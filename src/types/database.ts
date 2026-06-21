@@ -436,6 +436,7 @@ export interface User {
   full_name: string | null
   role: UserRole
   is_active: boolean
+  dashboard_prefs: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -465,5 +466,54 @@ export interface AuditLog {
   detail: unknown | null
   ip_address: string | null
   user_agent: string | null
+  created_at: string
+}
+
+// ── Group G: Phase 2 — Payments, CAM, Percentage Rent ─────────────────────
+
+export type CAMReconStatus = 'in_progress' | 'complete' | 'overdue' | 'disputed'
+export type PaymentType = 'rent' | 'cam' | 'tax' | 'insurance' | 'other'
+
+export interface CAMReconciliation {
+  id: string
+  property_id: string
+  lease_id: string
+  tenant_id: string
+  period_year: number
+  estimated_amount: number
+  actual_amount: number | null
+  status: CAMReconStatus
+  due_date: string | null
+  completed_date: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LeasePayment {
+  id: string
+  lease_id: string
+  property_id: string
+  tenant_id: string
+  amount_due: number
+  amount_paid: number
+  due_date: string
+  paid_date: string | null
+  payment_type: PaymentType
+  period_start: string | null
+  period_end: string | null
+  created_at: string
+}
+
+export interface PctRentRecord {
+  id: string
+  lease_id: string
+  property_id: string
+  tenant_id: string
+  period_year: number
+  period_month: number | null
+  reported_sales: number
+  cumulative_ytd_sales: number
+  pct_rent_owed: number
+  is_annual_reconciliation: boolean
   created_at: string
 }
