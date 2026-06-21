@@ -1,0 +1,143 @@
+# CRE Asset Management Platform
+
+Internal tool for managing a commercial real estate portfolio (~80% retail, 20% office).
+Single-firm, desktop-only. No LP/investor logins — internal staff only.
+
+## Stack
+
+| Layer | Choice |
+|---|---|
+| Frontend | React 18 + TypeScript + Tailwind CSS v3 |
+| Build tool | Vite |
+| Backend / DB | Supabase (managed Postgres + Auth + Storage + RLS) |
+| AI (Phase 4) | Anthropic Claude API |
+| Testing | Vitest |
+| Hosting | Vercel (frontend) + Supabase (backend) |
+
+## How to run
+
+**Prerequisites:** Node.js LTS (nodejs.org) and a Supabase project (supabase.com).
+
+```bash
+# 1. Install dependencies (one-time)
+npm install
+
+# 2. Copy env file and fill in your Supabase URL + anon key
+cp .env.example .env
+
+# 3. Start development server
+npm run dev
+# Opens at http://localhost:5173
+
+# 4. Run tests
+npm test          # watch mode
+npm run test:run  # single run (CI)
+```
+
+## Supabase setup
+
+Run migrations in `supabase/migrations/` in numeric order.
+Use the Supabase dashboard → SQL editor, or the Supabase CLI (`supabase db push`).
+
+| File | What it creates |
+|---|---|
+| 20240001_extensions.sql | uuid-ossp, pgvector extensions |
+| 20240002_enums.sql | All Postgres enum types |
+| 20240003_portfolio_properties.sql | portfolios, properties, units |
+| 20240004_tenants_leases.sql | tenants, leases, options, co-tenancy |
+| 20240005_financials.sql | financial_periods, operating_line_items, loans |
+| 20240006_capital_waterfall.sql | deals, waterfall_tiers, capital_accounts, distributions |
+| 20240007_documents.sql | documents, document_chunks (vector), inspections |
+| 20240008_users_access.sql | users, entitlements, auth trigger |
+| 20240009_rls.sql | Row Level Security policies on every table |
+| 20240010_audit_log.sql | audit_log with auto-triggers |
+| 20240011_indexes.sql | Performance indexes |
+
+## Architecture decisions
+
+### Why Supabase
+Managed Postgres with built-in auth, RLS, and file storage — all in one place.
+RLS policies (in 20240009_rls.sql) enforce access at the database level,
+so even a bug in application code cannot expose another user's data.
+
+### Roles
+- `admin` — full access, user management, audit log
+- `asset_manager` — full portfolio visibility, all financial and capital data
+- `property_manager` — scoped to assigned properties; can upload documents
+
+### Entitlements
+The `entitlements` table grants per-user, per-resource access. `scope` values:
+- `global` — sees everything (used for admin / asset manager)
+- `portfolio` — sees all properties in a named portfolio
+- `property` — sees one specific property
+- `fund` — sees all properties in a fund
+
+Two RLS helper functions enforce this: `is_admin_or_am()` and `can_access_property(uuid)`.
+They live inside the database and cannot be spoofed by the application.
+
+### Waterfall engine
+`src/lib/waterfall.ts` — pure TypeScript, zero database calls, fully testable.
+Tests: `src/lib/__tests__/waterfall.test.ts`
+
+Payment order per distribution event:
+1. Preferred equity: pay return (cash or PIK accrual) + redeem principal when current
+2. Return of LP capital (pro-rata by initial contribution)
+3. LP preferred return (accrues on unreturned capital at pref_rate)
+4. GP catch-up (100% to GP until GP reaches its promote %)
+5. Promote split (remaining cash splits LP/GP per the tier percentages)
+
+All parameters are deal-specific — nothing is hard-coded.
+Stored in `waterfall_tiers` table; entered via the property onboarding screen.
+
+### Financial calculations
+`src/lib/financials.ts` — NOI, DSCR, WALT, occupancy, trailing-12.
+Tests: `src/lib/__tests__/financials.test.ts`
+
+- **NOI** = Σ income lines − Σ operating expense lines. Capex excluded.
+- **DSCR** = trailing_12_NOI ÷ annual_debt_service per loan
+- **WALT** = Σ(leasedSF × remainingTermYears) ÷ totalLeasedSF
+- All monetary amounts stored as `numeric` (dollars, not cents)
+- Percentages stored as decimals: 0.08 = 8%
+
+### Co-tenancy flagging
+When a co-tenancy clause is triggered:
+1. A `co_tenancy_flags` row is created with `status = 'pending_review'`
+2. The flag includes: plain-language trigger reason, remedy description, source document IDs
+3. Dashboard surfaces it as an alert with a confirm/dismiss action
+4. Human confirmation writes `status = 'confirmed'` and logs to `audit_log`
+
+### Excel import pipeline (Phase 3)
+Operating statements arrive as MTD actual/budget/variance + YTD actual/budget/variance.
+Import jobs tracked in `import_jobs` with `column_mapping` jsonb (user maps columns to model fields).
+
+### Document AI / RAG (Phase 4)
+`document_chunks` stores text with `vector(1536)` embeddings via pgvector.
+After loading embeddings, uncomment the IVFFlat index in 20240011_indexes.sql.
+
+## Phase plan
+
+| Phase | Status | Deliverable |
+|---|---|---|
+| 1 | ✅ Complete | Data model + auth + RLS + unit tests |
+| 2 | Pending | Portfolio dashboard (NOI, DSCR, occupancy, rollover, critical dates) |
+| 3 | Pending | Document repository + Excel import + inspections |
+| 4 | Pending | AI assistant (RAG, lease abstraction, scenario analysis) |
+
+## Conventions
+
+- All IDs: UUID v4
+- Monetary amounts: `numeric` in dollars (e.g. `1500000.00`)
+- Dates: `date` type (no time) unless timestamp matters
+- Percentages: decimals (`0.08` = 8%, not `8`)
+- `updated_at`: updated by application code (not a DB trigger)
+- Retail-specific fields (`has_co_tenancy_clause`, `has_exclusives`, `percentage_rent_rate`, etc.)
+  are stored on all leases but only shown in the UI when `lease.lease_type = 'retail'`
+- Office-specific fields (`base_year`, `expense_stop_amount`) same pattern
+
+## Key accounts you will need
+
+| Service | URL | Purpose |
+|---|---|---|
+| Supabase | supabase.com | Database, auth, file storage |
+| Anthropic | console.anthropic.com | AI API key (Phase 4) |
+| Vercel | vercel.com | Frontend hosting |
