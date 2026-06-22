@@ -12,8 +12,9 @@ const NAV = [
 ]
 
 const ADMIN_NAV = [
-  { to: '/users',   label: 'Users',     icon: '🔑' },
-  { to: '/audit',   label: 'Audit Log', icon: '📋' },
+  { to: '/import',  label: 'Drive Import', icon: '📥' },
+  { to: '/users',   label: 'Users',        icon: '🔑' },
+  { to: '/audit',   label: 'Audit Log',    icon: '📋' },
 ]
 
 export function Sidebar() {

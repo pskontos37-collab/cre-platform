@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { FilterProvider } from './contexts/FilterContext'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
+import { ImportPage } from './pages/ImportPage'
+import { AppLayout } from './components/layout/AppLayout'
 import { ReactNode } from 'react'
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -43,6 +45,16 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/import"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <ImportPage />
+            </AppLayout>
           </ProtectedRoute>
         }
       />
