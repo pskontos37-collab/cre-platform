@@ -64,30 +64,48 @@ function classifyFile(name: string): {
   return { category: null, propertyKey: null, year: null, month: null }
 }
 
-// ── List xlsx files from Drive ────────────────────────────────
-async function listExcelFiles(
-  folderId: string, token: string
-): Promise<Array<Record<string, unknown>>> {
-  const files: Array<Record<string, unknown>> = []
+// ── List xlsx files from Drive (concurrent BFS, same pattern as drive-inventory) ──
+const EXCEL_MIME = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+])
+
+async function listOneLevel(fid: string, token: string): Promise<{
+  excelFiles: Array<Record<string, unknown>>; subfolders: string[]
+}> {
+  const excelFiles: Array<Record<string, unknown>> = []
+  const subfolders: string[] = []
   let pageToken = ''
   do {
     const u = new URL('https://www.googleapis.com/drive/v3/files')
-    u.searchParams.set('q',
-      `'${folderId}' in ancestors and trashed = false and ` +
-      `(mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType = 'application/vnd.ms-excel')`)
-    u.searchParams.set('fields', 'nextPageToken,files(id,name,mimeType,size,modifiedTime,parents)')
-    u.searchParams.set('pageSize', '1000')
-    u.searchParams.set('supportsAllDrives', 'true')
-    u.searchParams.set('includeItemsFromAllDrives', 'true')
+    u.searchParams.set('q',                        `'${fid}' in parents and trashed = false`)
+    u.searchParams.set('fields',                   'nextPageToken,files(id,name,mimeType,size,modifiedTime,parents)')
+    u.searchParams.set('pageSize',                 '1000')
+    u.searchParams.set('supportsAllDrives',        'true')
+    u.searchParams.set('includeItemsFromAllDrives','true')
     if (pageToken) u.searchParams.set('pageToken', pageToken)
-
     const r    = await fetch(u.toString(), { headers: { Authorization: `Bearer ${token}` } })
     const data = await r.json()
     if (data.error) throw new Error(JSON.stringify(data.error))
-    for (const f of (data.files ?? [])) files.push(f)
+    for (const f of (data.files ?? [])) {
+      if (f.mimeType === 'application/vnd.google-apps.folder') subfolders.push(f.id)
+      else if (EXCEL_MIME.has(f.mimeType)) excelFiles.push(f)
+    }
     pageToken = data.nextPageToken ?? ''
   } while (pageToken)
-  return files
+  return { excelFiles, subfolders }
+}
+
+async function listExcelFiles(folderId: string, token: string): Promise<Array<Record<string, unknown>>> {
+  const allFiles: Array<Record<string, unknown>> = []
+  let currentLevel = [folderId]
+  while (currentLevel.length > 0) {
+    const results = await Promise.all(currentLevel.map(fid => listOneLevel(fid, token)))
+    const nextLevel: string[] = []
+    for (const r of results) { allFiles.push(...r.excelFiles); nextLevel.push(...r.subfolders) }
+    currentLevel = nextLevel
+  }
+  return allFiles
 }
 
 // ── Parse rent roll workbook ──────────────────────────────────
