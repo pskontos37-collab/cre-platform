@@ -11,6 +11,7 @@ import { EmergencyManualsPage } from './pages/EmergencyManualsPage'
 import { InspectionsPage } from './pages/InspectionsPage'
 import { InspectFieldPage } from './pages/InspectFieldPage'
 import { ContactsPage } from './pages/ContactsPage'
+import { AnnouncementsPage } from './pages/AnnouncementsPage'
 import { FinancialsPage } from './pages/FinancialsPage'
 import { WaterfallPage } from './pages/WaterfallPage'
 import { ManagementPage } from './pages/ManagementPage'
@@ -318,6 +319,18 @@ function AppRoutes() {
             <RequirePage pageKey="contacts">
               <AppLayout>
                 <ContactsPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/announcements"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="announcements">
+              <AppLayout>
+                <AnnouncementsPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
