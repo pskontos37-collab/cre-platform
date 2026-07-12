@@ -5,7 +5,7 @@
 #
 # NOTE the loader gotcha: PowerShell vars are case-insensitive — never name a
 # loop var $key (it would clobber the API key). The API key here is $AK.
-param([string]$Root = "K:\ASSTMGMT\ACQUISITIONS")
+param([string]$Root = "K:\ASSTMGMT\ACQUISITIONS", [string]$DealFilter)
 $ErrorActionPreference = "Stop"
 $repo = "C:\Users\pskontos\Desktop\Software\cre-platform"
 $cfg = @{}; foreach ($ln in (Get-Content "$repo\.env" | Where-Object { $_ -match "=" })) { $a,$b = $ln -split '=',2; $cfg[$a.Trim()]=$b.Trim() }
@@ -42,6 +42,7 @@ function StateDirs($full){
 }
 
 $deals = & curl.exe -s "$BASE/rest/v1/pipeline_deals?select=id,name,state&limit=2000" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
+if($DealFilter){ $deals = @($deals | Where-Object { $_.name -like "*$DealFilter*" }) }
 Write-Output ("Deals: {0}" -f $deals.Count)
 
 $matched=0; $i=0
