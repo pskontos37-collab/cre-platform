@@ -9,6 +9,7 @@ import {
 } from '../lib/dashboardWidgets'
 import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds } from '../hooks/useFilteredPropertyIds'
+import { ExecutiveSnapshotButton } from '../reports/ExecutiveSnapshotButton'
 
 import { GlNoiWidget } from '../components/dashboard/GlNoiWidget'
 import { BudgetVarianceWidget } from '../components/dashboard/BudgetVarianceWidget'
@@ -165,7 +166,12 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <ExecutiveSnapshotButton
+          propertyIds={propertyIds}
+          propertyNames={propertyNames}
+          totalAccessible={(properties ?? []).length}
+        />
         <button
           onClick={() => setCustomizing(c => !c)}
           style={{
