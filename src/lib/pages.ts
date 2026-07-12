@@ -42,6 +42,7 @@ export const PAGES: PageDef[] = [
   { key: 'services',    path: '/services',    label: 'Service Agreements', icon: '🔧', group: 'operations' },
   { key: 'contacts',    path: '/contacts',    label: 'Contacts',    icon: '📇', group: 'operations' },
   { key: 'workorders',  path: '/workorders',  label: 'Work Orders', icon: '🛠', group: 'operations' },
+  { key: 'insurance',   path: '/insurance',   label: 'Insurance',   icon: '🛡', group: 'operations' },
   { key: 'inspections', path: '/inspections', label: 'Inspections', icon: '🔍', group: 'operations' },
   { key: 'forms',       path: '/forms',       label: 'Forms',       icon: '📋', group: 'operations' },
   { key: 'emergency',   path: '/emergency-manuals', label: 'Emergency Manuals', icon: '🚨', group: 'operations' },

@@ -27,6 +27,7 @@ import { DelinquencyWidget } from '../components/dashboard/DelinquencyWidget'
 import { CoTenancyWidget } from '../components/dashboard/CoTenancyWidget'
 import { ServiceAgreementsWidget } from '../components/dashboard/ServiceAgreementsWidget'
 import { TasksWidget } from '../components/dashboard/TasksWidget'
+import { WorkOrdersWidget } from '../components/dashboard/WorkOrdersWidget'
 import { PortfolioInvestorReturnsWidget } from '../components/PortfolioInvestorReturnsWidget'
 
 interface WidgetProps { propertyIds: string[]; propertyNames: Record<string, string> }
@@ -36,6 +37,7 @@ interface WidgetProps { propertyIds: string[]; propertyNames: Record<string, str
 // template presets without importing the widget components.
 const RENDERERS: Record<string, (p: WidgetProps) => ReactNode> = {
   my_tasks:       p => <TasksWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
+  work_orders:    p => <WorkOrdersWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
 
   gl_noi:         p => <GlNoiWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
   budget_var:     p => <BudgetVarianceWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,

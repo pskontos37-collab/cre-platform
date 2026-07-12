@@ -7,7 +7,7 @@ import type { DealRow } from './useDeals'
 const ROLE_NAMES: Record<string, string> = {
   'lp': 'LP Partner',
   'gp': 'GP (MJW Wilkow)',
-  'mjw': 'MJW only (firm + affiliates)',
+  'promote': 'Promote (Class B — M&J Wilkow, Ltd.)',
   'class_a': 'Class A',
   'class_ac': 'Class A/C',
   'class_b': 'Class B (Promote)',
@@ -15,9 +15,9 @@ const ROLE_NAMES: Record<string, string> = {
   'class_d': 'Class D (Senior)',
 }
 
-// ── Per-property breakdown (LP / GP / MJW-only), layer 1 ─────────────────────
+// ── Per-property breakdown (LP / GP / Promote-B), layer 1 ────────────────────
 
-export type Level = 'lp' | 'gp' | 'mjw'
+export type Level = 'lp' | 'gp' | 'promote'
 
 export interface RoleReturn {
   role: Level
@@ -36,9 +36,10 @@ export interface PropertyReturn {
   assetType: string | null
   lp: RoleReturn | null
   gp: RoleReturn | null
-  /** MJW's own slice of the GP entity (is_mjw roster units + 100% of Class B).
-   *  Null when the entity's roster isn't loaded (Gateway — member ledger pending). */
-  mjw: RoleReturn | null
+  /** The Class B position — always the promote at this firm, 100% M&J Wilkow, Ltd.
+   *  IRR/EM are null by design: the nominal ($1k) B basis makes them meaningless,
+   *  so the promote reports sold-today value + cash to date (as /waterfall does). */
+  promote: RoleReturn | null
 }
 
 export interface PortfolioReturnsByProperty {
@@ -86,7 +87,7 @@ export function usePortfolioReturnsByProperty(
   return useMemo(() => {
     const empty: PortfolioReturnsByProperty = {
       properties: [],
-      totals: { lp: emptyRole('lp'), gp: emptyRole('gp'), mjw: emptyRole('mjw') },
+      totals: { lp: emptyRole('lp'), gp: emptyRole('gp'), promote: emptyRole('promote') },
       assetTypes: [],
     }
     if (!deals || deals.length === 0) return empty
@@ -101,11 +102,11 @@ export function usePortfolioReturnsByProperty(
     const asOf = todayIso()
 
     // Pooled flows for the portfolio-total XIRR, per role.
-    const pooled: Record<Level, DatedFlow[]> = { lp: [], gp: [], mjw: [] }
+    const pooled: Record<Level, DatedFlow[]> = { lp: [], gp: [], promote: [] }
     const totalAgg: Record<Level, { contributed: number; distributed: number; equity: number; valued: boolean }> = {
       lp: { contributed: 0, distributed: 0, equity: 0, valued: false },
       gp: { contributed: 0, distributed: 0, equity: 0, valued: false },
-      mjw: { contributed: 0, distributed: 0, equity: 0, valued: false },
+      promote: { contributed: 0, distributed: 0, equity: 0, valued: false },
     }
 
     // Build one role's return from its dated flows + a sold-today terminal take,
@@ -172,38 +173,32 @@ export function usePortfolioReturnsByProperty(
       const gpTake = st ? (st.l2 ? st.l2.pool : st.l1GpTotal) : null
       const gp = compute('gp', gpFlows, gpTake, deemed)
 
-      // MJW-only: MJW's own slice of the GP syndication entity. Share of each
-      // unit class = is_mjw roster units ÷ class units (entity_investors);
-      // Class B (promote) is 100% M&J Wilkow, Ltd. per the operating agreements.
-      // Scale each class's dated flows and sold-today value by its share. Null
-      // when the senior-class roster isn't loaded (Gateway — member ledger
-      // pending) or a value-bearing class is uncovered.
-      let mjw: RoleReturn | null = null
+      // Promote (Class B): B units are always the promote at this firm, held
+      // 100% by M&J Wilkow, Ltd. The nominal ($1k) B basis makes IRR/EM
+      // meaningless — same suppression as /waterfall's B row — so the promote
+      // reports its sold-today value and cash received to date.
+      let promote: RoleReturn | null = null
       if (l2Deal && st?.l2) {
-        const roster = l2Deal.entity_investors ?? []
-        const shareOf = (cls: string): number | null => {
-          const rows = roster.filter(r => r.unit_class === cls)
-          if (rows.length === 0) return null
-          const total = rows.reduce((s, r) => s + Number(r.units), 0)
-          const mine = rows.filter(r => r.is_mjw).reduce((s, r) => s + Number(r.units), 0)
-          return total > 0 ? mine / total : null
+        let bContributed = 0
+        let bDistributed = 0
+        for (const f of flowsByRoles(l2Deal, ['class_b'])) {
+          if (f.amount < 0) bContributed -= f.amount
+          else bDistributed += f.amount
         }
-        const shareA = shareOf('A') ?? shareOf('AC')       // senior co-invest classes
-        const shareB = 1                                    // promote: 100% M&J Wilkow, Ltd.
-        const dFlows = flowsByRoles(l2Deal, ['class_d'])
-        const shareD = dFlows.length > 0 ? shareOf('D') : null
-        if (shareA != null && (dFlows.length === 0 || shareD != null)) {
-          const scale = (fl: DatedFlow[], k: number) => fl.map(f => ({ date: f.date, amount: f.amount * k }))
-          const mjwFlows = [
-            ...scale(flowsByRoles(l2Deal, ['class_a', 'class_ac', 'class_c']), shareA),
-            ...scale(flowsByRoles(l2Deal, ['class_b']), shareB),
-            ...(shareD != null ? scale(dFlows, shareD) : []),
-          ]
-          const mjwTake = st.l2.classAValue * shareA
-            + st.l2.classBValue * shareB
-            + (shareD != null ? Object.values(st.l2.seniorClassValues).reduce((s, v) => s + v, 0) * shareD : 0)
-          mjw = compute('mjw', mjwFlows, mjwTake, asOf)
+        promote = {
+          role: 'promote',
+          name: ROLE_NAMES.promote,
+          contributed: bContributed,
+          distributed: bDistributed,
+          currentEquity: st.l2.classBValue,
+          realizedMultiple: null,
+          totalValueMultiple: null,
+          totalValueIrr: null,
         }
+        totalAgg.promote.contributed += bContributed
+        totalAgg.promote.distributed += bDistributed
+        totalAgg.promote.equity += st.l2.classBValue
+        totalAgg.promote.valued = true
       }
 
       properties.push({
@@ -212,7 +207,7 @@ export function usePortfolioReturnsByProperty(
         assetType: deal.properties?.asset_type ?? null,
         lp,
         gp,
-        mjw,
+        promote,
       })
     }
     properties.sort((a, b) => a.name.localeCompare(b.name))
@@ -238,9 +233,15 @@ export function usePortfolioReturnsByProperty(
       new Set(properties.map(p => p.assetType).filter((t): t is string => !!t)),
     ).sort()
 
+    // Promote total: value + cash only — IRR/EM stay suppressed (nominal basis).
+    const promoteTotal = mkTotal('promote')
+    promoteTotal.realizedMultiple = null
+    promoteTotal.totalValueMultiple = null
+    promoteTotal.totalValueIrr = null
+
     return {
       properties,
-      totals: { lp: mkTotal('lp'), gp: mkTotal('gp'), mjw: mkTotal('mjw') },
+      totals: { lp: mkTotal('lp'), gp: mkTotal('gp'), promote: promoteTotal },
       assetTypes,
     }
   }, [deals, ncaMap])

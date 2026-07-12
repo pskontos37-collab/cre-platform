@@ -33,6 +33,7 @@ import { TransactionsPage } from './pages/TransactionsPage'
 import { PipelinePage } from './pages/PipelinePage'
 import { AdminPage } from './pages/AdminPage'
 import { WorkOrdersPage } from './pages/WorkOrdersPage'
+import { InsurancePage } from './pages/InsurancePage'
 import { TenantPortalPage } from './pages/TenantPortalPage'
 import { AppLayout } from './components/layout/AppLayout'
 import { canSeePage } from './lib/pages'
@@ -329,6 +330,18 @@ function AppRoutes() {
             <RequirePage pageKey="workorders">
               <AppLayout>
                 <WorkOrdersPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/insurance"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="insurance">
+              <AppLayout>
+                <InsurancePage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>

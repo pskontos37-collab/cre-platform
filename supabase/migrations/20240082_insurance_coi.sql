@@ -97,6 +97,9 @@ create table if not exists public.coi_certificates (
                          check (cert_type in ('acord25','acord28','evidence_property','other')),
   insured_name         text,
   insured_address      text,
+  insured_contact      text,
+  insured_email        text,
+  insured_phone        text,
   producer_name        text,   -- broker / agent
   producer_email       text,
   producer_phone       text,

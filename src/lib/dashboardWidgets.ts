@@ -23,6 +23,7 @@ export interface DashboardWidgetDef {
 
 export const WIDGET_DEFS: DashboardWidgetDef[] = [
   { key: 'my_tasks',      label: 'My Tasks',                      section: 'workflow',    def: true },
+  { key: 'work_orders',   label: 'Open Work Orders',              section: 'workflow',    def: true },
 
   { key: 'gl_noi',        label: 'Net Operating Income',          section: 'financial',   def: true },
   { key: 'budget_var',    label: 'Budget vs Actual (YTD)',        section: 'financial',   def: true },
@@ -59,7 +60,7 @@ export const ROLE_PRESETS: Record<UserRole, string[]> = {
   admin:         DEFAULT_WIDGET_KEYS,
   asset_manager: DEFAULT_WIDGET_KEYS,
   property_manager: [
-    'my_tasks',
+    'my_tasks', 'work_orders',
     'gl_noi', 'budget_var', 'opex', 'top_vendors',
     'ar', 'delinquency',
     'rent_roll', 'rollover', 'critical_dates', 'svc_renewals',
