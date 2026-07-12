@@ -115,6 +115,48 @@ export function useArContacts(propertyIds: string[]) {
   }, [propertyIds.join(',')])
 }
 
+// Follow-up log (ar_followups): reminder drafts generated per tenant, newest
+// first. Keyed like the contacts map so aging rows resolve with or without an
+// MRI lease id: "propertyId|mri:<lease>" and "propertyId|nm:<normalized name>".
+export interface ArFollowUp {
+  id: string
+  method: string
+  recipients: string[]
+  pastDue: number | null
+  createdAt: string
+  sentByName: string | null
+}
+
+export function useArFollowUps(propertyIds: string[]) {
+  return useQuery<Record<string, ArFollowUp[]>>(async () => {
+    if (!propertyIds.length) return {}
+    const { data, error } = await supabase
+      .from('ar_followups')
+      .select('id, property_id, mri_lease_id, tenant_name, method, recipients, past_due, created_at, sent_by_name')
+      .in('property_id', propertyIds)
+      .order('created_at', { ascending: false })
+      .limit(1000)
+    if (error) throw new Error(error.message)
+    const map: Record<string, ArFollowUp[]> = {}
+    for (const r of (data ?? []) as any[]) {
+      const f: ArFollowUp = {
+        id: r.id,
+        method: r.method,
+        recipients: r.recipients ?? [],
+        pastDue: r.past_due != null ? Number(r.past_due) : null,
+        createdAt: r.created_at,
+        sentByName: r.sent_by_name,
+      }
+      const keys = [
+        r.mri_lease_id ? `${r.property_id}|mri:${r.mri_lease_id}` : null,
+        r.tenant_name ? `${r.property_id}|nm:${normalizeTenantName(r.tenant_name)}` : null,
+      ].filter(Boolean) as string[]
+      for (const k of keys) (map[k] ?? (map[k] = [])).push(f)
+    }
+    return map
+  }, [propertyIds.join(',')])
+}
+
 // Durable operational annotations, keyed "propertyId|mriLeaseId".
 export function useArNotes(propertyIds: string[]) {
   return useQuery<Record<string, string>>(async () => {

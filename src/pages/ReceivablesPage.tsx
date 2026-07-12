@@ -2,7 +2,9 @@ import { useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEve
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds, usePropertyNameMap } from '../hooks/useFilteredPropertyIds'
-import { useArAging, useArDetail, useArNotes, useArContacts, normalizeTenantName, type ArAgingRow, type ArDetailLine, type ArFollowUpContact } from '../hooks/useArAging'
+import { useArAging, useArDetail, useArNotes, useArContacts, useArFollowUps, normalizeTenantName, type ArAgingRow, type ArDetailLine, type ArFollowUpContact, type ArFollowUp } from '../hooks/useArAging'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 import { useReaAgreements } from '../hooks/useRea'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -45,6 +47,7 @@ export function ReceivablesPage() {
   const rows = data ?? []
   const { data: notes } = useArNotes(propertyIds)
   const { data: arContacts } = useArContacts(propertyIds)
+  const { data: followUps, refetch: refetchFollowUps } = useArFollowUps(propertyIds)
   const { data: reas } = useReaAgreements(propertyIds, propertyNames)
   // MRI lease ids that belong to REA parties (chip + cross-link to /rea)
   const reaMris = useMemo(() => {
@@ -258,6 +261,12 @@ export function ReceivablesPage() {
                         ?? (arContacts ?? {})[`${r.propertyId}|nm:${normalizeTenantName(r.tenantName)}`]
                         ?? []
                       }
+                      followUps={
+                        (r.mriLeaseId ? (followUps ?? {})[`${r.propertyId}|mri:${r.mriLeaseId}`] : undefined)
+                        ?? (followUps ?? {})[`${r.propertyId}|nm:${normalizeTenantName(r.tenantName)}`]
+                        ?? []
+                      }
+                      onFollowUpLogged={refetchFollowUps}
                       onToggle={bucket => setOpen(open?.id === r.id && open.bucket === bucket ? null : { id: r.id, bucket })}
                     />
                   ))}
@@ -532,12 +541,36 @@ function downloadEmlDraft(row: ArAgingRow, contacts: ArFollowUpContact[], lines:
 // message drops in. If the clipboard is unavailable, the draft opens with the
 // plain-text version in the body instead, so the flow never dead-ends.
 // The "Outlook draft" variant skips the paste entirely via an .eml handoff.
-function FollowUpBar({ row, contacts, lines }: {
+function FollowUpBar({ row, contacts, lines, followUps, onLogged }: {
   row: ArAgingRow
   contacts: ArFollowUpContact[]
   lines: ArDetailLine[]
+  followUps: ArFollowUp[]
+  onLogged: () => void
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail' | 'eml'>('idle')
+  const { appUser } = useAuth()
+
+  // Best-effort log: record that a reminder draft was generated (NOT that it
+  // was sent — the send happens in the manager's own mail client). A logging
+  // failure must never block the draft itself, so errors are swallowed.
+  const logFollowUp = async (method: 'eml' | 'mailto') => {
+    try {
+      await supabase.from('ar_followups').insert({
+        property_id:   row.propertyId,
+        tenant_id:     row.tenantId,
+        mri_lease_id:  row.mriLeaseId,
+        tenant_name:   row.tenantName,
+        method,
+        recipients:    contacts.slice(0, 3).map(c => c.email),
+        past_due:      row.pastDue,
+        total_balance: row.total,
+        as_of:         row.asOf,
+        sent_by_name:  appUser?.full_name ?? appUser?.email ?? null,
+      })
+    } catch { /* never block the draft on logging */ }
+    onLogged()
+  }
 
   const openDraft = async (e: ReactMouseEvent) => {
     e.preventDefault()
@@ -553,6 +586,7 @@ function FollowUpBar({ row, contacts, lines }: {
       }
     } catch { /* clipboard blocked — fall through to the plain-text draft */ }
     setCopyState(ok ? 'ok' : 'fail')
+    logFollowUp('mailto')
     window.location.href = ok
       ? `mailto:${encodeURIComponent(followUpTo(contacts))}?subject=${encodeURIComponent(followUpSubject(row))}`
       : buildFollowUpMailto(row, contacts, lines)
@@ -564,7 +598,7 @@ function FollowUpBar({ row, contacts, lines }: {
       style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}
     >
       <button
-        onClick={() => { downloadEmlDraft(row, contacts, lines); setCopyState('eml') }}
+        onClick={() => { downloadEmlDraft(row, contacts, lines); setCopyState('eml'); logFollowUp('eml') }}
         title="Generates the complete reminder email — open the downloaded draft and the formatted message is ready to edit and send from your own mailbox"
         style={{
           fontSize: 11.5, fontWeight: 600, padding: '5px 13px', borderRadius: 7, cursor: 'pointer',
@@ -606,16 +640,33 @@ function FollowUpBar({ row, contacts, lines }: {
           No email on file for this tenant — the draft opens unaddressed. <Link to="/contacts" style={{ color: 'var(--accent)' }}>Add one in Contacts →</Link>
         </span>
       )}
+      {followUps.length > 0 && (
+        <span
+          title={followUps.slice(0, 8).map(f =>
+            `${new Date(f.createdAt).toLocaleDateString()} — ${f.sentByName ?? 'unknown'}${f.pastDue != null ? ` · ${fmt(f.pastDue)} past due` : ''}${f.recipients.length ? ` · to ${f.recipients.join(', ')}` : ''}`
+          ).join('\n')}
+          style={{
+            marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap',
+            background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 99, padding: '2px 9px',
+          }}
+        >
+          Last follow-up {new Date(followUps[0].createdAt).toLocaleDateString()}
+          {followUps[0].sentByName ? ` by ${followUps[0].sentByName}` : ''}
+          {followUps.length > 1 ? ` · ${followUps.length} total` : ''}
+        </span>
+      )}
     </div>
   )
 }
 
-function TenantRow({ row, open, note, isRea, contacts, onToggle }: {
+function TenantRow({ row, open, note, isRea, contacts, followUps, onFollowUpLogged, onToggle }: {
   row: ArAgingRow
   open: BucketKey | 'all' | null   // which bucket the drill is filtered to (null = collapsed)
   note: string | null
   isRea: boolean
   contacts: ArFollowUpContact[]
+  followUps: ArFollowUp[]
+  onFollowUpLogged: () => void
   onToggle: (bucket: BucketKey | 'all') => void
 }) {
   // Invoice lines feed both the composition graphic and the line table below
@@ -686,7 +737,9 @@ function TenantRow({ row, open, note, isRea, contacts, onToggle }: {
                 📝 {note}{isRea && <> · <Link to="/rea" style={{ color: 'var(--accent)' }}>open REAs panel →</Link></>}
               </div>
             )}
-            {row.pastDue > 0.005 && <FollowUpBar row={row} contacts={contacts} lines={detailLines ?? []} />}
+            {row.pastDue > 0.005 && (
+              <FollowUpBar row={row} contacts={contacts} lines={detailLines ?? []} followUps={followUps} onLogged={onFollowUpLogged} />
+            )}
             <CategoryAgedBars row={row} lines={detailLines ?? []} onBucket={b => onToggle(b)} />
             <div style={{ marginTop: 14 }}>
               <DetailLines lines={detailLines ?? []} loading={detailLoading} error={detailError} bucket={open} onBucket={b => onToggle(b)} />
