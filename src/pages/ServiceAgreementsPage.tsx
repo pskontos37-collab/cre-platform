@@ -183,11 +183,21 @@ export function ServiceAgreementsPage() {
     <div style={{ padding: '26px 32px 48px', maxWidth: 1080 }}>
       {/* ── corporate header ── */}
       <div style={{ borderBottom: `2px solid ${WILKOW}`, paddingBottom: 16, marginBottom: 18 }}>
-        <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.28em', textTransform: 'uppercase', color: WILKOW_MIST, marginBottom: 6 }}>
-          M&amp;J Wilkow · Property Operations
-        </div>
-        <div style={{ fontFamily: SERIF, fontSize: 27, fontWeight: 600, letterSpacing: '0.04em', color: 'var(--text)', lineHeight: 1.15 }}>
-          Service Agreements
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.28em', textTransform: 'uppercase', color: WILKOW_MIST, marginBottom: 6 }}>
+              M&amp;J Wilkow · Property Operations
+            </div>
+            <div style={{ fontFamily: SERIF, fontSize: 27, fontWeight: 600, letterSpacing: '0.04em', color: 'var(--text)', lineHeight: 1.15 }}>
+              Service Agreements
+            </div>
+          </div>
+          <Link to="/services/new" style={{
+            flexShrink: 0, textDecoration: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap',
+            padding: '8px 15px', borderRadius: 8, border: `1px solid ${WILKOW}`, background: WILKOW, color: '#f2f3f5',
+          }}>
+            + New Service Agreement
+          </Link>
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 6 }}>
           Vendor service contracts abstracted from the executed agreements in the corpus — one card per

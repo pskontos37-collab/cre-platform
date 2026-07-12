@@ -27,6 +27,7 @@ import { ReceivablesPage } from './pages/ReceivablesPage'
 import { TasksPage } from './pages/TasksPage'
 import { ReaPage } from './pages/ReaPage'
 import { ServiceAgreementsPage } from './pages/ServiceAgreementsPage'
+import { ServiceAgreementBuilderPage } from './pages/ServiceAgreementBuilderPage'
 import { BrokeragePage } from './pages/BrokeragePage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { PipelinePage } from './pages/PipelinePage'
@@ -203,6 +204,18 @@ function AppRoutes() {
             <RequirePage pageKey="services">
               <AppLayout>
                 <ServiceAgreementsPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/services/new"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="services">
+              <AppLayout>
+                <ServiceAgreementBuilderPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
