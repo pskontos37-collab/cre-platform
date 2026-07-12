@@ -213,6 +213,10 @@ export function ClausesPage() {
         {rows.loading && <WidgetSkeleton rows={10} />}
         {!rows.loading && rendered.length === 0 && <EmptyState title="No matches" subtitle="Adjust the filters" />}
         {rendered.length > 0 && (
+          // Same overflow guard as MriReconPage: the Widget card clips
+          // (overflow:hidden), so an unbreakable token in the clause text would
+          // silently push columns out of reach without this wrapper.
+          <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead><tr style={{ textAlign: 'left', color: 'var(--text-faint)', fontSize: 11 }}>
               <th style={{ padding: '4px 8px', width: 180 }}>Property</th>
@@ -224,11 +228,12 @@ export function ClausesPage() {
                 <tr key={r.id} style={{ borderTop: '1px solid var(--border)', verticalAlign: 'top' }}>
                   <td style={{ padding: '6px 8px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{r.property_name}</td>
                   <td style={{ padding: '6px 8px', color: 'var(--text)', fontWeight: 600 }}>{r.tenant_name}</td>
-                  <td style={{ padding: '6px 8px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>{r.value}</td>
+                  <td style={{ padding: '6px 8px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{r.value}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Widget>
       </>}

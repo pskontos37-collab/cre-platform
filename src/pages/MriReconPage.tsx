@@ -110,7 +110,7 @@ export function MriReconPage() {
   }, [recon.data])
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 1200 }}>
+    <div style={{ padding: '24px 32px' }}>
       <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>MRI Reconciliation</div>
       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 18 }}>
         Every field where the lease documents and the MRI system-of-record disagree, found by the abstract QA layer.
@@ -145,6 +145,11 @@ export function MriReconPage() {
         {recon.loading && <WidgetSkeleton rows={10} />}
         {!recon.loading && rows.length === 0 && <EmptyState title="Nothing in this filter" subtitle="Adjust the governs/status filters above" />}
         {rows.length > 0 && (
+          // Tables can't shrink below their content's min width, and the Widget
+          // card clips (overflow:hidden) — so wide content silently loses the
+          // Status column. Scroll wrapper + overflowWrap on the free-text value
+          // cells keep every column reachable.
+          <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead><tr style={{ textAlign: 'left', color: 'var(--text-faint)', fontSize: 11 }}>
               <th style={{ padding: '4px 8px' }}>Property</th><th style={{ padding: '4px 8px' }}>Tenant</th>
@@ -161,8 +166,8 @@ export function MriReconPage() {
                     <td style={{ padding: '6px 8px', color: 'var(--text-muted)' }}>{r.field}
                       {r.note && <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2, maxWidth: 380 }}>{r.note}</div>}
                     </td>
-                    <td style={{ padding: '6px 8px', color: 'var(--text)' }}>{r.abstract_value ?? '—'}</td>
-                    <td style={{ padding: '6px 8px', color: 'var(--text-muted)' }}>{r.mri_value ?? '—'}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text)', overflowWrap: 'anywhere' }}>{r.abstract_value ?? '—'}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>{r.mri_value ?? '—'}</td>
                     <td style={{ padding: '6px 8px' }}>
                       <select value={st?.status ?? 'open'} onChange={e => void setStatus(r, e.target.value)}
                         style={{ width: '100%', background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 5, color: 'var(--text)', fontSize: 11, padding: '3px 6px' }}>
@@ -174,6 +179,7 @@ export function MriReconPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </Widget>
     </div>
