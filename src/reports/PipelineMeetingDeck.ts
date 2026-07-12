@@ -70,7 +70,12 @@ const loc = (d: Deal) => [d.city, d.state].filter(Boolean).join(', ')
 const profileLabel = (d: Deal) => `${RISK_LABEL[d.riskProfile] ?? d.riskProfile} ${ASSET_LABEL[d.assetType] ?? d.assetType}`
 const priceLabel = (d: Deal) =>
   d.askPrice != null ? `${fmtM(d.askPrice)}${d.glaSf ? ` ($${Math.round(d.askPrice / d.glaSf)}/sf)` : ''}` : (d.priceText || '—')
-const priceShort = (d: Deal) => (d.askPrice != null ? fmtM(d.askPrice) : (d.priceText || '—'))
+const clip = (s: string, n: number): string => (s && s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s)
+// Concise guidance for tiles/tables — verbose broker prose ('Best Offer (asking
+// price listed as ...)') otherwise overflows the fixed-size metric tile.
+const guidanceShort = (d: Deal, max = 22): string =>
+  d.askPrice != null ? fmtM(d.askPrice)
+  : d.priceText ? clip((d.priceText.split(/[(;:]/)[0].trim() || d.priceText), max) : '—'
 const nextStep = (d: Deal): string =>
   d.bidText || (d.targetCloseDate ? `Target close ${d.targetCloseDate}` : '—')
 
@@ -141,7 +146,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
   const tile = (s: any, x: number, y: number, w: number, label: string, value: string, tint?: string) => {
     s.addShape(pptx.ShapeType.rect, { x, y, w, h: 0.82, fill: { color: 'FFFFFF' }, line: { color: ROW_A, width: 1 } })
     s.addText(label.toUpperCase(), { x: x + 0.1, y: y + 0.1, w: w - 0.2, h: 0.22, fontFace: SANS, fontSize: 7, bold: true, color: MUTED, charSpacing: 1 })
-    s.addText(value, { x: x + 0.1, y: y + 0.32, w: w - 0.2, h: 0.44, fontFace: SERIF, fontSize: 16, bold: true, color: tint ?? NAVY })
+    s.addText(value, { x: x + 0.1, y: y + 0.32, w: w - 0.2, h: 0.44, fontFace: SERIF, fontSize: 15, bold: true, color: tint ?? NAVY, valign: 'top', fit: 'shrink', wrap: false } as any)
   }
 
   // ── 1. Cover ──────────────────────────────────────────────────────────────
@@ -240,11 +245,11 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
           { text: d.name, options: { color: NAVY, bold: true, fill: { color: bg }, hyperlink: { slide: discussionNo[d.id] } } },
           { text: loc(d) || '—', options: { color: TEXT, fill: { color: bg } } },
           { text: profileLabel(d), options: { color: TEXT, fill: { color: bg } } },
-          { text: priceShort(d), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
+          { text: guidanceShort(d, 20), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
           { text: pct(d.goingInCap), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
           { text: STAGE_LABEL[d.stage] ?? d.stage, options: { color: TEXT, fill: { color: bg } } },
           { text: d.leadInitials ?? '—', options: { color: TEXT, fill: { color: bg } } },
-          { text: nextStep(d), options: { color: TEXT, fill: { color: bg }, fontSize: 10 } },
+          { text: clip(nextStep(d), 60), options: { color: TEXT, fill: { color: bg }, fontSize: 10 } },
         ])
       })
       s.addTable(rows, { x: 0.45, y: 1.2, w: 10.1, colW, fontFace: SERIF, fontSize: 10.5, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.355, valign: 'middle', margin: 0.05 })
@@ -260,7 +265,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
     s.addText(d.name, { x: 0.45, y: 0.26, w: 7.6, h: 0.5, fontFace: SERIF, fontSize: 24, bold: true, color: STEEL, underline: true })
     s.addText(
       [loc(d), profileLabel(d) + (d.subType ? ` · ${d.subType}` : ''), d.submarket].filter(Boolean).join('   ·   ') || '—',
-      { x: 0.47, y: 0.82, w: 7.6, h: 0.3, fontFace: SERIF, fontSize: 13, color: MUTED })
+      { x: 0.47, y: 0.82, w: 7.6, h: 0.3, fontFace: SERIF, fontSize: 13, color: MUTED, fit: 'shrink', wrap: false } as any)
     // stage chip (top-right)
     const chip = STAGE_CHIP[d.stage] ?? STEEL
     const prob = d.stage === 'closed' ? 'Closed' : `${Math.round(d.probability * 100)}% to close`
@@ -272,7 +277,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
     // metric tiles
     const cols = 5, gap = 0.14, tW = (10.1 - gap * (cols - 1)) / cols
     const tiles: [string, string, string?][] = [
-      [d.stage === 'closed' ? 'Price' : 'Guidance', priceShort(d)],
+      [d.stage === 'closed' ? 'Price' : 'Guidance', guidanceShort(d, 15)],
       ['Going-in cap', pct(d.goingInCap)],
       ['Projected IRR', pct(d.projIrr), GREEN],
       ['Equity multiple', d.equityMultiple != null ? `${d.equityMultiple.toFixed(2)}x` : '—'],
@@ -288,7 +293,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
       { text: '     Stabilized yield ', options: { color: MUTED } }, { text: pct(d.stabilizedYield), options: { color: TEXT, bold: true } },
       { text: '     Total cap. ', options: { color: MUTED } }, { text: fmtM(d.totalCapitalization ?? d.askPrice), options: { color: TEXT, bold: true } },
       ...(occ != null ? [{ text: '     Occupancy ', options: { color: MUTED } }, { text: pct(occ), options: { color: TEXT, bold: true } }] : []),
-    ], { x: 0.47, y: 2.2, w: 10.1, h: 0.3, fontFace: SERIF, fontSize: 11 })
+    ], { x: 0.47, y: 2.2, w: 10.1, h: 0.3, fontFace: SERIF, fontSize: 11, fit: 'shrink', wrap: false } as any)
 
     // ── left column: property & deal facts ──
     const facts: [string, string][] = [
@@ -297,7 +302,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
       ['Submarket', d.submarket ?? '—'],
       ['Total GLA', d.glaSf != null ? Math.round(d.glaSf).toLocaleString() + ' SF' : '—'],
       ['Year built', d.yearBuilt != null ? String(d.yearBuilt) : '—'],
-      ['Purchase / guidance', priceLabel(d)],
+      ['Purchase / guidance', d.askPrice != null ? priceLabel(d) : (d.priceText ? clip(d.priceText, 58) : '—')],
       ['Seller', d.seller ?? '—'],
       ['Broker', d.broker ?? '—'],
       ['Deal source', d.dealSource === 'off_market' ? 'Off-market' : d.dealSource === 'marketed' ? 'Marketed' : '—'],
@@ -309,7 +314,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
       ],
       ...facts.map(([k, v], i) => [
         { text: k, options: { bold: true, color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
-        { text: v, options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
+        { text: clip(v, 72), options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
       ]),
     ]
     s.addTable(factRows as any, { x: 0.45, y: 2.6, w: 4.55, colW: [1.7, 2.85], fontFace: SERIF, fontSize: 10.5, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.315, valign: 'middle', margin: 0.05 })
@@ -317,14 +322,14 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
     // ── right column ──
     const rx = 5.25, rw = 5.3
     // thesis / key points
-    s.addText('Investment thesis & key points', { x: rx, y: 2.55, w: rw, h: 0.28, fontFace: SERIF, fontSize: 13, bold: true, color: STEEL })
-    const pts = thesisPoints(d)
+    s.addText('Investment thesis & key points', { x: rx, y: 2.5, w: rw, h: 0.26, fontFace: SERIF, fontSize: 13, bold: true, color: STEEL })
+    const pts = thesisPoints(d).slice(0, 4).map(t => clip(t, 116))
     s.addText(
       (pts.length ? pts : ['No thesis captured yet — to be discussed.']).map(t => ({ text: t, options: { bullet: { characterCode: '2022', indent: 12 }, breakLine: true, paraSpaceAfter: 4 } })),
-      { x: rx, y: 2.85, w: rw, h: 1.75, fontFace: SERIF, fontSize: 11, color: TEXT, valign: 'top' })
+      { x: rx, y: 2.78, w: rw, h: 2.18, fontFace: SERIF, fontSize: 10, color: TEXT, valign: 'top', fit: 'shrink' } as any)
 
     // capital raise
-    s.addText('Capital raise', { x: rx, y: 4.65, w: rw, h: 0.28, fontFace: SERIF, fontSize: 13, bold: true, color: STEEL })
+    s.addText('Capital raise', { x: rx, y: 5.06, w: rw, h: 0.26, fontFace: SERIF, fontSize: 13, bold: true, color: STEEL })
     const committed = d.lps.reduce((a, l) => a + (l.committedAmount ?? 0), 0)
     const soft = d.lps.reduce((a, l) => a + (l.softAmount ?? 0), 0)
     const gap2 = Math.max(0, (d.equityRequired ?? 0) - committed - soft)
@@ -332,30 +337,30 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
       { text: 'Committed ', options: { color: MUTED } }, { text: fmtM(committed), options: { color: GREEN, bold: true } },
       { text: '   Soft ', options: { color: MUTED } }, { text: fmtM(soft), options: { color: TEXT, bold: true } },
       { text: '   Gap ', options: { color: MUTED } }, { text: d.equityRequired != null ? fmtM(gap2) : '—', options: { color: gap2 > 0 ? RED : GREEN, bold: true } },
-    ], { x: rx, y: 4.93, w: rw, h: 0.28, fontFace: SERIF, fontSize: 11 })
+    ], { x: rx, y: 5.34, w: rw, h: 0.26, fontFace: SERIF, fontSize: 11 })
     // progress bar
     const barW = rw, raise = d.equityRequired ? Math.min(1, committed / d.equityRequired) : 0
-    s.addShape(pptx.ShapeType.rect, { x: rx, y: 5.25, w: barW, h: 0.13, fill: { color: ROW_A } })
-    if (raise > 0) s.addShape(pptx.ShapeType.rect, { x: rx, y: 5.25, w: Math.max(0.03, barW * raise), h: 0.13, fill: { color: GREEN } })
+    s.addShape(pptx.ShapeType.rect, { x: rx, y: 5.64, w: barW, h: 0.13, fill: { color: ROW_A } })
+    if (raise > 0) s.addShape(pptx.ShapeType.rect, { x: rx, y: 5.64, w: Math.max(0.03, barW * raise), h: 0.13, fill: { color: GREEN } })
     if (d.lps.length) {
       const top = [...d.lps].slice(0, 4)
       s.addText(
         top.map((l, i) => ({ text: `${l.partnerName} (${LP_LABEL[l.status] ?? l.status})${i < top.length - 1 ? '   ' : ''}`, options: {} })),
-        { x: rx, y: 5.45, w: rw, h: 0.5, fontFace: SERIF, fontSize: 9.5, color: MUTED, valign: 'top' })
+        { x: rx, y: 5.84, w: rw, h: 0.42, fontFace: SERIF, fontSize: 9.5, color: MUTED, valign: 'top' })
     } else {
-      s.addText(d.partner ? `Targeted partner: ${d.partner}` : 'No LP engaged yet — raise to commence.', { x: rx, y: 5.45, w: rw, h: 0.3, fontFace: SERIF, fontSize: 9.5, italic: true, color: MUTED })
+      s.addText(d.partner ? `Targeted partner: ${clip(d.partner, 40)}` : 'No LP engaged yet — raise to commence.', { x: rx, y: 5.84, w: rw, h: 0.3, fontFace: SERIF, fontSize: 9.5, italic: true, color: MUTED })
     }
 
     // status & next steps
-    s.addShape(pptx.ShapeType.rect, { x: rx, y: 6.15, w: rw, h: 1.35, fill: { color: ROW_B }, line: { color: ROW_A, width: 1 } })
-    s.addText('STATUS & NEXT STEPS', { x: rx + 0.12, y: 6.24, w: rw - 0.24, h: 0.22, fontFace: SANS, fontSize: 7.5, bold: true, color: STEEL, charSpacing: 2 })
+    s.addShape(pptx.ShapeType.rect, { x: rx, y: 6.35, w: rw, h: 1.18, fill: { color: ROW_B }, line: { color: ROW_A, width: 1 } })
+    s.addText('STATUS & NEXT STEPS', { x: rx + 0.12, y: 6.43, w: rw - 0.24, h: 0.22, fontFace: SANS, fontSize: 7.5, bold: true, color: STEEL, charSpacing: 2 })
     s.addText([
-      { text: nextStep(d), options: { color: TEXT, bold: true, breakLine: true } },
+      { text: clip(nextStep(d), 90), options: { color: TEXT, bold: true, breakLine: true } },
       ...(d.stage === 'lost' || d.stage === 'passed' || d.stage === 'dead'
-        ? [{ text: d.lostReason ? `Reason: ${d.lostReason}` : '', options: { color: RED, breakLine: true } as any }]
+        ? [{ text: d.lostReason ? `Reason: ${clip(d.lostReason, 80)}` : '', options: { color: RED, breakLine: true } as any }]
         : []),
       { text: teamLabel(d), options: { color: MUTED, breakLine: true } },
-    ], { x: rx + 0.12, y: 6.48, w: rw - 0.24, h: 0.95, fontFace: SERIF, fontSize: 10.5, valign: 'top', lineSpacingMultiple: 1.15 })
+    ], { x: rx + 0.12, y: 6.66, w: rw - 0.24, h: 0.82, fontFace: SERIF, fontSize: 10, valign: 'top', lineSpacingMultiple: 1.1, fit: 'shrink' } as any)
 
     // ── companion slide: site plan (rendered image) + tenant roster ──
     const img = input.extras?.sitePlanImgs?.[d.id]
@@ -414,8 +419,8 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
         { text: d.name, options: { color: TEXT, bold: true, fill: { color: bg } } },
         { text: loc(d) || '—', options: { color: TEXT, fill: { color: bg } } },
         { text: profileLabel(d), options: { color: TEXT, fill: { color: bg } } },
-        { text: priceShort(d), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
-        { text: d.bidText ?? '—', options: { color: TEXT, fill: { color: bg }, fontSize: 10 } },
+        { text: guidanceShort(d, 20), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
+        { text: clip(d.bidText ?? '—', 70), options: { color: TEXT, fill: { color: bg }, fontSize: 10 } },
       ])
     })
     s.addTable(rows, { x: 0.45, y: 1.2, w: 10.1, colW: [2.7, 1.9, 1.7, 1.2, 2.6], fontFace: SERIF, fontSize: 10.5, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.355, valign: 'middle', margin: 0.05 })
