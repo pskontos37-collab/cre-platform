@@ -494,17 +494,50 @@ function buildFollowUpHtml(row: ArAgingRow, contacts: ArFollowUpContact[], detai
   ].join('\n')
 }
 
+// A browser can't inject HTML into a desktop mail client (mailto is plain-text
+// only), so the fully-formatted draft is delivered as an .eml file instead:
+// X-Unsent: 1 makes Outlook open it as an EDITABLE, ready-to-send message with
+// To/Subject/HTML table already in place — no pasting.
+function downloadEmlDraft(row: ArAgingRow, contacts: ArFollowUpContact[], lines: ArDetailLine[]) {
+  const html = `<html><body>${buildFollowUpHtml(row, contacts, lines)}</body></html>`
+  // base64-encode UTF-8 safely (btoa alone chokes on non-latin1)
+  const bytes = new TextEncoder().encode(html)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  const b64 = btoa(bin).replace(/(.{76})/g, '$1\r\n')
+  const eml = [
+    `To: ${followUpTo(contacts)}`,
+    `Subject: ${followUpSubject(row)}`,
+    'X-Unsent: 1',
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    b64,
+    '',
+  ].join('\r\n')
+  const url = URL.createObjectURL(new Blob([eml], { type: 'message/rfc822' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `Follow-up - ${row.tenantName.replace(/[\\/:*?"<>|]/g, '')}.eml`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 // One click: the formatted HTML table (charges × aging buckets + recap) goes
 // on the clipboard AND an addressed, subject-lined draft opens in the manager's
 // own mail client — they press Ctrl+V in the body and the whole formatted
 // message drops in. If the clipboard is unavailable, the draft opens with the
 // plain-text version in the body instead, so the flow never dead-ends.
+// The "Outlook draft" variant skips the paste entirely via an .eml handoff.
 function FollowUpBar({ row, contacts, lines }: {
   row: ArAgingRow
   contacts: ArFollowUpContact[]
   lines: ArDetailLine[]
 }) {
-  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail' | 'eml'>('idle')
 
   const openDraft = async (e: ReactMouseEvent) => {
     e.preventDefault()
@@ -530,18 +563,32 @@ function FollowUpBar({ row, contacts, lines }: {
       onClick={e => e.stopPropagation()}
       style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}
     >
-      <a
-        href={buildFollowUpMailto(row, contacts, lines)}
-        onClick={openDraft}
-        title="Copies a formatted charge table and opens a pre-addressed reminder draft in your email client — paste the table into the body, review, and send from your own mailbox"
+      <button
+        onClick={() => { downloadEmlDraft(row, contacts, lines); setCopyState('eml') }}
+        title="Generates the complete reminder email — open the downloaded draft and the formatted message is ready to edit and send from your own mailbox"
         style={{
-          fontSize: 11.5, fontWeight: 600, padding: '5px 13px', borderRadius: 7,
-          background: WILKOW, color: '#f2f3f5', textDecoration: 'none', whiteSpace: 'nowrap',
+          fontSize: 11.5, fontWeight: 600, padding: '5px 13px', borderRadius: 7, cursor: 'pointer',
+          background: WILKOW, color: '#f2f3f5', border: 'none', whiteSpace: 'nowrap',
         }}
       >
         ✉ Email payment follow-up
+      </button>
+      <a
+        href={buildFollowUpMailto(row, contacts, lines)}
+        onClick={openDraft}
+        title="Alternate: opens a draft in your mail client directly — the formatted table goes on the clipboard for you to paste into the body"
+        style={{
+          fontSize: 11.5, fontWeight: 600, padding: '4px 13px', borderRadius: 7,
+          background: 'transparent', color: WILKOW, border: `1px solid ${WILKOW}`, textDecoration: 'none', whiteSpace: 'nowrap',
+        }}
+      >
+        Compose via mail client
       </a>
-      {copyState === 'ok' ? (
+      {copyState === 'eml' ? (
+        <span style={{ fontSize: 10.5, color: 'var(--green)', fontWeight: 600 }}>
+          Draft generated — open the downloaded file and the formatted email is ready to edit and send.
+        </span>
+      ) : copyState === 'ok' ? (
         <span style={{ fontSize: 10.5, color: 'var(--green)', fontWeight: 600 }}>
           Charge table copied — press Ctrl+V in the draft body to insert the formatted message.
         </span>
