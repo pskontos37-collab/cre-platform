@@ -22,19 +22,16 @@ export function DelinquencyWidget({ propertyIds, propertyNames }: DelinquencyWid
   const totalPastDue = rows.reduce((s, r) => s + r.pastDue, 0)
   const asOf = rows[0]?.asOf
   const shown = expanded ? rows : rows.slice(0, COLLAPSED)
-  const countLabel = `${rows.length} past due${asOf ? ` · as of ${asOf}` : ''}`
+  // Count + as-of live in the summary banner, not the header chip — the header
+  // only fits the property filter without squeezing the title onto two lines.
+  const countLabel = `${rows.length} tenant${rows.length === 1 ? '' : 's'} past due${asOf ? ` · as of ${asOf}` : ''}`
 
   return (
     <Widget
       title="Delinquency Tracker"
       chip={propertyIds.length > 1
-        ? (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {rows.length > 0 && <span style={{ fontSize: 10, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{countLabel}</span>}
-            <WidgetPropertyChip scopeIds={propertyIds} propertyNames={propertyNames} value={sel} onChange={setSel} />
-          </span>
-        )
-        : (rows.length > 0 ? countLabel : undefined)}
+        ? <WidgetPropertyChip scopeIds={propertyIds} propertyNames={propertyNames} value={sel} onChange={setSel} />
+        : undefined}
       href="/receivables"
     >
       {loading && <WidgetSkeleton rows={3} />}
@@ -44,9 +41,12 @@ export function DelinquencyWidget({ propertyIds, propertyNames }: DelinquencyWid
       )}
       {!loading && !error && rows.length > 0 && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, padding: '8px 10px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 7 }}>
-            <span style={{ fontSize: 11, color: 'var(--red)' }}>Total Past Due (30d+)</span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--red)' }}>{fmtDollar(totalPastDue)}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12, padding: '8px 10px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 7 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: 'var(--red)' }}>Total Past Due (30d+)</div>
+              <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{countLabel}</div>
+            </div>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--red)', whiteSpace: 'nowrap' }}>{fmtDollar(totalPastDue)}</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -65,7 +65,11 @@ export function DelinquencyWidget({ propertyIds, propertyNames }: DelinquencyWid
                       {row.propertyName}{row.suite ? ` · ${row.suite}` : ''}
                     </div>
                   </div>
-                  <Badge variant={worst === '30d' ? 'amber' : 'red'}>{worst}</Badge>
+                  {/* Fixed-width slot keeps the badges in a straight column even
+                      though the amounts to their right vary in width. */}
+                  <span style={{ width: 46, display: 'flex', justifyContent: 'center', flex: 'none' }}>
+                    <Badge variant={worst === '30d' ? 'amber' : 'red'}>{worst}</Badge>
+                  </span>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--red)', fontVariantNumeric: 'tabular-nums', minWidth: 80, textAlign: 'right' }}>
                     {fmtDollar(row.pastDue)}
                   </div>

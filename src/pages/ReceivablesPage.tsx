@@ -2,7 +2,7 @@ import { useMemo, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds, usePropertyNameMap } from '../hooks/useFilteredPropertyIds'
-import { useArAging, useArDetail, useArNotes, type ArAgingRow } from '../hooks/useArAging'
+import { useArAging, useArDetail, useArNotes, useArContacts, normalizeTenantName, type ArAgingRow, type ArFollowUpContact } from '../hooks/useArAging'
 import { useReaAgreements } from '../hooks/useRea'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -44,6 +44,7 @@ export function ReceivablesPage() {
   const { data, loading, error } = useArAging(propertyIds, propertyNames)
   const rows = data ?? []
   const { data: notes } = useArNotes(propertyIds)
+  const { data: arContacts } = useArContacts(propertyIds)
   const { data: reas } = useReaAgreements(propertyIds, propertyNames)
   // MRI lease ids that belong to REA parties (chip + cross-link to /rea)
   const reaMris = useMemo(() => {
@@ -252,6 +253,11 @@ export function ReceivablesPage() {
                       open={open?.id === r.id ? open.bucket : null}
                       note={(notes ?? {})[`${r.propertyId}|${r.mriLeaseId}`] ?? null}
                       isRea={r.mriLeaseId != null && reaMris.has(r.mriLeaseId)}
+                      contacts={
+                        (r.tenantId ? (arContacts ?? {})[`${r.propertyId}|id:${r.tenantId}`] : undefined)
+                        ?? (arContacts ?? {})[`${r.propertyId}|nm:${normalizeTenantName(r.tenantName)}`]
+                        ?? []
+                      }
                       onToggle={bucket => setOpen(open?.id === r.id && open.bucket === bucket ? null : { id: r.id, bucket })}
                     />
                   ))}
@@ -339,11 +345,47 @@ function Amt({ v, bold, color }: { v: number; bold?: boolean; color?: string }) 
   )
 }
 
-function TenantRow({ row, open, note, isRea, onToggle }: {
+// One-click payment follow-up: a mailto draft that opens in the manager's own
+// mail client (so the reply lands with them and nothing sends until they hit
+// Send). Canned reminder + the aging snippet for this tenant, pre-addressed to
+// the directory's billing contact when one exists.
+function buildFollowUpMailto(row: ArAgingRow, contacts: ArFollowUpContact[]) {
+  const to = contacts.slice(0, 3).map(c => c.email).join(',')
+  const greetName = contacts[0]?.name
+  const suite = row.suite ? `, Suite ${row.suite}` : ''
+  const buckets: Array<[string, number]> = [
+    ['Current', row.current],
+    ['30 days', row.b30],
+    ['60 days', row.b60],
+    ['90 days', row.b90],
+    ['120+ days', row.b120],
+  ]
+  const lines = [
+    `Dear ${greetName ?? 'Accounts Payable Team'},`,
+    '',
+    `Our records show a past-due balance of ${fmt(row.pastDue)} for ${row.tenantName} at ${row.propertyName}${suite} as of ${row.asOf}. Account summary:`,
+    '',
+    ...buckets.filter(([, v]) => Math.abs(v) > 0.005).map(([label, v]) => `  ${label}: ${fmt(v)}`),
+    `  Total balance: ${fmt(row.total)}`,
+    '',
+    ...(row.lastPaymentDate
+      ? [`Our last payment received was on ${row.lastPaymentDate}${row.lastPaymentAmount != null ? ` (${fmt(row.lastPaymentAmount)})` : ''}.`, '']
+      : []),
+    'Please arrange remittance of the past-due amount, or reply with a remittance update and your expected payment date. If you believe any of these charges are in error, let us know and we will research them promptly.',
+    '',
+    'Thank you,',
+    '',
+  ]
+  const subject = `Past-Due Balance Reminder - ${row.tenantName} - ${row.propertyName}`
+  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\r\n'))}`
+}
+
+function TenantRow({ row, open, note, isRea, contacts, onToggle }: {
   row: ArAgingRow
   open: BucketKey | 'all' | null   // which bucket the drill is filtered to (null = collapsed)
   note: string | null
   isRea: boolean
+  contacts: ArFollowUpContact[]
   onToggle: (bucket: BucketKey | 'all') => void
 }) {
   const worst = row.b120 > 0.005 ? BUCKETS[4] : row.b90 > 0.005 ? BUCKETS[3] : row.b60 > 0.005 ? BUCKETS[2] : row.b30 > 0.005 ? BUCKETS[1] : BUCKETS[0]
@@ -409,6 +451,33 @@ function TenantRow({ row, open, note, isRea, onToggle }: {
             {note && (
               <div style={{ marginBottom: 10, padding: '8px 12px', background: 'var(--amber-bg)', border: '1px solid var(--amber-border)', borderRadius: 8, fontSize: 11.5, color: 'var(--text)', lineHeight: 1.55 }}>
                 📝 {note}{isRea && <> · <Link to="/rea" style={{ color: 'var(--accent)' }}>open REAs panel →</Link></>}
+              </div>
+            )}
+            {row.pastDue > 0.005 && (
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}
+              >
+                <a
+                  href={buildFollowUpMailto(row, contacts)}
+                  title="Opens a pre-filled payment reminder in your email client — review and send from your own mailbox"
+                  style={{
+                    fontSize: 11.5, fontWeight: 600, padding: '5px 13px', borderRadius: 7,
+                    background: WILKOW, color: '#f2f3f5', textDecoration: 'none', whiteSpace: 'nowrap',
+                  }}
+                >
+                  ✉ Email payment follow-up
+                </a>
+                {contacts.length > 0 ? (
+                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                    To: {contacts.slice(0, 3).map(c => c.name ? `${c.name} <${c.email}>` : c.email).join(' · ')}
+                    <span style={{ color: 'var(--text-faint)' }}> · {contacts[0].type === 'billing' ? 'billing contact' : `${contacts[0].type.replace('_', ' ')} contact`} on file</span>
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
+                    No email on file for this tenant — the draft opens unaddressed. <Link to="/contacts" style={{ color: 'var(--accent)' }}>Add one in Contacts →</Link>
+                  </span>
+                )}
               </div>
             )}
             <DetailLines row={row} bucket={open} onBucket={b => onToggle(b)} />

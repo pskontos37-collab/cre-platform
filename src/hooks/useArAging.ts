@@ -17,6 +17,7 @@ export interface ArAgingRow {
   propertyName: string
   asOf: string
   tenantName: string
+  tenantId: string | null
   mriLeaseId: string | null
   suite: string | null
   status: string | null
@@ -65,6 +66,55 @@ export function useArDetail(arAgingId: string | null) {
   }, [arAgingId])
 }
 
+// Emailable contacts for the A/R follow-up composer, from the tenant_contacts
+// directory. Keyed two ways so an aging row can resolve its recipients even
+// when it has no tenants-table link: "propertyId|id:tenantId" and
+// "propertyId|nm:<normalized tenant name>". Within a tenant, billing contacts
+// rank first (then general/corporate/operational), primaries before others.
+export interface ArFollowUpContact {
+  name: string | null
+  email: string
+  type: string
+}
+
+const CONTACT_TYPE_RANK: Record<string, number> = {
+  billing: 0, general: 1, corporate: 2, operational: 3, legal_notice: 4,
+}
+
+// Loose name key: lowercase, alphanumerics only — survives punctuation and
+// spacing drift between MRI tenant labels and directory names.
+export const normalizeTenantName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+export function useArContacts(propertyIds: string[]) {
+  return useQuery<Record<string, ArFollowUpContact[]>>(async () => {
+    if (!propertyIds.length) return {}
+    const { data, error } = await supabase
+      .from('tenant_contacts')
+      .select('property_id, tenant_id, tenant_name, contact_type, contact_name, email, is_primary')
+      .in('property_id', propertyIds)
+      .not('email', 'is', null)
+    if (error) throw new Error(error.message)
+
+    const rows = ((data ?? []) as any[])
+      .filter(r => typeof r.email === 'string' && r.email.includes('@'))
+      .sort((a, b) =>
+        (CONTACT_TYPE_RANK[a.contact_type] ?? 9) - (CONTACT_TYPE_RANK[b.contact_type] ?? 9) ||
+        Number(b.is_primary) - Number(a.is_primary))
+
+    const map: Record<string, ArFollowUpContact[]> = {}
+    const push = (key: string, c: ArFollowUpContact) => {
+      const list = map[key] ?? (map[key] = [])
+      if (!list.some(x => x.email.toLowerCase() === c.email.toLowerCase())) list.push(c)
+    }
+    for (const r of rows) {
+      const c: ArFollowUpContact = { name: r.contact_name, email: r.email.trim(), type: r.contact_type }
+      if (r.tenant_id) push(`${r.property_id}|id:${r.tenant_id}`, c)
+      if (r.tenant_name) push(`${r.property_id}|nm:${normalizeTenantName(r.tenant_name)}`, c)
+    }
+    return map
+  }, [propertyIds.join(',')])
+}
+
 // Durable operational annotations, keyed "propertyId|mriLeaseId".
 export function useArNotes(propertyIds: string[]) {
   return useQuery<Record<string, string>>(async () => {
@@ -84,7 +134,7 @@ export function useArAging(propertyIds: string[], propertyNames: Record<string, 
 
     const { data, error } = await supabase
       .from('ar_aging')
-      .select('id, property_id, as_of_date, tenant_label, mri_lease_id, suite, occupant_status, total, bucket_current, bucket_30, bucket_60, bucket_90, bucket_120, last_payment_date, last_payment_amount, categories, tenant:tenants(name)')
+      .select('id, property_id, as_of_date, tenant_label, tenant_id, mri_lease_id, suite, occupant_status, total, bucket_current, bucket_30, bucket_60, bucket_90, bucket_120, last_payment_date, last_payment_amount, categories, tenant:tenants(name)')
       .in('property_id', propertyIds)
       .order('as_of_date', { ascending: false })
       .limit(2000)
@@ -114,6 +164,7 @@ export function useArAging(propertyIds: string[], propertyNames: Record<string, 
           propertyName:      propertyNames[r.property_id] ?? '—',
           asOf:              r.as_of_date,
           tenantName:        r.tenant?.name ?? r.tenant_label,
+          tenantId:          r.tenant_id ?? null,
           mriLeaseId:        r.mri_lease_id,
           suite:             r.suite,
           status:            r.occupant_status,

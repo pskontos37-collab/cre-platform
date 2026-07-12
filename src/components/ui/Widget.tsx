@@ -68,11 +68,18 @@ export function Widget({ title, chip, href, hrefLabel, children, fullWidth, minH
             fontWeight:    700,
             letterSpacing: '0.01em',
             color:         'var(--text)',
+            // Never let the title wrap onto a second line and reflow the header —
+            // when the chip slot is wide, truncate the title instead.
+            whiteSpace:    'nowrap',
+            overflow:      'hidden',
+            textOverflow:  'ellipsis',
+            minWidth:      0,
           }}
+          title={title}
         >
           {title}
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 'none' }}>
           {chip != null && (
             typeof chip === 'string' ? (
               <span
