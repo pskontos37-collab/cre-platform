@@ -831,7 +831,7 @@ function DealDrawer({ deal, partners, team, onClose, onChanged }: { deal: Deal; 
         {tab === 'overview' && <OverviewTab deal={deal} team={team} onSave={p => run(() => updateDeal(deal.id, p))} busy={busy} onDelete={() => run(async () => { await deleteDeal(deal.id); onClose() })} />}
         {tab === 'underwriting' && <UnderwritingTab deal={deal} onSave={p => run(() => updateDeal(deal.id, p))} busy={busy} />}
         {tab === 'capital' && <CapitalTab deal={deal} partners={partners} onChanged={onChanged} onDiscuss={lpId => { setDiscussLp(lpId); setTab('discussion') }} />}
-        {tab === 'documents' && <DocumentsTab dealId={deal.id} createdBy={appUser?.id ?? null} folderPath={deal.folderPath} folderFiles={deal.folderFiles} docs={docsQ.data ?? []} loading={docsQ.loading} refetch={docsQ.refetch} ddPropertyId={deal.ddPropertyId} />}
+        {tab === 'documents' && <DocumentsTab dealId={deal.id} dealName={deal.name} createdBy={appUser?.id ?? null} folderPath={deal.folderPath} folderFiles={deal.folderFiles} docs={docsQ.data ?? []} loading={docsQ.loading} refetch={docsQ.refetch} ddPropertyId={deal.ddPropertyId} />}
         {tab === 'discussion' && <DiscussionTab deal={deal} createdBy={appUser?.id ?? null} initialLp={discussLp} />}
       </div>
       {closeOpen && <CloseModal deal={deal} onClose={() => setCloseOpen(false)} onDone={() => { setCloseOpen(false); onChanged() }} />}
@@ -1076,7 +1076,9 @@ function MoneyInput({ label, value, disabled, onSave }: { label: string; value: 
   )
 }
 
-function DocumentsTab({ dealId, createdBy, folderPath, folderFiles, docs, loading, refetch, ddPropertyId }: { dealId: string; createdBy: string | null; folderPath: string | null; folderFiles: { name: string; dir: boolean }[] | null; docs: DealDoc[]; loading: boolean; refetch: () => void; ddPropertyId: string | null }) {
+function DocumentsTab({ dealId, dealName, createdBy, folderPath, folderFiles, docs, loading, refetch, ddPropertyId }: { dealId: string; dealName: string; createdBy: string | null; folderPath: string | null; folderFiles: { name: string; dir: boolean }[] | null; docs: DealDoc[]; loading: boolean; refetch: () => void; ddPropertyId: string | null }) {
+  const enrichCmd = `.\\scripts\\enrich_deal.ps1 -Deal "${dealName}"`
+  const [cmdCopied, setCmdCopied] = useState(false)
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [sentIds, setSentIds] = useState<Set<string>>(new Set())
   const sendToDd = async (d: DealDoc) => {
@@ -1109,6 +1111,19 @@ function DocumentsTab({ dealId, createdBy, folderPath, folderFiles, docs, loadin
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* one-command per-deal enrichment (pulls folder info; runs locally — the web app can't reach K:\) */}
+      <div style={{ border: `1px solid ${folderPath ? 'var(--border)' : 'var(--accent, #466371)'}`, borderRadius: 9, background: folderPath ? 'var(--surface-2, rgba(0,0,0,.03))' : 'rgba(70, 99, 113, 0.06)', padding: '10px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: folderPath ? 'var(--text-faint)' : 'var(--accent, #466371)' }}>⤓ Pull folder info{folderPath ? ' · re-run' : ''}</span>
+          <button style={{ ...ghostBtn, padding: '3px 9px', fontSize: 11, marginLeft: 'auto' }} onClick={() => { navigator.clipboard?.writeText(enrichCmd); setCmdCopied(true); setTimeout(() => setCmdCopied(false), 2000) }}>{cmdCopied ? 'Copied ✓' : 'Copy command'}</button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text)', fontFamily: 'monospace', wordBreak: 'break-all', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 5, padding: '6px 8px' }}>{enrichCmd}</div>
+        <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 8 }}>
+          {folderPath
+            ? 'Re-run in PowerShell (cre-platform folder, office PC) to refresh from the deal folder — mirrors new docs and fills any blank fields. Safe to re-run.'
+            : 'New deal — run this in PowerShell from the cre-platform folder on the office PC to link the K:\\ACQUISITIONS folder and pull in the OM facts, tenant roster, site plan and return metrics.'}
+        </div>
+      </div>
       {ddPropertyId && (
         <div style={{ border: '1px solid var(--accent, #466371)', borderRadius: 9, background: 'rgba(70, 99, 113, 0.06)', padding: '10px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
