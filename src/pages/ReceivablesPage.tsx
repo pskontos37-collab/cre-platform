@@ -36,7 +36,11 @@ const fmtCents = (n: number) => {
   return n < 0 ? `(${s})` : s
 }
 
-type QuickFilter = 'all' | 'pastdue' | 'severe' | 'credits'
+type QuickFilter = 'all' | 'pastdue' | 'severe' | 'credits' | 'needsfollowup'
+
+// A past-due tenant "needs follow-up" when no reminder draft has been logged
+// for it within this window (or ever).
+const FOLLOWUP_STALE_DAYS = 14
 type SortKey = 'pastDue' | 'total' | 'current' | BucketKey | 'tenantName'
 
 export function ReceivablesPage() {
@@ -48,6 +52,20 @@ export function ReceivablesPage() {
   const { data: notes } = useArNotes(propertyIds)
   const { data: arContacts } = useArContacts(propertyIds)
   const { data: followUps, refetch: refetchFollowUps } = useArFollowUps(propertyIds)
+
+  // Same dual-key resolution the drill uses: MRI lease id first, then the
+  // punctuation-tolerant tenant-name match.
+  const followUpsFor = (r: ArAgingRow): ArFollowUp[] =>
+    (r.mriLeaseId ? (followUps ?? {})[`${r.propertyId}|mri:${r.mriLeaseId}`] : undefined)
+    ?? (followUps ?? {})[`${r.propertyId}|nm:${normalizeTenantName(r.tenantName)}`]
+    ?? []
+
+  const needsFollowUp = (r: ArAgingRow): boolean => {
+    if (r.pastDue <= 0.005) return false
+    const latest = followUpsFor(r)[0]
+    if (!latest) return true
+    return Date.now() - new Date(latest.createdAt).getTime() > FOLLOWUP_STALE_DAYS * 86400e3
+  }
   const { data: reas } = useReaAgreements(propertyIds, propertyNames)
   // MRI lease ids that belong to REA parties (chip + cross-link to /rea)
   const reaMris = useMemo(() => {
@@ -96,6 +114,7 @@ export function ReceivablesPage() {
       if (quick === 'pastdue' && r.pastDue <= 0.005) return false
       if (quick === 'severe' && r.b90 + r.b120 <= 0.005) return false
       if (quick === 'credits' && r.total >= 0) return false
+      if (quick === 'needsfollowup' && !needsFollowUp(r)) return false
       if (q && !(`${r.tenantName} ${r.suite ?? ''} ${r.propertyName} ${r.mriLeaseId ?? ''}`.toLowerCase().includes(q))) return false
       return true
     })
@@ -108,7 +127,7 @@ export function ReceivablesPage() {
       return sortDesc ? -c : c
     })
     return v
-  }, [rows, quick, search, sortKey, sortDesc])
+  }, [rows, quick, search, sortKey, sortDesc, followUps])
 
   function clickSort(k: SortKey) {
     if (sortKey === k) setSortDesc(d => !d)
@@ -130,7 +149,7 @@ export function ReceivablesPage() {
             Tenant aged delinquencies{asOf ? <> · as of <b style={{ color: 'var(--text)' }}>{asOf}</b></> : null} · source: MRI Aged Delinquencies
           </div>
         </div>
-        <ArAgingPdfButton rows={rows} notes={notes ?? {}} reaMris={reaMris} asOf={asOf} />
+        <ArAgingPdfButton rows={rows} notes={notes ?? {}} followUps={followUps ?? {}} reaMris={reaMris} asOf={asOf} />
       </div>
 
       {loading && <WidgetSkeleton rows={8} />}
@@ -212,11 +231,13 @@ export function ReceivablesPage() {
               { k: 'all',     label: `All (${rows.length})` },
               { k: 'pastdue', label: `Past due (${rows.filter(r => r.pastDue > 0.005).length})` },
               { k: 'severe',  label: `90d+ (${rows.filter(r => r.b90 + r.b120 > 0.005).length})` },
+              { k: 'needsfollowup', label: `Needs follow-up (${rows.filter(needsFollowUp).length})`, title: `Past due with no payment reminder logged in the last ${FOLLOWUP_STALE_DAYS} days` },
               { k: 'credits', label: `Credits (${rows.filter(r => r.total < 0).length})` },
-            ] as { k: QuickFilter; label: string }[]).map(f => (
+            ] as { k: QuickFilter; label: string; title?: string }[]).map(f => (
               <button
                 key={f.k}
                 onClick={() => setQuick(f.k)}
+                title={f.title}
                 style={{
                   fontSize: 11, padding: '5px 12px', borderRadius: 99, cursor: 'pointer',
                   border: `1px solid ${quick === f.k ? WILKOW : 'var(--border-2)'}`,
@@ -261,11 +282,7 @@ export function ReceivablesPage() {
                         ?? (arContacts ?? {})[`${r.propertyId}|nm:${normalizeTenantName(r.tenantName)}`]
                         ?? []
                       }
-                      followUps={
-                        (r.mriLeaseId ? (followUps ?? {})[`${r.propertyId}|mri:${r.mriLeaseId}`] : undefined)
-                        ?? (followUps ?? {})[`${r.propertyId}|nm:${normalizeTenantName(r.tenantName)}`]
-                        ?? []
-                      }
+                      followUps={followUpsFor(r)}
                       onFollowUpLogged={refetchFollowUps}
                       onToggle={bucket => setOpen(open?.id === r.id && open.bucket === bucket ? null : { id: r.id, bucket })}
                     />
