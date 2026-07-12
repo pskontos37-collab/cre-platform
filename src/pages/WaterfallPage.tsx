@@ -128,18 +128,28 @@ export function WaterfallPage() {
   const sel = useMemo(() => groups.find(g => g.propertyId === propId) ?? null, [groups, propId])
 
   const { data: glNca } = useGlNca(propId)
+  // useQuery retains the prior property's data until the new fetch resolves, so `glNca`
+  // may momentarily belong to the previously selected property. Only ever treat it as the
+  // current property's figure once its propertyId matches — otherwise a Gateway NCA leaks
+  // into Knightdale (which has no GL) and inflates its sold-today math.
+  const glForSel = sel && glNca && glNca.propertyId === sel.propertyId ? glNca : null
   const [inputs, setInputs] = useState<Inputs | null>(null)
   const [ncaTouched, setNcaTouched] = useState(false)
+  // On every tab switch, re-seed from the new property's own defaults (stored config unless a
+  // matching GL figure is already in hand) and clear any prior manual override.
   useEffect(() => {
-    if (sel) { setInputs(defaultInputs(sel, glNca?.nca ?? null)); setNcaTouched(false) }
+    if (sel) { setInputs(defaultInputs(sel, glForSel?.nca ?? null)); setNcaTouched(false) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel])
-  // When the GL figure arrives after the initial seed, adopt it unless the user has typed an override.
+  // When the GL figure for THIS property arrives after the initial seed, adopt it unless the
+  // user has typed an override. Gating on glForSel (not glNca) prevents the stale prior-property
+  // figure from being applied during the refetch window.
   useEffect(() => {
-    if (sel && glNca && !ncaTouched) {
-      setInputs(i => (i && i.nca !== glNca.nca ? { ...i, nca: glNca.nca } : i))
+    if (glForSel && !ncaTouched) {
+      setInputs(i => (i && i.nca !== glForSel.nca ? { ...i, nca: glForSel.nca } : i))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glNca, sel])
+  }, [glForSel, sel])
 
   const result = useMemo(() => (sel && inputs ? runSellToday(sel, inputs) : null), [sel, inputs])
 
@@ -250,16 +260,16 @@ export function WaterfallPage() {
             </Field>
             <Field
               label="Net current assets ($)"
-              caption={glNca
-                ? (inputs.nca === glNca.nca ? `from GL balance sheet (${glNca.gl_year})` : 'manual override')
+              caption={glForSel
+                ? (inputs.nca === glForSel.nca ? `from GL balance sheet (${glForSel.gl_year})` : 'manual override')
                 : 'stored default (no GL)'}
             >
               <div style={{ display: 'flex', gap: 4 }}>
                 <NumInput value={inputs.nca} step={50_000} onChange={v => { setNcaTouched(true); setInputs({ ...inputs, nca: v }) }} wide />
-                {glNca && inputs.nca !== glNca.nca && (
+                {glForSel && inputs.nca !== glForSel.nca && (
                   <button
-                    title={`Reset to GL: ${usd(glNca.nca)}`}
-                    onClick={() => { setNcaTouched(false); setInputs({ ...inputs, nca: glNca.nca }) }}
+                    title={`Reset to GL: ${usd(glForSel.nca)}`}
+                    onClick={() => { setNcaTouched(false); setInputs({ ...inputs, nca: glForSel.nca }) }}
                     style={{ ...resetStyle, padding: '4px 8px' }}
                   >GL ↺</button>
                 )}
@@ -270,7 +280,7 @@ export function WaterfallPage() {
             <Field label="As of">
               <input type="date" value={inputs.asOf} onChange={e => setInputs({ ...inputs, asOf: e.target.value })} style={dateStyle} />
             </Field>
-            <button onClick={() => { setInputs(defaultInputs(sel, glNca?.nca ?? null)); setNcaTouched(false) }} style={resetStyle}>Reset defaults</button>
+            <button onClick={() => { setInputs(defaultInputs(sel, glForSel?.nca ?? null)); setNcaTouched(false) }} style={resetStyle}>Reset defaults</button>
           </div>
 
           {result && (

@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { logGeneratedAgreement, useGeneratedAgreements } from '../hooks/useGeneratedAgreements'
+import { upsertVendor, useServiceAgreementVendors, vendorKey, type VendorRecord } from '../hooks/useServiceAgreementVendors'
 import { supabase } from '../lib/supabase'
 import {
   blankInput, buildContentBase, PROPERTY_CONFIGS,
@@ -14,6 +15,28 @@ const WILKOW_MIST = '#8fa2ad'
 const SERIF = "'Frank Ruhl Libre', 'Cinzel', Georgia, serif"
 
 const PROPERTY_KEYS: PropertyKey[] = ['KME', 'KMW']
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+const ordinal = (n: number) => {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`
+}
+// Parse a native date-input value ("yyyy-mm-dd") without timezone drift.
+const isoParts = (iso: string): { y: number; m: number; d: number } | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  return m ? { y: +m[1], m: +m[2], d: +m[3] } : null
+}
+const formatLong = (iso: string): string => {
+  const p = isoParts(iso)
+  return p ? `${MONTHS[p.m - 1]} ${p.d}, ${p.y}` : ''
+}
+const pad4 = (a: string[]) => [0, 1, 2, 3].map(i => a[i] ?? '')
+
+const dateInputStyle: CSSProperties = {
+  padding: '8px 10px', fontSize: 12.5, borderRadius: 7,
+  border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)',
+}
 
 // Resolve the properties-table row for tracking (fuzzy: fka / dba tokens).
 function matchPropertyId(props: { id: string; name: string }[] | null, key: PropertyKey): string | null {
@@ -63,6 +86,18 @@ function Text({ value, onChange, placeholder }: { value: string; onChange: (v: s
   return <input style={inputStyle} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
 }
 
+// Free-text date field with an adjacent calendar picker; the picker formats the
+// chosen day to "Month D, YYYY" into the same field, so users can pick OR type.
+function DateTextField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      <input style={{ ...inputStyle, flex: 1 }} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
+      <input type="date" title="Pick from calendar" style={dateInputStyle}
+        onChange={e => { if (e.target.value) onChange(formatLong(e.target.value)) }} />
+    </div>
+  )
+}
+
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section style={{ border: '1px solid var(--border-2)', borderRadius: 12, background: 'var(--surface)', padding: 18, marginBottom: 16 }}>
@@ -77,6 +112,7 @@ export function ServiceAgreementBuilderPage() {
   const [input, setInput] = useState<AgreementInput>(() => blankInput('KME'))
   const [exhibitA, setExhibitA] = useState<File | null>(null)
   const recent = useGeneratedAgreements()
+  const vendors = useServiceAgreementVendors()
 
   const [busy, setBusy] = useState<null | 'word' | 'pdf' | 'email'>(null)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
@@ -85,6 +121,25 @@ export function ServiceAgreementBuilderPage() {
   const set = (patch: Partial<AgreementInput>) => setInput(prev => ({ ...prev, ...patch }))
   const setAddr = (i: number, v: string) =>
     setInput(prev => { const a = [...prev.vendorAddress]; a[i] = v; return { ...prev, vendorAddress: a } })
+
+  // Fill the vendor fields from a saved directory entry.
+  const applyVendor = (v: VendorRecord) => setInput(prev => ({
+    ...prev,
+    vendorName: v.name,
+    vendorBusiness: v.business ?? '',
+    vendorEmail: v.email ?? '',
+    vendorAddress: pad4(v.address_lines ?? []),
+  }))
+  // Remember this vendor's details for next time (best-effort).
+  const rememberVendor = () => {
+    void upsertVendor({ name: input.vendorName, business: input.vendorBusiness, addressLines: input.vendorAddress, email: input.vendorEmail })
+      .then(() => vendors.refetch())
+  }
+  // Set the agreement date (day-ordinal / month name / year) from a picked date.
+  const setAgreementDate = (iso: string) => {
+    const p = isoParts(iso)
+    if (p) set({ day: ordinal(p.d), month: MONTHS[p.m - 1], year: String(p.y) })
+  }
 
   const base = useMemo(() => buildContentBase(input), [input])
   const propertyId = useMemo(() => matchPropertyId(properties, input.property), [properties, input.property])
@@ -115,6 +170,7 @@ export function ServiceAgreementBuilderPage() {
       const blob = await buildAgreementDocx(input)
       download(blob, `${base.baseFilename}.docx`)
       void logGeneratedAgreement(input, { propertyId, status: 'generated' })
+      rememberVendor()
       setMsg({ kind: 'ok', text: 'Word document downloaded.' })
     } catch (err) {
       setMsg({ kind: 'err', text: err instanceof Error ? err.message : String(err) })
@@ -128,6 +184,7 @@ export function ServiceAgreementBuilderPage() {
       const blob = await makePdfBlob()
       download(blob, `${base.baseFilename}.pdf`)
       void logGeneratedAgreement(input, { propertyId, status: 'generated' })
+      rememberVendor()
       setMsg({ kind: 'ok', text: exhibitA ? 'PDF package downloaded (agreement + Exhibit A + Exhibit B).' : 'PDF downloaded (agreement + Exhibit B — no Exhibit A attached).' })
     } catch (err) {
       setMsg({ kind: 'err', text: err instanceof Error ? err.message : String(err) })
@@ -155,6 +212,7 @@ export function ServiceAgreementBuilderPage() {
       if (error) throw new Error((data as any)?.error || error.message)
       if ((data as any)?.error) throw new Error((data as any).error)
       void logGeneratedAgreement(input, { propertyId, status: 'sent', sentTo: input.vendorEmail.trim() })
+      rememberVendor()
       recent.refetch()
       setMsg({ kind: 'ok', text: `Sent to ${input.vendorEmail.trim()} for signature.` })
     } catch (err) {
@@ -206,14 +264,37 @@ export function ServiceAgreementBuilderPage() {
           </Card>
 
           <Card title="Parties & date">
+            {vendors.data && vendors.data.length > 0 && (
+              <Field label="Start from a saved vendor" hint="fills name, business, address & email">
+                <select style={inputStyle} value="" onChange={e => { const v = vendors.data!.find(x => x.id === e.target.value); if (v) applyVendor(v) }}>
+                  <option value="">— pick a saved vendor —</option>
+                  {vendors.data.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </Field>
+            )}
             <Field label="Agreement date" hint='"made this ___ day of ___, ___"'>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <input type="date" title="Pick from calendar" style={dateInputStyle} onChange={e => setAgreementDate(e.target.value)} />
+                <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>pick from calendar, or type below</span>
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 100px', gap: 8 }}>
                 <input style={inputStyle} placeholder="22nd" value={input.day} onChange={e => set({ day: e.target.value })} />
                 <input style={inputStyle} placeholder="May" value={input.month} onChange={e => set({ month: e.target.value })} />
                 <input style={inputStyle} placeholder="2026" value={input.year} onChange={e => set({ year: e.target.value })} />
               </div>
             </Field>
-            <Field label="Vendor legal name"><Text value={input.vendorName} onChange={v => set({ vendorName: v })} placeholder="Baker Roofing Company" /></Field>
+            <Field label="Vendor legal name" hint={(vendors.data?.length ?? 0) > 0 ? 'type a known vendor to auto-fill' : undefined}>
+              <input style={inputStyle} list="saved-vendor-names" value={input.vendorName} placeholder="Baker Roofing Company"
+                onChange={e => {
+                  const val = e.target.value
+                  const match = (vendors.data ?? []).find(v => v.name_key === vendorKey(val))
+                  const othersEmpty = !input.vendorBusiness.trim() && !input.vendorEmail.trim() && !input.vendorAddress.some(s => s.trim())
+                  if (match && othersEmpty) applyVendor(match); else set({ vendorName: val })
+                }} />
+              <datalist id="saved-vendor-names">
+                {(vendors.data ?? []).map(v => <option key={v.id} value={v.name} />)}
+              </datalist>
+            </Field>
             <Field label="Vendor's business" hint='"in the business of ___ contracted services"'>
               <Text value={input.vendorBusiness} onChange={v => set({ vendorBusiness: v })} placeholder="Roofing" />
             </Field>
@@ -234,10 +315,10 @@ export function ServiceAgreementBuilderPage() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <Field label={input.termType === 'continuing' ? 'Commences on' : 'Anticipated start'}>
-                <Text value={input.startDate} onChange={v => set({ startDate: v })} placeholder="July 30, 2026" />
+                <DateTextField value={input.startDate} onChange={v => set({ startDate: v })} placeholder="July 30, 2026" />
               </Field>
               <Field label={input.termType === 'continuing' ? 'Expires on' : 'Complete on or before'}>
-                <Text value={input.endDate} onChange={v => set({ endDate: v })} placeholder={input.termType === 'continuing' ? 'June 30, 2027' : 'August 13, 2026'} />
+                <DateTextField value={input.endDate} onChange={v => set({ endDate: v })} placeholder={input.termType === 'continuing' ? 'June 30, 2027' : 'August 13, 2026'} />
               </Field>
             </div>
             <p style={{ fontSize: 11, color: 'var(--text-faint)', margin: 0 }}>The other term clause stays blank on the form, exactly as in the paper template.</p>

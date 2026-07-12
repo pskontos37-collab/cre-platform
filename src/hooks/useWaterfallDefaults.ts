@@ -35,6 +35,10 @@ export function getWaterfallDefaults(l1Deal: DealRow | null): WaterfallDefaults 
  * excluded — principal belongs in the payoff input.
  */
 export interface GlNca {
+  /** The property this figure was computed for. `useQuery` keeps stale data across
+   *  key changes, so callers must confirm this matches the currently selected
+   *  property before applying the figure (a Gateway NCA must not leak into Knightdale). */
+  propertyId: string
   nca: number
   assets: number
   liabilities: number
@@ -49,10 +53,36 @@ export function useGlNca(propertyId: string | null) {
     const row = Array.isArray(data) ? data[0] : data
     if (!row || row.gl_year == null) return null
     return {
+      propertyId,
       nca: Number(row.nca ?? 0),
       assets: Number(row.assets ?? 0),
       liabilities: Number(row.liabilities ?? 0),
       gl_year: Number(row.gl_year),
     }
   }, [propertyId])
+}
+
+/**
+ * Batched GL net-current-assets lookup for the portfolio dashboard. Runs the
+ * property_nca RPC for each property and returns a { propertyId -> nca } map,
+ * omitting properties that have no GL year (callers fall back to the stored
+ * selltoday.nca). Keeps the dashboard's sold-today math on the same NCA basis
+ * as the /waterfall page.
+ */
+export function useGlNcaMap(propertyIds: string[]) {
+  const key = [...propertyIds].sort().join(',')
+  return useQuery<Record<string, number>>(async () => {
+    if (propertyIds.length === 0) return {}
+    const entries = await Promise.all(propertyIds.map(async pid => {
+      const { data, error } = await supabase.rpc('property_nca', { pid })
+      if (error) throw new Error(error.message)
+      const row = Array.isArray(data) ? data[0] : data
+      if (!row || row.gl_year == null) return [pid, null] as const
+      return [pid, Number(row.nca ?? 0)] as const
+    }))
+    const map: Record<string, number> = {}
+    for (const [pid, nca] of entries) if (nca != null) map[pid] = nca
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
 }

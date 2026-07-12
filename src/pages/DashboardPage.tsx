@@ -27,6 +27,7 @@ import { DelinquencyWidget } from '../components/dashboard/DelinquencyWidget'
 import { CoTenancyWidget } from '../components/dashboard/CoTenancyWidget'
 import { ServiceAgreementsWidget } from '../components/dashboard/ServiceAgreementsWidget'
 import { TasksWidget } from '../components/dashboard/TasksWidget'
+import { PortfolioInvestorReturnsWidget } from '../components/PortfolioInvestorReturnsWidget'
 
 interface WidgetProps { propertyIds: string[]; propertyNames: Record<string, string> }
 
@@ -41,6 +42,7 @@ const RENDERERS: Record<string, (p: WidgetProps) => ReactNode> = {
   opex:           p => <OpexTrendWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
   dscr:           p => <DSCRWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
   top_vendors:    p => <TopVendorsWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
+  investor_returns: p => <PortfolioInvestorReturnsWidget propertyIds={p.propertyIds} layer={1} />,
 
   ar:             p => <ARWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
   delinquency:    p => <DelinquencyWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,

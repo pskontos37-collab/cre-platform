@@ -54,7 +54,7 @@ export interface DealRow {
   notes: string | null
   layer: 1 | 2 | null
   selltoday: SellTodayConfig | null
-  properties: { name: string } | null
+  properties: { name: string; asset_type: string | null } | null
   waterfall_tiers: WaterfallTier[]
   preferred_equity_positions: DealPrefPosition[]
   capital_flows: CapitalFlowRow[]
@@ -66,7 +66,7 @@ export function useDeals() {
   return useQuery<DealRow[]>(async () => {
     const { data, error } = await supabase
       .from('deals')
-      .select('*, properties(name), waterfall_tiers(*), preferred_equity_positions(*), capital_flows(*), entity_investors(*)')
+      .select('*, properties(name, asset_type), waterfall_tiers(*), preferred_equity_positions(*), capital_flows(*), entity_investors(*)')
       .order('name')
     if (error) throw new Error(error.message)
     return (data ?? []) as unknown as DealRow[]

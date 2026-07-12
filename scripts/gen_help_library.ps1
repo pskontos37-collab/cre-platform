@@ -59,16 +59,33 @@ function Get-Mime([string]$ext) {
   }
 }
 
+# Property names (current + former + notable tenants). Files whose path matches
+# are dropped from the GENERIC categories. Per-property Emergency manuals and
+# M&J University training are KEPT regardless (user choice).
+$PROP = @(
+  'Bank Financial','Chapel Hills','Cherry Creek','East Gate','Gateway','Knightdale','Magnolia',
+  'Meridian Plaza','Miracle Mile','One East Erie','Outlets of Maui','Parker Ranch','Penn Center',
+  'Southlands','Waterfront','Mililani','Lakeside','Brentwood','Vinings','Algonquin','Freedom Commons',
+  'College Hills','Water Tower','Providence','Bolingbrook','Cascade Station','Oakbrook','Fishers District',
+  'Stanwix','4500CC','Nona Park','Peachtree','Hamilton Mill','Metro Commons','Parkwood','Park Lane',
+  'Oak Tree','Dunwoody','Lake Pointe','Kwench','One Bellevue','Water Tower Place','Providence Pavilion'
+)
+$PROP_RE = '(?i)(' + (($PROP | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')'
+$KEEP_PROP = @('Emergency & Life Safety','M&J University')   # keep property-specific here
+
 $collections = @()
 $uploads = @{}   # storageKey -> local K: full path (dedup)
+$removed = New-Object System.Collections.ArrayList
 
 $mdFiles = Get-ChildItem -LiteralPath $wikiRoot -Recurse -Filter *.md
 foreach ($md in $mdFiles) {
   $rel = $md.FullName.Substring($wikiRoot.Length).TrimStart('\')
   $top = ($rel -split '\\')[0]
   if (-not $CATEGORY.ContainsKey($top)) { continue }
+  $cat = $CATEGORY[$top]
+  $isUni = ($top -eq 'university')
+  $isEmg = ($top -eq 'emergency')
   $lines = [IO.File]::ReadAllLines($md.FullName, [Text.Encoding]::UTF8)
-  # frontmatter title
   $title = ($rel -replace '\\','/')
   foreach ($l in $lines) { if ($l -match '^title:\s*(.+)$') { $title = $matches[1].Trim(); break } }
 
@@ -80,33 +97,61 @@ foreach ($md in $mdFiles) {
   }
   foreach ($line in $lines) {
     if ($line -match '^##\s+(.+)$') { Flush; $curLabel = $matches[1].Trim(); $curItems = New-Object System.Collections.ArrayList; continue }
-    # NOTE: K: paths contain literal "(" ")" (the URL encoder leaves parens
-    # unescaped), so we cannot stop at the first ")". Match minimally up to the
-    # ")" that closes the markdown link - i.e. the one followed by a table pipe,
-    # a middot separator, the next link, or end-of-line.
+
+    # University + Emergency pages are tables whose first column is the entity
+    # (session name / property). The link text is just a date, so use col 1 to
+    # label that row's links.
+    $rowLabel = $null
+    if (($isUni -or $isEmg) -and $line -match '^\s*\|\s*(.+?)\s*\|') {
+      $c1 = $matches[1].Trim()
+      if ($c1 -and $c1 -notmatch '^[-\s]+$' -and $c1 -ne 'Session' -and $c1 -ne 'Property') { $rowLabel = $c1 }
+    }
+
     foreach ($m in [regex]::Matches($line, '\[([^\]]+)\]\(MEDIA_BASE/(.*?)\)(?=\s*(?:\||·|\[|$))')) {
-      $label = ($m.Groups[1].Value -replace '^[^A-Za-z0-9]+','').Trim()  # strip leading emoji
-      $enc   = $m.Groups[2].Value
-      $relPath = [uri]::UnescapeDataString($enc)
+      $raw = $m.Groups[1].Value
+      $relPath = [uri]::UnescapeDataString($m.Groups[2].Value)
       if ($BASE_PREFIX.ContainsKey($top)) { $relPath = $BASE_PREFIX[$top] + $relPath }
       $ext = [IO.Path]::GetExtension($relPath).ToLower()
-      $item = [ordered]@{ title = $label }
+
+      # drop folder-only links (a web app cannot open a K: folder)
+      if ($VIDEO -notcontains $ext -and $AUDIO -notcontains $ext -and $DOC -notcontains $ext) { continue }
+
+      # drop property-specific files from the generic categories
+      if ($KEEP_PROP -notcontains $cat -and $relPath -match $PROP_RE) {
+        [void]$removed.Add(("{0}  |  {1}" -f $cat, [IO.Path]::GetFileName($relPath))); continue
+      }
+
+      if ($rowLabel -and ($isUni -or $isEmg)) {
+        if ($isUni) {
+          $mat = if ($raw -match 'Recording') { 'Recording' } elseif ($raw -match 'Audio') { 'Audio' } elseif ($raw -match 'Slides') { 'Slides' } else { 'Material' }
+        } else {
+          $mat = if ($relPath -match '(?i)active.?shooter') { 'Active-Shooter Training' } else { 'Emergency Manual' }
+        }
+        $lbl = ($rowLabel + ' - ' + $mat)
+      } else {
+        $lbl = ($raw -replace '^[^A-Za-z0-9]+','').Trim()   # strip leading emoji
+      }
+
+      $item = [ordered]@{ title = $lbl }
       if ($VIDEO -contains $ext) { $item.kind='video'; $item.loc=$relPath }
       elseif ($AUDIO -contains $ext) { $item.kind='audio'; $item.loc=$relPath }
-      elseif ($DOC -contains $ext) {
+      else {
         $key = 'forms/help/lib/' + (Md5Hash $relPath) + $ext
-        $item.kind='doc'; $item.key=$key; $item.pdf = ($ext -eq '.pdf')
-        $item.file = [IO.Path]::GetFileName($relPath)
+        $item.kind='doc'; $item.key=$key; $item.pdf = ($ext -eq '.pdf'); $item.file = [IO.Path]::GetFileName($relPath)
         if (-not $uploads.ContainsKey($key)) { $uploads[$key] = ($KM + '\' + ($relPath -replace '/','\')) }
       }
-      else { $item.kind='folder'; $item.loc=$relPath }   # link to a folder of handouts
       [void]$curItems.Add($item)
     }
   }
   Flush
   if ($groups.Count -eq 0) { continue }
-  $collections += [ordered]@{ category=$CATEGORY[$top]; key=($rel -replace '\\','/' -replace '\.md$',''); title=$title; groups=@($groups) }
+  $collections += [ordered]@{ category=$cat; key=($rel -replace '\\','/' -replace '\.md$',''); title=$title; groups=@($groups) }
 }
+
+# removal report (so the excluded property-specific files can be reviewed)
+$repPath = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'removed-property-specific.txt')
+(($removed | Sort-Object) -join "`r`n") | Out-File -FilePath $repPath -Encoding utf8
+Write-Host ("Removed as property-specific: {0}  (see {1})" -f $removed.Count, $repPath)
 
 # ---- write JSON ----
 $catOrder = 'Policy Manual','M&J University','Forms & Templates','Emergency & Life Safety','Departments'
