@@ -10,7 +10,7 @@ import {
   useDealTeamMembers, type TeamMember,
   createPartner, updatePartner, deletePartner, type PartnerInput,
   openDiligence, unlinkDiligence, sendDocToDiligence,
-  pipelineMetrics,
+  pipelineMetrics, fetchDeckExtras,
   BOARD_STAGES, ALL_STAGES, STAGE_LABEL, STAGE_HUE, boardColumn, isTerminal, STAGE_PROB,
   RISK_ORDER, RISK_LABEL, RISK_COLOR, ASSET_ORDER, ASSET_LABEL, ASSET_MONO, ASSET_COLOR,
   LP_STATUS_ORDER, LP_STATUS_LABEL, PARTNER_TIER_LABEL,
@@ -854,13 +854,30 @@ function MeetingDeckButton({ deals, preparedBy }: { deals: Deal[]; preparedBy: s
       filename={`Wilkow-Pipeline-Review-${today.toISOString().slice(0, 10)}.pptx`}
       title="Generate the weekly acquisitions meeting deck — every deal in the pipeline (editable PowerPoint)"
       build={async () => {
-        const { buildPipelineMeetingDeck } = await import('../reports/PipelineMeetingDeck')
+        const [{ buildPipelineMeetingDeck }, { openPdf }] = await Promise.all([
+          import('../reports/PipelineMeetingDeck'),
+          import('../lib/pdfRender'),
+        ])
+        // Gather embedded assets: linked site-plan PDFs rendered to images + the
+        // OM-extracted tenant roster / occupancy (from om_intake.extracted).
+        const extrasData = await fetchDeckExtras(deals.map(d => d.id))
+        const sitePlanImgs: Record<string, { data: string; w: number; h: number }> = {}
+        for (const sp of extrasData.sitePlans) {
+          try {
+            const pdfDoc = await openPdf(sp.url)
+            const canvas = document.createElement('canvas')
+            const { width, height } = await pdfDoc.renderPage(1, canvas, 1400)
+            sitePlanImgs[sp.dealId] = { data: canvas.toDataURL('image/jpeg', 0.72), w: width, h: height }
+            pdfDoc.destroy()
+          } catch (e) { console.warn('[meeting-deck] site-plan render failed', sp.dealId, e) }
+        }
         return buildPipelineMeetingDeck({
           deals,
           metrics: pipelineMetrics(deals),
           preparedBy,
           meetingDate,
           generatedAt: today.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }),
+          extras: { sitePlanImgs, tenants: extrasData.tenants, occupancy: extrasData.occupancy },
         })
       }}
     />

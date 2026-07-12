@@ -732,6 +732,60 @@ export async function createDealFromExtraction(
   return dealId
 }
 
+// ── meeting-deck extras (site plans + OM-extracted tenancy) ──────────────────
+export interface DeckTenant { name: string; sf: number | null; expiration: string | null }
+export interface DeckExtras {
+  /** one site-plan PDF per deal, signed for rendering */
+  sitePlans: { dealId: string; url: string; title: string | null }[]
+  tenants: Record<string, DeckTenant[]>
+  occupancy: Record<string, number | null>
+}
+
+/**
+ * Gather the assets the meeting deck embeds but that don't live on the deal
+ * record: the linked site-plan PDF (signed) and the OM-extracted tenant roster +
+ * occupancy (stored on om_intake.extracted by scripts/enrich_deals.ps1).
+ */
+export async function fetchDeckExtras(dealIds: string[]): Promise<DeckExtras> {
+  const out: DeckExtras = { sitePlans: [], tenants: {}, occupancy: {} }
+  if (!dealIds.length) return out
+
+  // ── site plans: one per deal (smallest linked site_plan = the clean plan) ──
+  const { data: sp } = await supabase.from('pipeline_deal_documents')
+    .select('deal_id, role, documents(title, storage_path, file_size_bytes)')
+    .in('deal_id', dealIds).eq('role', 'site_plan')
+  const byDeal = new Map<string, any>()
+  for (const r of (sp ?? []) as any[]) {
+    if (!r.documents?.storage_path) continue
+    const prev = byDeal.get(r.deal_id)
+    if (!prev || (r.documents.file_size_bytes ?? 0) < (prev.documents.file_size_bytes ?? Infinity)) byDeal.set(r.deal_id, r)
+  }
+  const paths = [...byDeal.values()].map(r => r.documents.storage_path)
+  const signed = new Map<string, string>()
+  if (paths.length) {
+    const { data: s } = await supabase.storage.from('documents').createSignedUrls(paths, 3600)
+    for (const it of s ?? []) if (it.path && it.signedUrl) signed.set(it.path, it.signedUrl)
+  }
+  for (const [dealId, r] of byDeal) {
+    const url = signed.get(r.documents.storage_path)
+    if (url) out.sitePlans.push({ dealId, url, title: r.documents.title ?? null })
+  }
+
+  // ── tenants + occupancy from om_intake.extracted ──
+  const { data: om } = await supabase.from('om_intake').select('deal_id, extracted').in('deal_id', dealIds)
+  for (const r of (om ?? []) as any[]) {
+    const ex = r.extracted
+    if (!r.deal_id || !ex) continue
+    if (Array.isArray(ex.major_tenants) && ex.major_tenants.length) {
+      const roster: DeckTenant[] = ex.major_tenants.map((t: any) => ({ name: String(t.name ?? '—'), sf: t.sf != null ? Number(t.sf) : null, expiration: t.expiration ?? null }))
+      // keep the richest roster if multiple om_intake rows exist for the deal
+      if (!out.tenants[r.deal_id] || roster.length > out.tenants[r.deal_id].length) out.tenants[r.deal_id] = roster
+    }
+    if (ex.occupancy != null && out.occupancy[r.deal_id] == null) out.occupancy[r.deal_id] = Number(ex.occupancy)
+  }
+  return out
+}
+
 // ── metrics ──────────────────────────────────────────────────────────────────
 export interface PipelineMetrics {
   activeCount: number; activeVolume: number; weighted: number; activeSf: number

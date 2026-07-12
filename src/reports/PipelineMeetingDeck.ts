@@ -12,12 +12,20 @@ import { isActiveStage, boardColumn } from '../hooks/usePipeline'
 // Summary table(s) → one discussion slide per active deal (hottest stage first)
 // → Watchlist appendix. Generated client-side with pptxgenjs (dynamic import).
 
+export interface DeckTenant { name: string; sf: number | null; expiration: string | null }
 export interface MeetingDeckInput {
   deals: Deal[]            // the full pipeline — this module sorts/sections internally
   metrics: PipelineMetrics
   preparedBy: string
   meetingDate: string      // e.g. 'July 11, 2026'
   generatedAt: string      // display timestamp for the cover
+  /** Embedded assets gathered by the caller (site-plan images pre-rendered to
+   *  data-URIs, OM-extracted tenant rosters + occupancy). All optional. */
+  extras?: {
+    sitePlanImgs?: Record<string, { data: string; w: number; h: number }>
+    tenants?: Record<string, DeckTenant[]>
+    occupancy?: Record<string, number | null>
+  }
 }
 
 // palette sampled from the firm's Investment Summary deck (hex without # for pptxgenjs)
@@ -98,6 +106,19 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
   const watchDeals = input.deals.filter(d => d.stage === 'tracking')
   const ordered = [...boardDeals].sort((a, b) =>
     (STAGE_RANK[a.stage] ?? 4) - (STAGE_RANK[b.stage] ?? 4) || (b.askPrice ?? 0) - (a.askPrice ?? 0))
+
+  // A deal gets a companion Site Plan & Tenancy slide when we have either asset.
+  const hasCompanion = (d: Deal): boolean =>
+    !!input.extras?.sitePlanImgs?.[d.id] || !!(input.extras?.tenants?.[d.id]?.length)
+
+  // Pre-compute slide indices so the Pipeline Summary can hyperlink each deal to
+  // its discussion slide. Layout order: cover(1) · snapshot(2) · S summary pages ·
+  // then per deal: discussion slide (+ optional companion slide) · watchlist.
+  const PER_PAGE = 17
+  const S = Math.max(1, Math.ceil(ordered.length / PER_PAGE))
+  const discussionNo: Record<string, number> = {}
+  { let slide = 2 + S
+    for (const d of ordered) { slide += 1; discussionNo[d.id] = slide; if (hasCompanion(d)) slide += 1 } }
 
   let pageNo = 0
   const footer = (s: any) => {
@@ -207,18 +228,16 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
 
   // ── 3. Pipeline Summary table(s) ────────────────────────────────────────────
   {
-    const PER_PAGE = 17
-    const pages = Math.max(1, Math.ceil(ordered.length / PER_PAGE))
     const cols = ['Deal', 'Market', 'Profile', 'Guidance', 'Cap', 'Stage', 'Lead', 'Next / status']
     const colW = [2.4, 1.55, 1.4, 1.1, 0.6, 1.2, 0.6, 1.25]
-    for (let pg = 0; pg < pages; pg++) {
+    for (let pg = 0; pg < S; pg++) {
       const slice = ordered.slice(pg * PER_PAGE, (pg + 1) * PER_PAGE)
-      const s = bodySlide(pages > 1 ? `Pipeline Summary (${pg + 1}/${pages})` : 'Pipeline Summary', 'All active deals, hottest first')
+      const s = bodySlide(S > 1 ? `Pipeline Summary (${pg + 1}/${S})` : 'Pipeline Summary', 'All active deals, hottest first — click a name to jump to its slide')
       const rows: any[] = [cols.map((c, i) => ({ text: c, options: { bold: true, color: 'FFFFFF', fill: { color: STEEL }, align: i >= 3 && i <= 4 ? 'right' : 'left' } }))]
       slice.forEach((d, i) => {
         const bg = i % 2 ? ROW_B : ROW_A
         rows.push([
-          { text: d.name, options: { color: TEXT, bold: true, fill: { color: bg } } },
+          { text: d.name, options: { color: NAVY, bold: true, fill: { color: bg }, hyperlink: { slide: discussionNo[d.id] } } },
           { text: loc(d) || '—', options: { color: TEXT, fill: { color: bg } } },
           { text: profileLabel(d), options: { color: TEXT, fill: { color: bg } } },
           { text: priceShort(d), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
@@ -236,6 +255,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
   for (const d of ordered) {
     pageNo++
     const s = pptx.addSlide()
+    const occ = input.extras?.occupancy?.[d.id] ?? null
     // header: name + location/profile subtitle + stage chip
     s.addText(d.name, { x: 0.45, y: 0.26, w: 7.6, h: 0.5, fontFace: SERIF, fontSize: 24, bold: true, color: STEEL, underline: true })
     s.addText(
@@ -267,7 +287,8 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
       { text: '     Exit cap ', options: { color: MUTED } }, { text: pct(d.exitCap), options: { color: TEXT, bold: true } },
       { text: '     Stabilized yield ', options: { color: MUTED } }, { text: pct(d.stabilizedYield), options: { color: TEXT, bold: true } },
       { text: '     Total cap. ', options: { color: MUTED } }, { text: fmtM(d.totalCapitalization ?? d.askPrice), options: { color: TEXT, bold: true } },
-    ], { x: 0.47, y: 2.2, w: 10.1, h: 0.3, fontFace: SERIF, fontSize: 11.5 })
+      ...(occ != null ? [{ text: '     Occupancy ', options: { color: MUTED } }, { text: pct(occ), options: { color: TEXT, bold: true } }] : []),
+    ], { x: 0.47, y: 2.2, w: 10.1, h: 0.3, fontFace: SERIF, fontSize: 11 })
 
     // ── left column: property & deal facts ──
     const facts: [string, string][] = [
@@ -335,6 +356,44 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
         : []),
       { text: teamLabel(d), options: { color: MUTED, breakLine: true } },
     ], { x: rx + 0.12, y: 6.48, w: rw - 0.24, h: 0.95, fontFace: SERIF, fontSize: 10.5, valign: 'top', lineSpacingMultiple: 1.15 })
+
+    // ── companion slide: site plan (rendered image) + tenant roster ──
+    const img = input.extras?.sitePlanImgs?.[d.id]
+    const tlist = input.extras?.tenants?.[d.id] ?? []
+    if (img || tlist.length) {
+      const sp = bodySlide(`${d.name} — Site Plan & Tenancy`, 'Reference')
+      const hasImg = !!img
+      if (img) {
+        const box = { x: 0.45, y: 1.25, w: 6.0, h: 6.45 }
+        const ratio = img.w / img.h
+        let dw = box.w, dh = box.w / ratio
+        if (dh > box.h) { dh = box.h; dw = box.h * ratio }
+        const ix = box.x + (box.w - dw) / 2, iy = box.y + (box.h - dh) / 2
+        sp.addShape(pptx.ShapeType.rect, { x: box.x, y: box.y, w: box.w, h: box.h, fill: { color: ROW_B }, line: { color: ROW_A, width: 1 } })
+        sp.addImage({ data: img.data, x: ix, y: iy, w: dw, h: dh })
+        if (img.title) sp.addText(img.title, { x: box.x, y: 7.72, w: box.w, h: 0.28, fontFace: SANS, fontSize: 8, italic: true, color: MUTED, align: 'center' } as any)
+      }
+      const tx = hasImg ? 6.7 : 0.45
+      const tw = hasImg ? 3.85 : 10.1
+      sp.addText([
+        { text: 'Occupancy ', options: { color: MUTED } }, { text: pct(occ), options: { color: TEXT, bold: true } },
+        { text: '     GLA ', options: { color: MUTED } }, { text: d.glaSf != null ? Math.round(d.glaSf).toLocaleString() + ' SF' : '—', options: { color: TEXT, bold: true } },
+      ], { x: tx, y: 1.25, w: tw, h: 0.3, fontFace: SERIF, fontSize: 11 })
+      if (tlist.length) {
+        const tRows: any[] = [
+          ['Tenant', 'SF', 'Expiry'].map((h, i) => ({ text: h, options: { bold: true, color: 'FFFFFF', fill: { color: STEEL }, align: i ? 'right' : 'left' } })),
+          ...tlist.slice(0, 15).map((t, i) => [
+            { text: t.name, options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
+            { text: t.sf != null ? Math.round(t.sf).toLocaleString() : '—', options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A }, align: 'right' } },
+            { text: t.expiration ?? '—', options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A }, align: 'right' } },
+          ]),
+        ]
+        sp.addTable(tRows, { x: tx, y: 1.62, w: tw, colW: hasImg ? [2.15, 0.9, 0.8] : [5.5, 2.3, 2.3], fontFace: SERIF, fontSize: 10, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.32, valign: 'middle', margin: 0.04 })
+      } else {
+        sp.addText('Tenant roster not captured from the OM.', { x: tx, y: 1.66, w: tw, h: 0.3, fontFace: SERIF, fontSize: 10.5, italic: true, color: MUTED })
+      }
+      if (!hasImg) sp.addText('Site plan not available for this property.', { x: 0.45, y: 7.5, w: 10.1, h: 0.3, fontFace: SERIF, fontSize: 10.5, italic: true, color: MUTED })
+    }
   }
 
   // ── 5. Watchlist appendix ───────────────────────────────────────────────────
