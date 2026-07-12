@@ -409,7 +409,7 @@ export function PortfolioSnapshotReport(p: PortfolioSnapshotInput) {
                   <Text style={{ width: 40, textAlign: 'right', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: BAND_COLOR[h.band] }}>{pct1(h.ratio)}</Text>
                 </View>
               ))}
-              <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 3 }}>Healthy ≤10% · Watch 10–15% · High &gt;15% (general-retail screen). * rent-only — recoveries not yet loaded, so cost is a floor.</Text>
+              <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 3 }}>Healthy &lt;=10% · Watch 10-15% · High &gt;15% (general-retail screen). * rent-only — recoveries not yet loaded, so cost is a floor.</Text>
             </View>
           </View>
         </View>
