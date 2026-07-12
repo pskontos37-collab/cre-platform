@@ -55,7 +55,11 @@ export function DiligencePage() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* alignSelf:start keeps this column at its natural height. Without it the
+            grid stretches it to the (taller) workspace column, the two Widgets'
+            height:100% makes them split that height, and the deal list gets
+            clipped by the card's overflow:hidden. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignSelf: 'start' }}>
           <NewDealForm onCreated={id => { setBump(b => b + 1); setSelectedDeal(id) }} />
           <Widget title="Deals in diligence" chip={`${deals.data?.length ?? 0}`}>
             {deals.loading && <WidgetSkeleton rows={4} />}
