@@ -392,7 +392,13 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
       } else {
         sp.addText('Tenant roster not captured from the OM.', { x: tx, y: 1.66, w: tw, h: 0.3, fontFace: SERIF, fontSize: 10.5, italic: true, color: MUTED })
       }
-      if (!hasImg) sp.addText('Site plan not available for this property.', { x: 0.45, y: 7.5, w: 10.1, h: 0.3, fontFace: SERIF, fontSize: 10.5, italic: true, color: MUTED })
+      if (!hasImg) sp.addText('Site plan not available for this property.', { x: 0.45, y: 7.42, w: 10.1, h: 0.3, fontFace: SERIF, fontSize: 10.5, italic: true, color: MUTED })
+      // provenance footnote — tenants / occupancy / pricing come from the broker OM
+      if (tlist.length) {
+        const note = 'Tenants, occupancy & pricing are AI-extracted from the broker offering memorandum — verify against the rent roll before relying.'
+        if (hasImg) sp.addText(note, { x: tx, y: 7.3, w: tw, h: 0.65, fontFace: SANS, fontSize: 7.5, italic: true, color: MUTED, valign: 'bottom' })
+        else sp.addText(note, { x: 0.45, y: 7.68, w: 10.1, h: 0.3, fontFace: SANS, fontSize: 8, italic: true, color: MUTED })
+      }
     }
   }
 
