@@ -376,6 +376,8 @@ export interface CriticalDateRow {
   daysUntil: number
   loanId: string | null
   leaseId: string | null
+  status: string
+  requiresLandlordReminder: boolean
 }
 
 export function useCriticalDates(propertyIds: string[], propertyNames: Record<string, string>, days = 90) {
@@ -388,7 +390,7 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
 
     const { data, error } = await supabase
       .from('critical_dates')
-      .select('id, property_id, lease_id, loan_id, date_type, due_date, description')
+      .select('id, property_id, lease_id, loan_id, date_type, due_date, description, status, requires_landlord_reminder')
       .in('property_id', propertyIds)
       .eq('is_completed', false)
       .gte('due_date', today.toISOString().split('T')[0])
@@ -409,6 +411,8 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
       daysUntil:    Math.ceil((new Date(row.due_date).getTime() - today.getTime()) / 86_400_000),
       loanId:       row.loan_id,
       leaseId:      row.lease_id,
+      status:       row.status ?? 'open',
+      requiresLandlordReminder: row.requires_landlord_reminder ?? false,
     }))
   }, [propertyIds.join(','), JSON.stringify(propertyNames), days])
 }

@@ -19,13 +19,44 @@ const DATE_LABELS: Record<string, string> = {
   other:                  'Other',
 }
 
-// Resolving removes the item from the widget (query filters is_completed=false).
-const RESOLUTIONS = [
-  { value: 'completed', label: 'Completed' },
-  { value: 'exercised', label: 'Exercised' },
-  { value: 'received',  label: 'Received' },
-  { value: 'waived',    label: 'Waived' },
-]
+// Resolution choices are contextual to the date type. Choosing one closes the
+// item (drops off the widget, which filters is_completed=false) unless keepsOpen
+// — e.g. a tax appeal marked "In progress" stays visible. needsReason prompts
+// for a note (stored in critical_dates.resolution_note) before writing.
+type StatusOpt = { value: string; label: string; needsReason?: boolean; keepsOpen?: boolean }
+
+const STATUS_OPTIONS: Record<string, StatusOpt[]> = {
+  option_notice_deadline: [
+    { value: 'exercised', label: 'Exercised' },
+    { value: 'lapsed',    label: 'Lapsed' },
+    { value: 'waived',    label: 'Waived', needsReason: true },
+    { value: 'ignored',   label: 'Ignored', needsReason: true },
+  ],
+  lease_expiration: [
+    { value: 'renewed',   label: 'Renewed' },
+    { value: 'moved_out', label: 'Moved out' },
+  ],
+  rent_commencement: [{ value: 'completed', label: 'Completed' }],
+  free_rent_end:     [{ value: 'completed', label: 'Completed' }],
+  escalation:        [{ value: 'completed', label: 'Completed' }],
+  loan_maturity:     [{ value: 'ok', label: 'OK' }],
+  tax_appeal_deadline: [
+    { value: 'completed',   label: 'Completed' },
+    { value: 'in_progress', label: 'In progress', keepsOpen: true },
+  ],
+  inspection_due: [
+    { value: 'ok',     label: 'OK' },
+    { value: 'waived', label: 'Waived', needsReason: true },
+  ],
+  other: [
+    { value: 'completed', label: 'Completed' },
+    { value: 'approved',  label: 'Approved' },
+    { value: 'ignored',   label: 'Ignored', needsReason: true },
+    { value: 'waived',    label: 'Waived', needsReason: true },
+  ],
+}
+const DEFAULT_STATUS_OPTIONS: StatusOpt[] = [{ value: 'completed', label: 'Completed' }]
+const optionsFor = (dateType: string): StatusOpt[] => STATUS_OPTIONS[dateType] ?? DEFAULT_STATUS_OPTIONS
 
 function toCalendarEvent(row: CriticalDateRow): CalendarEvent {
   const label = DATE_LABELS[row.dateType] ?? row.dateType
@@ -58,18 +89,32 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
   const { data, loading, error, refetch } = useCriticalDates(effectiveIds, propertyNames, days)
   const [busy, setBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  // A resolution that needs a reason parks here until the manager types one.
+  const [pending, setPending] = useState<{ rowId: string; opt: StatusOpt } | null>(null)
+  const [reason, setReason] = useState('')
   const rows = data ?? []
   const visible = expanded ? rows : rows.slice(0, COLLAPSED)
 
-  async function resolve(row: CriticalDateRow, status: string) {
+  async function applyStatus(row: CriticalDateRow, opt: StatusOpt, note: string | null) {
     setBusy(row.id); setActionError(null)
-    const { error: err } = await supabase
-      .from('critical_dates')
-      .update({ status, is_completed: true, completed_date: new Date().toISOString().slice(0, 10) })
-      .eq('id', row.id)
-    setBusy(null)
+    const patch: Record<string, unknown> = { status: opt.value, resolution_note: note }
+    // keepsOpen (e.g. tax appeal "In progress") records the status but leaves the
+    // item on the list; every other choice closes it.
+    if (!opt.keepsOpen) {
+      patch.is_completed = true
+      patch.completed_date = new Date().toISOString().slice(0, 10)
+    }
+    const { error: err } = await supabase.from('critical_dates').update(patch).eq('id', row.id)
+    setBusy(null); setPending(null); setReason('')
     if (err) setActionError(`Couldn't update: ${err.message}`)
     else refetch()
+  }
+
+  function chooseStatus(row: CriticalDateRow, value: string) {
+    const opt = optionsFor(row.dateType).find(o => o.value === value)
+    if (!opt) return
+    if (opt.needsReason) { setPending({ rowId: row.id, opt }); setReason('') }
+    else void applyStatus(row, opt, null)
   }
 
   return (
@@ -104,16 +149,17 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
             <div
               key={row.id}
               style={{
-                display:      'flex',
-                alignItems:   'flex-start',
-                gap:          10,
-                padding:      '8px 10px',
-                background:   'var(--surface-2)',
-                borderRadius: 7,
-                border:       `1px solid ${urgencyBorder(row.daysUntil)}`,
-                opacity:      busy === row.id ? 0.5 : 1,
+                display:       'flex',
+                flexDirection: 'column',
+                gap:           6,
+                padding:       '8px 10px',
+                background:    'var(--surface-2)',
+                borderRadius:  7,
+                border:        `1px solid ${urgencyBorder(row.daysUntil)}`,
+                opacity:       busy === row.id ? 0.5 : 1,
               }}
             >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
               <div style={{ minWidth: 36, textAlign: 'center', paddingTop: 2 }}>
                 <div style={{ fontSize: 16, fontWeight: 800, color: urgencyColor(row.daysUntil), lineHeight: 1 }}>
                   {row.daysUntil}
@@ -130,16 +176,30 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
                   </Link>
                   {' '}· due {row.dueDate}
                 </div>
+                {/* Landlord reminder-notice provision: this lease obliges the
+                    landlord to remind the tenant before the option window — flag
+                    it so the manager prepares a notice to tenant. */}
+                {row.requiresLandlordReminder && row.dateType === 'option_notice_deadline' && (
+                  <div style={{ marginTop: 5 }}>
+                    <Badge variant="blue">⚑ Prepare tenant notice</Badge>
+                  </div>
+                )}
+                {row.status === 'in_progress' && (
+                  <div style={{ marginTop: 5 }}>
+                    <Badge variant="amber">In progress</Badge>
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
                 <Badge variant={urgencyBadge(row.daysUntil)}>
                   {DATE_LABELS[row.dateType] ?? row.dateType}
                 </Badge>
-                {/* Resolve: choosing a status removes the item from the list */}
+                {/* Resolve: options are contextual to the date type. A choice that
+                    needs a reason opens the note row below; others write directly. */}
                 <select
                   value=""
                   disabled={busy === row.id}
-                  onChange={e => { if (e.target.value) void resolve(row, e.target.value) }}
+                  onChange={e => { if (e.target.value) chooseStatus(row, e.target.value) }}
                   title="Mark this date resolved"
                   style={{
                     fontSize:     10,
@@ -153,7 +213,7 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
                   }}
                 >
                   <option value="">Mark ▾</option>
-                  {RESOLUTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  {optionsFor(row.dateType).map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
                 {/* Add to calendar: all-day event on the due date with a 1-week reminder */}
                 <select
@@ -177,6 +237,46 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
                   <option value="ics">.ics file</option>
                 </select>
               </div>
+              </div>
+              {/* Reason capture for ignored / waived resolutions */}
+              {pending?.rowId === row.id && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 46 }}>
+                  <input
+                    autoFocus
+                    value={reason}
+                    onChange={e => setReason(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && reason.trim()) void applyStatus(row, pending.opt, reason.trim())
+                      if (e.key === 'Escape') { setPending(null); setReason('') }
+                    }}
+                    placeholder={`Reason for "${pending.opt.label}"…`}
+                    style={{
+                      flex: 1, fontSize: 11, color: 'var(--text)', background: 'var(--surface)',
+                      border: '1px solid var(--border-2)', borderRadius: 6, padding: '4px 7px', outline: 'none',
+                    }}
+                  />
+                  <button
+                    disabled={!reason.trim() || busy === row.id}
+                    onClick={() => { if (reason.trim()) void applyStatus(row, pending.opt, reason.trim()) }}
+                    style={{
+                      fontSize: 10.5, fontWeight: 600, color: 'var(--accent)', background: 'var(--accent-dim)',
+                      border: '1px solid var(--accent)', borderRadius: 6, padding: '4px 9px',
+                      cursor: reason.trim() ? 'pointer' : 'not-allowed', opacity: reason.trim() ? 1 : 0.5,
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setPending(null); setReason('') }}
+                    style={{
+                      fontSize: 10.5, color: 'var(--text-muted)', background: 'var(--surface)',
+                      border: '1px solid var(--border-2)', borderRadius: 6, padding: '4px 9px', cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
           ))}
           <ExpandToggle

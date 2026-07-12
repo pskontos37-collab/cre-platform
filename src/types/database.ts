@@ -170,6 +170,8 @@ export interface LeaseOption {
   term_if_exercised_months: number | null
   rent_at_exercise: string | null
   is_exercised: boolean
+  requires_landlord_reminder: boolean
+  landlord_reminder_note: string | null
   notes: string | null
   created_at: string
 }
@@ -212,6 +214,12 @@ export interface CriticalDate {
   due_date: string
   description: string | null
   is_completed: boolean
+  status: string
+  resolution_note: string | null
+  requires_landlord_reminder: boolean
+  completed_date: string | null
+  completed_by: string | null
+  auto_source: string | null
   alert_days_before: number[] | null
   created_at: string
 }
