@@ -83,7 +83,7 @@ export function PortfolioInvestorReturnsWidget({
 
   return (
     <Widget
-      title="Investor Returns — JV Layer 1"
+      title="Investor Returns"
       href="/waterfall"
       chip={
         <span style={{ display: 'flex', gap: 6 }}>

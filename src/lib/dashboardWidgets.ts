@@ -30,7 +30,7 @@ export const WIDGET_DEFS: DashboardWidgetDef[] = [
   { key: 'opex',          label: 'Operating Expenses',            section: 'financial',   def: true },
   { key: 'dscr',          label: 'Debt Service Coverage',         section: 'financial',   def: true },
   { key: 'top_vendors',   label: 'Top Vendors',                   section: 'financial',   def: true },
-  { key: 'investor_returns', label: 'Investor Returns (Realized)', section: 'financial',  def: true },
+  { key: 'investor_returns', label: 'Investor Returns', section: 'financial',  def: true },
 
   { key: 'ar',            label: 'Accounts Receivable',           section: 'receivables', def: true },
   { key: 'delinquency',   label: 'Delinquency Tracker',           section: 'receivables', def: true },
