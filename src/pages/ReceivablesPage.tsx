@@ -2,7 +2,7 @@ import { useMemo, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds, usePropertyNameMap } from '../hooks/useFilteredPropertyIds'
-import { useArAging, useArDetail, useArNotes, useArContacts, normalizeTenantName, type ArAgingRow, type ArFollowUpContact } from '../hooks/useArAging'
+import { useArAging, useArDetail, useArNotes, useArContacts, normalizeTenantName, type ArAgingRow, type ArDetailLine, type ArFollowUpContact } from '../hooks/useArAging'
 import { useReaAgreements } from '../hooks/useRea'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -388,6 +388,9 @@ function TenantRow({ row, open, note, isRea, contacts, onToggle }: {
   contacts: ArFollowUpContact[]
   onToggle: (bucket: BucketKey | 'all') => void
 }) {
+  // Invoice lines feed both the composition graphic and the line table below
+  // it — fetched once, lazily, only while the row is expanded.
+  const { data: detailLines, loading: detailLoading, error: detailError } = useArDetail(open != null ? row.id : null)
   const worst = row.b120 > 0.005 ? BUCKETS[4] : row.b90 > 0.005 ? BUCKETS[3] : row.b60 > 0.005 ? BUCKETS[2] : row.b30 > 0.005 ? BUCKETS[1] : BUCKETS[0]
   const bucketCell = (key: BucketKey, v: number, color?: string) => (
     <td
@@ -480,20 +483,9 @@ function TenantRow({ row, open, note, isRea, contacts, onToggle }: {
                 )}
               </div>
             )}
-            <DetailLines row={row} bucket={open} onBucket={b => onToggle(b)} />
-            <div style={{ fontSize: 9.5, fontWeight: 650, letterSpacing: '0.14em', textTransform: 'uppercase', color: WILKOW_MIST, margin: '12px 0 8px' }}>
-              Balance by Income Category{row.mriLeaseId ? ` · MRI lease ${row.mriLeaseId}` : ''}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 6 }}>
-              {row.categories.map(c => (
-                <div key={c.code} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 11.5, padding: '5px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6 }}>
-                  <span style={{ color: 'var(--text-muted)' }}>
-                    <span style={{ fontWeight: 650, color: 'var(--text)', marginRight: 6 }}>{c.code}</span>{c.desc}
-                  </span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: c.total < 0 ? '#65bc7b' : 'var(--text)' }}>{fmtCents(c.total)}</span>
-                </div>
-              ))}
-              {row.categories.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>No category detail on this row</span>}
+            <CategoryAgedBars row={row} lines={detailLines ?? []} onBucket={b => onToggle(b)} />
+            <div style={{ marginTop: 14 }}>
+              <DetailLines lines={detailLines ?? []} loading={detailLoading} error={detailError} bucket={open} onBucket={b => onToggle(b)} />
             </div>
           </td>
         </tr>
@@ -502,11 +494,107 @@ function TenantRow({ row, open, note, isRea, contacts, onToggle }: {
   )
 }
 
+// "Balance with detail": what the outstanding balance is made of (one bar per
+// income category) and how old each piece is (segments = aging buckets, same
+// palette as the property composition bars). Bar lengths are scaled to the
+// largest category. Clicking a segment filters the invoice lines below to that
+// bucket. While invoice lines are still loading (or absent for a row), falls
+// back to solid single-color bars from the row's category totals.
+function CategoryAgedBars({ row, lines, onBucket }: {
+  row: ArAgingRow
+  lines: ArDetailLine[]
+  onBucket: (b: BucketKey | 'all') => void
+}) {
+  type CatBar = { code: string; desc: string; total: number; buckets: Record<BucketKey, number> }
+  const emptyBuckets = (): Record<BucketKey, number> => ({ current: 0, b30: 0, b60: 0, b90: 0, b120: 0 })
+
+  const aged = lines.length > 0
+  let list: CatBar[]
+  if (aged) {
+    const m = new Map<string, CatBar>()
+    for (const l of lines) {
+      const code = l.category ?? '—'
+      const e = m.get(code) ?? { code, desc: l.categoryDesc ?? code, total: 0, buckets: emptyBuckets() }
+      e.total += l.amount
+      e.buckets[l.bucket] += l.amount
+      m.set(code, e)
+    }
+    list = Array.from(m.values())
+  } else {
+    list = row.categories.map(c => ({ code: c.code, desc: c.desc, total: c.total, buckets: emptyBuckets() }))
+  }
+  list.sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+  if (list.length === 0) return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>No category detail on this row</span>
+
+  // Bars are sized on positive (owed) amounts; credits show as green totals.
+  const posOf = (c: CatBar) => aged
+    ? BUCKETS.reduce((s, b) => s + Math.max(c.buckets[b.key], 0), 0)
+    : Math.max(c.total, 0)
+  const maxPos = Math.max(...list.map(posOf))
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 9.5, fontWeight: 650, letterSpacing: '0.14em', textTransform: 'uppercase', color: WILKOW_MIST }}>
+          Balance Composition{row.mriLeaseId ? ` · MRI lease ${row.mriLeaseId}` : ''}
+        </span>
+        {aged && BUCKETS.map(b => (
+          <span key={b.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: 'var(--text-faint)' }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: b.color, display: 'inline-block' }} />
+            {b.label}
+          </span>
+        ))}
+        {aged && <span style={{ fontSize: 9.5, color: 'var(--text-faint)' }}>click a segment to filter the invoice lines</span>}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {list.map(c => {
+          const p = posOf(c)
+          return (
+            <div key={c.code} style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 210px) 1fr 96px', gap: 10, alignItems: 'center' }}>
+              <span title={`${c.code} · ${c.desc}`} style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <span style={{ fontWeight: 650, color: 'var(--text)', marginRight: 6 }}>{c.code}</span>{c.desc}
+              </span>
+              <div style={{ height: 13, background: 'var(--surface-2)', borderRadius: 4, overflow: 'hidden' }}>
+                {p > 0.005 && maxPos > 0 && (
+                  <div style={{ display: 'flex', height: '100%', width: `${(p / maxPos) * 100}%`, minWidth: 3 }}>
+                    {aged
+                      ? BUCKETS.map(b => {
+                          const v = Math.max(c.buckets[b.key], 0)
+                          if (v <= 0.005) return null
+                          return (
+                            <div
+                              key={b.key}
+                              onClick={e => { e.stopPropagation(); onBucket(b.key) }}
+                              title={`${c.code} · ${b.label}: ${fmtCents(v)} — click to filter invoice lines`}
+                              style={{ width: `${(v / p) * 100}%`, background: b.color, minWidth: 2, cursor: 'pointer' }}
+                            />
+                          )
+                        })
+                      : <div style={{ width: '100%', background: WILKOW, opacity: 0.55 }} />}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontSize: 11.5, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: c.total < 0 ? '#65bc7b' : 'var(--text)' }}>
+                {fmtCents(c.total)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // Invoice-level drill: the MRI report's underlying lines for one tenant,
 // optionally filtered to the bucket cell that was clicked.
-function DetailLines({ row, bucket, onBucket }: { row: ArAgingRow; bucket: BucketKey | 'all'; onBucket: (b: BucketKey | 'all') => void }) {
-  const { data, loading, error } = useArDetail(row.id)
-  const lines = (data ?? []).filter(l => bucket === 'all' || l.bucket === bucket)
+function DetailLines({ lines: allLines, loading, error, bucket, onBucket }: {
+  lines: ArDetailLine[]
+  loading: boolean
+  error: string | null
+  bucket: BucketKey | 'all'
+  onBucket: (b: BucketKey | 'all') => void
+}) {
+  const lines = allLines.filter(l => bucket === 'all' || l.bucket === bucket)
   const bucketLabel = (k: string) => BUCKETS.find(b => b.key === k)?.label ?? k
   const bucketColor = (k: string) => BUCKETS.find(b => b.key === k)?.color ?? 'var(--text-muted)'
   return (
@@ -516,7 +604,7 @@ function DetailLines({ row, bucket, onBucket }: { row: ArAgingRow; bucket: Bucke
           Invoice Lines
         </span>
         {(['all', ...BUCKETS.map(b => b.key)] as (BucketKey | 'all')[]).map(k => {
-          const has = k === 'all' || (data ?? []).some(l => l.bucket === k)
+          const has = k === 'all' || allLines.some(l => l.bucket === k)
           if (!has) return null
           return (
             <button
