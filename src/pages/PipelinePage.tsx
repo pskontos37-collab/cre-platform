@@ -862,15 +862,28 @@ function MeetingDeckButton({ deals, preparedBy }: { deals: Deal[]; preparedBy: s
         // OM-extracted tenant roster / occupancy (from om_intake.extracted).
         const extrasData = await fetchDeckExtras(deals.map(d => d.id))
         const sitePlanImgs: Record<string, { data: string; w: number; h: number }> = {}
+        // Rendering ~23 site-plan PDFs client-side is heavy and one oversized
+        // architectural sheet can hang pdf.js indefinitely. Bound each render with
+        // a timeout (skip on failure) and cap the total time so the deck always
+        // finishes — a missing plan just omits that deal's companion image.
+        const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+          Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])
+        const budgetMs = 90_000, startTs = Date.now()
         for (const sp of extrasData.sitePlans) {
+          if (Date.now() - startTs > budgetMs) { console.warn('[meeting-deck] site-plan render budget reached; remaining plans skipped'); break }
+          let pdfDoc: any = null
           try {
-            const pdfDoc = await openPdf(sp.url)
+            pdfDoc = await withTimeout(openPdf(sp.url), 8_000)
             const canvas = document.createElement('canvas')
-            const { width, height } = await pdfDoc.renderPage(1, canvas, 1400)
-            sitePlanImgs[sp.dealId] = { data: canvas.toDataURL('image/jpeg', 0.72), w: width, h: height }
-            pdfDoc.destroy()
-          } catch (e) { console.warn('[meeting-deck] site-plan render failed', sp.dealId, e) }
+            const { width, height } = await withTimeout(pdfDoc.renderPage(1, canvas, 1100), 8_000)
+            sitePlanImgs[sp.dealId] = { data: canvas.toDataURL('image/jpeg', 0.7), w: width, h: height }
+          } catch (e) {
+            console.warn('[meeting-deck] site-plan skipped (slow/failed):', sp.title ?? sp.dealId, e)
+          } finally {
+            try { pdfDoc?.destroy() } catch { /* ignore */ }
+          }
         }
+        console.log(`[meeting-deck] site plans rendered ${Object.keys(sitePlanImgs).length}/${extrasData.sitePlans.length}`)
         return buildPipelineMeetingDeck({
           deals,
           metrics: pipelineMetrics(deals),
