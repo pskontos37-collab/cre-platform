@@ -242,8 +242,8 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
       slice.forEach((d, i) => {
         const bg = i % 2 ? ROW_B : ROW_A
         rows.push([
-          { text: d.name, options: { color: NAVY, bold: true, fill: { color: bg }, hyperlink: { slide: discussionNo[d.id] } } },
-          { text: loc(d) || '—', options: { color: TEXT, fill: { color: bg } } },
+          { text: clip(d.name, 30), options: { color: NAVY, bold: true, fill: { color: bg }, hyperlink: { slide: discussionNo[d.id] } } },
+          { text: clip(loc(d) || '—', 22), options: { color: TEXT, fill: { color: bg } } },
           { text: profileLabel(d), options: { color: TEXT, fill: { color: bg } } },
           { text: guidanceShort(d, 20), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
           { text: pct(d.goingInCap), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
@@ -262,7 +262,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
     const s = pptx.addSlide()
     const occ = input.extras?.occupancy?.[d.id] ?? null
     // header: name + location/profile subtitle + stage chip
-    s.addText(d.name, { x: 0.45, y: 0.26, w: 7.6, h: 0.5, fontFace: SERIF, fontSize: 24, bold: true, color: STEEL, underline: true })
+    s.addText(d.name, { x: 0.45, y: 0.26, w: 7.6, h: 0.5, fontFace: SERIF, fontSize: 24, bold: true, color: STEEL, underline: true, fit: 'shrink', wrap: false } as any)
     s.addText(
       [loc(d), profileLabel(d) + (d.subType ? ` · ${d.subType}` : ''), d.submarket].filter(Boolean).join('   ·   ') || '—',
       { x: 0.47, y: 0.82, w: 7.6, h: 0.3, fontFace: SERIF, fontSize: 13, color: MUTED, fit: 'shrink', wrap: false } as any)
@@ -385,15 +385,20 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
         { text: '     GLA ', options: { color: MUTED } }, { text: d.glaSf != null ? Math.round(d.glaSf).toLocaleString() + ' SF' : '—', options: { color: TEXT, bold: true } },
       ], { x: tx, y: 1.25, w: tw, h: 0.3, fontFace: SERIF, fontSize: 11 })
       if (tlist.length) {
+        // expirations arrive verbose ('May-2031 (Four, 5-Yr options ... 2051)') —
+        // keep just the date so rows don't wrap and overflow the slide.
+        const expShort = (e: string | null) => (e ? clip((e.split('(')[0].trim() || e), 12) : '—')
+        const MAX = 13
         const tRows: any[] = [
           ['Tenant', 'SF', 'Expiry'].map((h, i) => ({ text: h, options: { bold: true, color: 'FFFFFF', fill: { color: STEEL }, align: i ? 'right' : 'left' } })),
-          ...tlist.slice(0, 15).map((t, i) => [
-            { text: t.name, options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
+          ...tlist.slice(0, MAX).map((t, i) => [
+            { text: clip(t.name, 24), options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
             { text: t.sf != null ? Math.round(t.sf).toLocaleString() : '—', options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A }, align: 'right' } },
-            { text: t.expiration ?? '—', options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A }, align: 'right' } },
+            { text: expShort(t.expiration), options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A }, align: 'right' } },
           ]),
         ]
-        sp.addTable(tRows, { x: tx, y: 1.62, w: tw, colW: hasImg ? [2.15, 0.9, 0.8] : [5.5, 2.3, 2.3], fontFace: SERIF, fontSize: 10, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.32, valign: 'middle', margin: 0.04 })
+        sp.addTable(tRows, { x: tx, y: 1.62, w: tw, colW: hasImg ? [1.95, 0.72, 1.18] : [5.4, 1.9, 2.8], fontFace: SERIF, fontSize: 9.5, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.3, valign: 'middle', margin: 0.04 })
+        if (tlist.length > MAX) sp.addText(`+ ${tlist.length - MAX} more tenants`, { x: tx, y: 1.62 + (MAX + 1) * 0.3 + 0.03, w: tw, h: 0.22, fontFace: SANS, fontSize: 8, italic: true, color: MUTED })
       } else {
         sp.addText('Tenant roster not captured from the OM.', { x: tx, y: 1.66, w: tw, h: 0.3, fontFace: SERIF, fontSize: 10.5, italic: true, color: MUTED })
       }
@@ -416,11 +421,11 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
     watchDeals.slice(0, 18).forEach((d, i) => {
       const bg = i % 2 ? ROW_B : ROW_A
       rows.push([
-        { text: d.name, options: { color: TEXT, bold: true, fill: { color: bg } } },
-        { text: loc(d) || '—', options: { color: TEXT, fill: { color: bg } } },
+        { text: clip(d.name, 32), options: { color: TEXT, bold: true, fill: { color: bg } } },
+        { text: clip(loc(d) || '—', 28), options: { color: TEXT, fill: { color: bg } } },
         { text: profileLabel(d), options: { color: TEXT, fill: { color: bg } } },
         { text: guidanceShort(d, 20), options: { color: TEXT, fill: { color: bg }, align: 'right' } },
-        { text: clip(d.bidText ?? '—', 70), options: { color: TEXT, fill: { color: bg }, fontSize: 10 } },
+        { text: clip(d.bidText ?? '—', 60), options: { color: TEXT, fill: { color: bg }, fontSize: 10 } },
       ])
     })
     s.addTable(rows, { x: 0.45, y: 1.2, w: 10.1, colW: [2.7, 1.9, 1.7, 1.2, 2.6], fontFace: SERIF, fontSize: 10.5, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.355, valign: 'middle', margin: 0.05 })
