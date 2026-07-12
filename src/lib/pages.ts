@@ -40,6 +40,7 @@ export const PAGES: PageDef[] = [
   { key: 'services',    path: '/services',    label: 'Services',    icon: '🔧', group: 'leasing' },
   { key: 'documents',   path: '/documents',   label: 'Documents',   icon: '📁', group: 'leasing' },
   { key: 'mri',         path: '/mri-recon',   label: 'MRI Recon',   icon: '🔀', restricted: true, group: 'leasing' },
+  { key: 'svc_new',     path: '/services/new', label: 'New Agreement', icon: '✍️', group: 'operations' },
   { key: 'contacts',    path: '/contacts',    label: 'Contacts',    icon: '📇', group: 'operations' },
   { key: 'inspections', path: '/inspections', label: 'Inspections', icon: '🔍', group: 'operations' },
   { key: 'forms',       path: '/forms',       label: 'Forms',       icon: '📋', group: 'operations' },

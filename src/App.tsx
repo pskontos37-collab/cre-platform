@@ -213,7 +213,7 @@ function AppRoutes() {
         path="/services/new"
         element={
           <ProtectedRoute>
-            <RequirePage pageKey="services">
+            <RequirePage pageKey="svc_new">
               <AppLayout>
                 <ServiceAgreementBuilderPage />
               </AppLayout>
