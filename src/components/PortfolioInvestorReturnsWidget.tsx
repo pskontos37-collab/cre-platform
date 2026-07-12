@@ -1,6 +1,7 @@
+import { useMemo } from 'react'
 import { Widget } from './ui/Widget'
 import { usePortfolioInvestorReturns } from '../hooks/usePortfolioInvestorReturns'
-import type { DealRow } from '../hooks/useDeals'
+import { useDeals } from '../hooks/useDeals'
 
 const usd = (n: number, dp = 0) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: dp })
@@ -12,17 +13,29 @@ const pct = (n: number | null | undefined) =>
   n == null || !isFinite(n) ? '—' : (n * 100).toFixed(1) + '%'
 
 interface PortfolioInvestorReturnsWidgetProps {
-  deals: DealRow[] | null
+  /** Property scope from the dashboard's global View filter; aggregates only
+   *  deals whose property is in scope. Omit to aggregate every deal. */
+  propertyIds?: string[]
   layer?: 1 | 2
 }
 
 export function PortfolioInvestorReturnsWidget({
-  deals,
+  propertyIds,
   layer = 1,
 }: PortfolioInvestorReturnsWidgetProps) {
   const title = layer === 1
     ? 'Portfolio — Layer 1 JV Returns (Realized, cash to date)'
     : 'Portfolio — Layer 2 Syndication Returns (Realized, cash to date)'
+
+  const { data: allDeals } = useDeals()
+
+  // Scope to the properties in the global View filter (falls back to all deals).
+  const deals = useMemo(() => {
+    if (!allDeals) return null
+    if (!propertyIds || propertyIds.length === 0) return allDeals
+    const inScope = new Set(propertyIds)
+    return allDeals.filter(d => inScope.has(d.property_id))
+  }, [allDeals, propertyIds])
 
   const returns = usePortfolioInvestorReturns(deals, layer)
 
@@ -71,7 +84,7 @@ export function PortfolioInvestorReturnsWidget({
               <td style={{ ...td, textAlign: 'right', color: r.totalMultiple ? 'var(--accent)' : 'var(--text-muted)' }}>
                 {mult(r.totalMultiple)}
               </td>
-              <td style={{ ...td, textAlign: 'right', color: r.totalIrr == null ? 'var(--text-muted)' : r.totalIrr < 0 ? 'var(--danger)' : 'var(--accent)' }}>
+              <td style={{ ...td, textAlign: 'right', color: r.totalIrr == null ? 'var(--text-muted)' : r.totalIrr < 0 ? 'var(--red)' : 'var(--accent)' }}>
                 {pct(r.totalIrr)}
               </td>
             </tr>
