@@ -3,8 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds, usePropertyNameMap } from '../hooks/useFilteredPropertyIds'
 import {
-  useServiceAgreements, lifecycleOf, EXPIRING_WINDOW_DAYS,
-  type ServiceAgreement, type Lifecycle,
+  useServiceAgreements, lifecycleOf, EXPIRING_WINDOW_DAYS, RESOLVED_LIFECYCLES,
+  resolveServiceAgreement, restoreServiceAgreement,
+  type ServiceAgreement, type Lifecycle, type Resolution,
 } from '../hooks/useServiceAgreements'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -41,6 +42,17 @@ const LIFECYCLE: Record<Lifecycle, { label: string; rank: number; color: string;
   evergreen:  { label: 'Auto-renews', rank: 4, color: WILKOW_MIST,         bg: 'var(--surface-2)', border: 'var(--border-2)' },
   terminated: { label: 'Terminated',  rank: 5, color: 'var(--text-faint)', bg: 'var(--surface-2)', border: 'var(--border-2)' },
   superseded: { label: 'Superseded',  rank: 6, color: 'var(--text-faint)', bg: 'var(--surface-2)', border: 'var(--border-2)' },
+  completed:  { label: 'Completed',   rank: 7, color: 'var(--green)',      bg: 'var(--surface-2)', border: 'var(--border-2)' },
+  cancelled:  { label: 'Cancelled',   rank: 8, color: 'var(--text-faint)', bg: 'var(--surface-2)', border: 'var(--border-2)' },
+  ignored:    { label: 'Ignored',     rank: 9, color: 'var(--text-faint)', bg: 'var(--surface-2)', border: 'var(--border-2)' },
+}
+
+// Manual dismissals (migration 20240078): all three leave the default list;
+// cancelled + ignored require the audit note, completed doesn't need one.
+const RESOLUTION_META: Record<Resolution, { icon: string; label: string; needsReason: boolean; title: string }> = {
+  completed: { icon: '✓', label: 'Completed', needsReason: false, title: 'One-time job finished — nothing left to renew or track' },
+  cancelled: { icon: '✕', label: 'Cancelled', needsReason: true,  title: 'Contract cancelled — a short note is required for the audit trail' },
+  ignored:   { icon: '🚫', label: 'Ignored',   needsReason: true,  title: 'Not relevant to track — a short note is required for the audit trail' },
 }
 
 type SortMode = 'form-date' | 'date-desc' | 'date-asc' | 'vendor-asc' | 'vendor-desc' | 'expiry' | 'value-desc'
@@ -102,13 +114,13 @@ export function ServiceAgreementsPage() {
   const { data: properties } = useProperties()
   const propertyIds = useFilteredPropertyIds(properties ?? null)
   const propertyNames = usePropertyNameMap(properties ?? null)
-  const { data, loading, error } = useServiceAgreements(propertyIds, propertyNames)
+  const { data, loading, error, refetch } = useServiceAgreements(propertyIds, propertyNames)
   const agreements = data ?? []
 
   const [searchParams] = useSearchParams()
   const [lifecycleFilter, setLifecycleFilter] = useState<Lifecycle | null>(() => {
     const s = searchParams.get('status')
-    const valid: string[] = ['expired', 'expiring', 'active', 'evergreen', 'terminated', 'superseded', 'unknown']
+    const valid: string[] = ['expired', 'expiring', 'active', 'evergreen', 'terminated', 'superseded', 'completed', 'cancelled', 'ignored', 'unknown']
     return s && valid.includes(s) ? (s as Lifecycle) : null
   })
   const [categoryFilter, setCategoryFilter] = useState<string>('')
@@ -148,7 +160,7 @@ export function ServiceAgreementsPage() {
   }, [agreements, todayIso, horizonIso])
 
   const counts = useMemo(() => {
-    const c: Record<Lifecycle, number> = { expired: 0, expiring: 0, unknown: 0, active: 0, evergreen: 0, terminated: 0, superseded: 0 }
+    const c: Record<Lifecycle, number> = { expired: 0, expiring: 0, unknown: 0, active: 0, evergreen: 0, terminated: 0, superseded: 0, completed: 0, cancelled: 0, ignored: 0 }
     for (const g of groups) c[g.lifecycle]++
     return c
   }, [groups])
@@ -162,7 +174,8 @@ export function ServiceAgreementsPage() {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
     return groups
-      .filter(g => !lifecycleFilter || g.lifecycle === lifecycleFilter)
+      // resolved relationships (completed/cancelled/ignored) only show under their explicit chip
+      .filter(g => lifecycleFilter ? g.lifecycle === lifecycleFilter : !RESOLVED_LIFECYCLES.has(g.lifecycle))
       .filter(g => !categoryFilter || g.category === categoryFilter)
       .filter(g => !formOnly || g.isForm)
       .filter(g => !q || g.vendor.toLowerCase().includes(q) || g.category.toLowerCase().includes(q))
@@ -282,7 +295,7 @@ export function ServiceAgreementsPage() {
             {propName} <span style={{ color: 'var(--text-faint)', letterSpacing: 0 }}>· {list.length} vendor{list.length === 1 ? '' : 's'}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {list.map(g => <VendorCard key={g.key} g={g} todayIso={todayIso} />)}
+            {list.map(g => <VendorCard key={g.key} g={g} todayIso={todayIso} onChanged={refetch} />)}
           </div>
         </div>
       ))}
@@ -290,7 +303,7 @@ export function ServiceAgreementsPage() {
   )
 }
 
-function VendorCard({ g, todayIso }: { g: VendorGroup; todayIso: string }) {
+function VendorCard({ g, todayIso, onChanged }: { g: VendorGroup; todayIso: string; onChanged: () => void }) {
   const [showPrior, setShowPrior] = useState(false)
   const a = g.current
   const lc = LIFECYCLE[g.lifecycle]
@@ -336,7 +349,16 @@ function VendorCard({ g, todayIso }: { g: VendorGroup; todayIso: string }) {
         </div>
       )}
 
-      {/* document link + history */}
+      {a.resolution && a.resolvedAt && (
+        <div style={{ marginTop: 9, padding: '7px 11px', background: 'var(--surface-2)', border: '1px dashed var(--border-2)', borderRadius: 8, fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          <span style={{ fontWeight: 650 }}>
+            {RESOLUTION_META[a.resolution].icon} {RESOLUTION_META[a.resolution].label} {fmtDate(a.resolvedAt.slice(0, 10))}{a.resolvedByName ? ` by ${a.resolvedByName}` : ''}
+          </span>
+          {a.resolutionReason && <> — {a.resolutionReason}</>}
+        </div>
+      )}
+
+      {/* document link + history + resolve/restore */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
         <DocChip a={a} label="View agreement" />
         {g.prior.length > 0 && (
@@ -347,6 +369,8 @@ function VendorCard({ g, todayIso }: { g: VendorGroup; todayIso: string }) {
             {showPrior ? '▾' : '▸'} {g.prior.length} prior contract{g.prior.length === 1 ? '' : 's'}
           </button>
         )}
+        <span style={{ flex: 1 }} />
+        <ResolveControl a={a} onChanged={onChanged} />
       </div>
 
       {showPrior && g.prior.length > 0 && (
@@ -370,7 +394,7 @@ function VendorCard({ g, todayIso }: { g: VendorGroup; todayIso: string }) {
 
 /** "expires in 42 d · Aug 16, 2026" next to the badge for anything with a horizon. */
 function ExpiryBlurb({ a, lifecycle, todayIso }: { a: ServiceAgreement; lifecycle: Lifecycle; todayIso: string }) {
-  if (!a.endDate || lifecycle === 'terminated' || lifecycle === 'superseded') return null
+  if (!a.endDate || lifecycle === 'terminated' || lifecycle === 'superseded' || RESOLVED_LIFECYCLES.has(lifecycle)) return null
   const d = daysUntil(a.endDate, todayIso)
   const txt = d < 0 ? `ended ${fmtDate(a.endDate)}`
     : d === 0 ? `expires today`
@@ -378,6 +402,115 @@ function ExpiryBlurb({ a, lifecycle, todayIso }: { a: ServiceAgreement; lifecycl
   return (
     <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: d < 0 ? 'var(--red)' : d <= EXPIRING_WINDOW_DAYS ? 'var(--amber)' : 'var(--text-faint)', whiteSpace: 'nowrap' }}>
       {txt}
+    </span>
+  )
+}
+
+/** Resolve (complete / cancel / ignore) or restore a vendor relationship.
+ *  Cancelled and ignored REQUIRE a short note — it's stored on the row and
+ *  every transition is written to audit_log (migration 20240078), so there's
+ *  always a record of why something was dismissed and by whom. */
+function ResolveControl({ a, onChanged }: { a: ServiceAgreement; onChanged: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [choice, setChoice] = useState<Resolution | null>(null)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const close = () => { setOpen(false); setChoice(null); setReason(''); setErr(null) }
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true)
+    setErr(null)
+    try {
+      await fn()
+      close()
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (a.resolution) {
+    return (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {err && <span style={{ fontSize: 10.5, color: 'var(--red)' }}>{err}</span>}
+        <button
+          disabled={busy}
+          onClick={() => run(() => restoreServiceAgreement(a.id))}
+          title="Bring this agreement back into renewal tracking (the resolution note stays in the audit log)"
+          style={{ fontSize: 10.5, padding: '3px 10px', borderRadius: 99, cursor: busy ? 'default' : 'pointer', border: '1px solid var(--border-2)', color: 'var(--text-muted)', background: 'var(--surface-2)', opacity: busy ? 0.6 : 1 }}
+        >
+          {busy ? 'Restoring…' : '↩ Restore'}
+        </button>
+      </span>
+    )
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        title="Mark this vendor relationship completed, cancelled or ignored — removes it from the default list, the renewals widget and the email digest"
+        style={{ fontSize: 10.5, padding: '3px 10px', borderRadius: 99, cursor: 'pointer', border: '1px solid var(--border-2)', color: 'var(--text-faint)', background: 'transparent' }}
+      >
+        ✓ Mark…
+      </button>
+    )
+  }
+
+  const needsReason = choice != null && RESOLUTION_META[choice].needsReason
+  const canConfirm = !busy && choice != null && (!needsReason || reason.trim().length > 0)
+
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      {(Object.keys(RESOLUTION_META) as Resolution[]).map(r => {
+        const meta = RESOLUTION_META[r]
+        const on = choice === r
+        return (
+          <button
+            key={r}
+            disabled={busy}
+            onClick={() => setChoice(on ? null : r)}
+            title={meta.title}
+            style={{
+              fontSize: 10.5, fontWeight: 650, padding: '4px 10px', borderRadius: 99, cursor: 'pointer',
+              border: `1px solid ${on ? 'var(--accent)' : 'var(--border-2)'}`,
+              color: on ? 'var(--accent)' : 'var(--text-muted)', background: 'var(--surface-2)',
+              boxShadow: on ? '0 0 0 1px var(--accent)' : 'none',
+            }}
+          >
+            {meta.icon} {meta.label}
+          </button>
+        )
+      })}
+      {needsReason && (
+        <input
+          autoFocus
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Escape') close() }}
+          placeholder={`Why ${choice}? (required — kept for audit)`}
+          style={{ fontSize: 11.5, padding: '4px 9px', borderRadius: 7, border: `1px solid ${err ? 'var(--red-border)' : 'var(--border-2)'}`, background: 'var(--surface-2)', color: 'var(--text)', width: 240 }}
+        />
+      )}
+      {err && <span style={{ fontSize: 10.5, color: 'var(--red)' }}>{err}</span>}
+      <button
+        disabled={!canConfirm}
+        onClick={() => { if (choice) run(() => resolveServiceAgreement(a.id, choice, reason)) }}
+        style={{ fontSize: 10.5, fontWeight: 650, padding: '4px 11px', borderRadius: 99, cursor: canConfirm ? 'pointer' : 'default', border: '1px solid var(--border-2)', color: canConfirm ? 'var(--accent)' : 'var(--text-faint)', background: 'var(--surface-2)', opacity: busy ? 0.6 : 1 }}
+      >
+        {busy ? 'Saving…' : 'Confirm'}
+      </button>
+      <button
+        disabled={busy}
+        onClick={close}
+        style={{ fontSize: 10.5, padding: '4px 9px', borderRadius: 99, cursor: 'pointer', border: 'none', color: 'var(--text-faint)', background: 'transparent' }}
+      >
+        Cancel
+      </button>
     </span>
   )
 }

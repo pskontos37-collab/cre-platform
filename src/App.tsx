@@ -32,6 +32,8 @@ import { BrokeragePage } from './pages/BrokeragePage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { PipelinePage } from './pages/PipelinePage'
 import { AdminPage } from './pages/AdminPage'
+import { WorkOrdersPage } from './pages/WorkOrdersPage'
+import { TenantPortalPage } from './pages/TenantPortalPage'
 import { AppLayout } from './components/layout/AppLayout'
 import { canSeePage } from './lib/pages'
 import { ReactNode } from 'react'
@@ -79,6 +81,9 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       {/* Public: reached via the password-reset email link (recovery token in URL). */}
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      {/* Public shell: the tenant work-order portal has its OWN login (portal
+          users are not Supabase auth users — see src/lib/portalApi.ts). */}
+      <Route path="/portal" element={<TenantPortalPage />} />
       <Route
         path="/"
         element={
@@ -213,7 +218,7 @@ function AppRoutes() {
         path="/services/new"
         element={
           <ProtectedRoute>
-            <RequirePage pageKey="svc_new">
+            <RequirePage pageKey="services">
               <AppLayout>
                 <ServiceAgreementBuilderPage />
               </AppLayout>
@@ -312,6 +317,18 @@ function AppRoutes() {
             <RequirePage pageKey="contacts">
               <AppLayout>
                 <ContactsPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/workorders"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="workorders">
+              <AppLayout>
+                <WorkOrdersPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>

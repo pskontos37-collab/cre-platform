@@ -40,6 +40,8 @@ export interface EntityInvestorRow {
   name: string
   unit_class: string
   units: number
+  /** MJW-affiliated (firm entities + Wilkow family/trusts) vs outside co-investor. */
+  is_mjw: boolean
 }
 
 export interface DealRow {

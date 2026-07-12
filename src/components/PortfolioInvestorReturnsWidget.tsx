@@ -77,7 +77,9 @@ export function PortfolioInvestorReturnsWidget({
 
   const showLp = level === 'both' || level === 'lp'
   const showGp = level === 'both' || level === 'gp'
+  const showMjw = level === 'mjw'
   const heroLevels: Level[] = level === 'both' ? ['lp', 'gp'] : [level]
+  const LEVEL_LABEL: Record<Level, string> = { lp: 'LP', gp: 'GP', mjw: 'MJW' }
 
   return (
     <Widget

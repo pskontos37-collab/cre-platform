@@ -39,7 +39,8 @@ export function ServiceAgreementsWidget({ propertyIds, propertyNames }: Props) {
       const cur = latest.get(key)
       if (!cur || rankOf(a) > rankOf(cur)) latest.set(key, a)
     }
-    const governing = [...latest.values()].filter(a => a.status !== 'terminated' && a.status !== 'superseded')
+    // resolved relationships (marked completed/cancelled/ignored) don't count as lapse risk
+    const governing = [...latest.values()].filter(a => a.status !== 'terminated' && a.status !== 'superseded' && !a.resolution)
 
     let expired = 0
     const soon: Array<{ a: ServiceAgreement; daysUntil: number }> = []
