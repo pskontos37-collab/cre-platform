@@ -512,7 +512,8 @@ export function useDealDocuments(dealId: string | null) {
       .eq('deal_id', dealId)
       .order('created_at', { ascending: false })
     if (error) throw new Error(error.message)
-    const rows = (data ?? []) as any[]
+    // hide the deck's pre-rendered site-plan JPEGs from the Documents tab
+    const rows = ((data ?? []) as any[]).filter(r => r.role !== 'site_plan_img')
     const paths = Array.from(new Set(rows.map(r => r.documents?.storage_path).filter((p: any): p is string => !!p)))
     const signed = new Map<string, string>()
     if (paths.length) {
@@ -750,10 +751,12 @@ export async function fetchDeckExtras(dealIds: string[]): Promise<DeckExtras> {
   const out: DeckExtras = { sitePlans: [], tenants: {}, occupancy: {} }
   if (!dealIds.length) return out
 
-  // ── site plans: one per deal (smallest linked site_plan = the clean plan) ──
+  // ── site plans: the pre-rendered JPEG (scripts/render_site_plans.ps1) so the
+  //    deck embeds an image directly — client-side pdf.js can't rasterize the
+  //    vector-dense OM site-plan PDFs fast enough (>15s each on the main thread). ──
   const { data: sp } = await supabase.from('pipeline_deal_documents')
     .select('deal_id, role, documents(title, storage_path, file_size_bytes)')
-    .in('deal_id', dealIds).eq('role', 'site_plan')
+    .in('deal_id', dealIds).eq('role', 'site_plan_img')
   const byDeal = new Map<string, any>()
   for (const r of (sp ?? []) as any[]) {
     if (!r.documents?.storage_path) continue

@@ -854,38 +854,25 @@ function MeetingDeckButton({ deals, preparedBy }: { deals: Deal[]; preparedBy: s
       filename={`Wilkow-Pipeline-Review-${today.toISOString().slice(0, 10)}.pptx`}
       title="Generate the weekly acquisitions meeting deck — every deal in the pipeline (editable PowerPoint)"
       build={async () => {
-        const [{ buildPipelineMeetingDeck }, { openPdf }] = await Promise.all([
-          import('../reports/PipelineMeetingDeck'),
-          import('../lib/pdfRender'),
-        ])
-        // Gather embedded assets: linked site-plan PDFs rendered to images + the
-        // OM-extracted tenant roster / occupancy (from om_intake.extracted).
+        const { buildPipelineMeetingDeck } = await import('../reports/PipelineMeetingDeck')
+        // Site plans are PRE-RENDERED to stored JPEGs (scripts/render_site_plans.ps1),
+        // so we just fetch each image — fast and reliable, no client-side pdf.js.
         const extrasData = await fetchDeckExtras(deals.map(d => d.id))
         const sitePlanImgs: Record<string, { data: string; w: number; h: number }> = {}
-        // Rendering ~23 site-plan PDFs client-side is heavy and one oversized
-        // architectural sheet can hang pdf.js indefinitely. Bound each render with
-        // a timeout (skip on failure) and cap the total time so the deck always
-        // finishes — a missing plan just omits that deal's companion image.
-        const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
-          Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])
-        const budgetMs = 180_000, startTs = Date.now()
-        for (const sp of extrasData.sitePlans) {
-          if (Date.now() - startTs > budgetMs) { console.warn('[meeting-deck] site-plan render budget reached; remaining plans skipped'); break }
-          let pdfDoc: any = null
+        const toDataUrl = (b: Blob) => new Promise<string>((res, rej) => {
+          const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.onerror = () => rej(fr.error); fr.readAsDataURL(b)
+        })
+        const dims = (url: string) => new Promise<{ w: number; h: number }>(res => {
+          const im = new Image(); im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight }); im.onerror = () => res({ w: 1600, h: 1000 }); im.src = url
+        })
+        await Promise.all(extrasData.sitePlans.map(async sp => {
           try {
-            pdfDoc = await withTimeout(openPdf(sp.url), 12_000)
-            const canvas = document.createElement('canvas')
-            // 900px is plenty for a slide; the render self-cancels at 15s so one
-            // heavy sheet can't starve the rest.
-            const { width, height } = await pdfDoc.renderPage(1, canvas, 900, 15_000)
-            sitePlanImgs[sp.dealId] = { data: canvas.toDataURL('image/jpeg', 0.7), w: width, h: height }
-          } catch (e) {
-            console.warn('[meeting-deck] site-plan skipped (slow/failed):', sp.title ?? sp.dealId, e)
-          } finally {
-            try { pdfDoc?.destroy() } catch { /* ignore */ }
-          }
-        }
-        console.log(`[meeting-deck] site plans rendered ${Object.keys(sitePlanImgs).length}/${extrasData.sitePlans.length}`)
+            const blob = await (await fetch(sp.url)).blob()
+            const data = await toDataUrl(blob)
+            sitePlanImgs[sp.dealId] = { data, ...(await dims(data)) }
+          } catch (e) { console.warn('[meeting-deck] site-plan image failed:', sp.title ?? sp.dealId, e) }
+        }))
+        console.log(`[meeting-deck] site plans embedded ${Object.keys(sitePlanImgs).length}/${extrasData.sitePlans.length}`)
         return buildPipelineMeetingDeck({
           deals,
           metrics: pipelineMetrics(deals),
