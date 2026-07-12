@@ -1,6 +1,8 @@
 import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
+import { useLeaseRm, rmRowForCategory } from '../hooks/useLeaseRm'
 import {
   WorkOrder, WoComment, WoPhoto, PortalUserRow, VendorBookRow,
   useWorkOrders, usePortalUsers, useVendorBook,
@@ -12,6 +14,7 @@ import {
 import {
   WO_CATEGORIES, WO_PRIORITIES, WO_STATUSES, OPEN_STATUSES,
   categoryIcon, categoryLabel, statusMeta, priorityColor, woNumber,
+  CATEGORY_RM_SYSTEMS, RM_SYSTEM_LABELS,
 } from '../lib/workOrderMeta'
 
 // Staff work-order management (/workorders): the queue tenants feed from the
@@ -331,6 +334,8 @@ function DetailPanel({ order, allOrders, vendorBook, me, onClose, onChanged }: {
         )}
       </div>
 
+      <LeaseClauseBox order={order} />
+
       <RoutingBlock order={order} allOrders={allOrders} vendorBook={vendorBook} busy={busy} run={run} />
 
       {/* thread */}
@@ -370,6 +375,122 @@ function DetailPanel({ order, allOrders, vendorBook, me, onClose, onChanged }: {
       </div>
 
       {err && <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 10 }}>{err}</div>}
+    </div>
+  )
+}
+
+// ── Per the lease: repair & maintenance responsibility ───────────────────────
+// Shows what the tenant's lease says about the system this work order touches
+// (lease_rm_matrix, extracted by scripts/extract_rm_matrix.ps1), with the
+// verbatim quote + section cite and a link to the lease itself. Decision
+// support only — the manager confirms against the actual document.
+
+const RESP_STYLE: Record<string, { label: string; color: string }> = {
+  landlord: { label: 'LANDLORD RESPONSIBILITY', color: 'var(--green)' },
+  tenant:   { label: 'POSSIBLY TENANT RESPONSIBILITY', color: 'var(--amber)' },
+  shared:   { label: 'SHARED RESPONSIBILITY', color: 'var(--accent)' },
+  unclear:  { label: 'LEASE UNCLEAR', color: 'var(--text-faint)' },
+}
+
+function LeaseClauseBox({ order }: { order: WorkOrder }) {
+  const { data, error } = useLeaseRm(order.propertyId, order.tenantName)
+  const [showQuote, setShowQuote] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+
+  // Common-area issues check the common-area allocation first, then the category's.
+  const systems = order.locationType === 'common_area'
+    ? ['common_areas', ...(CATEGORY_RM_SYSTEMS[order.category] ?? ['general'])]
+    : (CATEGORY_RM_SYSTEMS[order.category] ?? ['general'])
+
+  const rows = data?.rows ?? []
+  const match = rmRowForCategory(rows, systems)
+  const leaseQuery = data?.leaseDocTitle ?? `${order.tenantName} lease`
+  const leaseLink = `/documents?q=${encodeURIComponent(leaseQuery)}`
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <label style={labelStyle}>Per the lease</label>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', background: 'var(--bg)' }}>
+        {error && <div style={{ fontSize: 11.5, color: 'var(--red)' }}>{error}</div>}
+        {!data && !error && <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>Checking the lease…</div>}
+
+        {data && !match && (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {rows.length === 0
+              ? 'No repair & maintenance terms extracted for this lease yet.'
+              : `The extracted matrix doesn't specifically address ${categoryLabel(order.category).toLowerCase()}.`}
+            {' '}
+            <Link to={leaseLink} style={{ color: 'var(--accent)' }}>Open the lease →</Link>
+          </div>
+        )}
+
+        {data && match && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+                color: RESP_STYLE[match.responsible].color,
+                border: `1px solid ${RESP_STYLE[match.responsible].color}`,
+                borderRadius: 999, padding: '2px 9px',
+              }}>
+                {RESP_STYLE[match.responsible].label}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                {RM_SYSTEM_LABELS[match.system] ?? match.system}
+                {match.sectionRef ? ` · ${match.sectionRef}` : ''}
+                {match.verified ? ' · ✓ verified' : ' · AI-extracted, verify below'}
+              </span>
+            </div>
+            {match.summary && (
+              <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 7, lineHeight: 1.45 }}>{match.summary}</div>
+            )}
+            {match.quote && (
+              <div style={{ marginTop: 7 }}>
+                <button onClick={() => setShowQuote(s => !s)} style={{
+                  fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                }}>
+                  {showQuote ? 'Hide lease language' : 'Show lease language'}
+                </button>
+                {showQuote && (
+                  <div style={{
+                    fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 5,
+                    padding: '8px 10px', borderLeft: '3px solid var(--border-2)', whiteSpace: 'pre-wrap',
+                  }}>
+                    “{match.quote}”
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 12, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Link to={leaseLink} style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>
+                Open the lease →
+              </Link>
+              {rows.length > 1 && (
+                <button onClick={() => setShowAll(s => !s)} style={{
+                  fontSize: 11, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                }}>
+                  {showAll ? 'Hide full matrix' : `Full R&M matrix (${rows.length})`}
+                </button>
+              )}
+            </div>
+            {showAll && (
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {rows.map(r => (
+                  <div key={r.id} style={{ fontSize: 11, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                    <span style={{ color: RESP_STYLE[r.responsible].color, fontWeight: 700, width: 68, flexShrink: 0, textTransform: 'uppercase', fontSize: 9.5 }}>
+                      {r.responsible}
+                    </span>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      <b style={{ color: 'var(--text)' }}>{RM_SYSTEM_LABELS[r.system] ?? r.system}:</b>{' '}
+                      {r.summary ?? '—'}{r.sectionRef ? ` (${r.sectionRef})` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }

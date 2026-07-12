@@ -51,3 +51,31 @@ export const priorityColor = (p: string) =>
   : 'var(--text-muted)'
 
 export const woNumber = (n: number) => `WO-${String(n).padStart(6, '0')}`
+
+// Work-order category → lease_rm_matrix systems (migration 20240084), most
+// specific first. The /workorders panel walks this list and shows the first
+// system the tenant's lease matrix actually covers; 'general' is the blanket
+// repairs clause fallback.
+export const CATEGORY_RM_SYSTEMS: Record<string, string[]> = {
+  hvac:         ['hvac', 'general'],
+  plumbing:     ['plumbing', 'utilities', 'general'],
+  electrical:   ['electrical', 'utilities', 'general'],
+  lighting:     ['electrical', 'general'],
+  roof_leak:    ['roof', 'structure', 'general'],
+  doors_locks:  ['storefront_doors_glass', 'interior', 'general'],
+  janitorial:   ['interior', 'general'],
+  pest_control: ['pest_control', 'general'],
+  landscaping:  ['landscaping', 'common_areas', 'general'],
+  parking_lot:  ['parking_lot', 'common_areas', 'general'],
+  signage:      ['signage', 'storefront_doors_glass', 'general'],
+  safety:       ['fire_life_safety', 'general'],
+  other:        ['general'],
+}
+
+export const RM_SYSTEM_LABELS: Record<string, string> = {
+  hvac: 'HVAC', plumbing: 'Plumbing', electrical: 'Electrical', roof: 'Roof',
+  structure: 'Structure', storefront_doors_glass: 'Storefront / Doors / Glass',
+  interior: 'Interior', common_areas: 'Common Areas', parking_lot: 'Parking Lot',
+  signage: 'Signage', pest_control: 'Pest Control', landscaping: 'Landscaping',
+  fire_life_safety: 'Fire / Life Safety', utilities: 'Utilities', general: 'Repairs (general)',
+}
