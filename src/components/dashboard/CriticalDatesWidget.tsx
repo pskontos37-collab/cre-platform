@@ -5,6 +5,7 @@ import { Badge } from '../ui/Badge'
 import { EmptyState } from '../ui/EmptyState'
 import { useCriticalDates, type CriticalDateRow } from '../../hooks/useDashboard'
 import { supabase } from '../../lib/supabase'
+import { downloadIcs, googleCalendarUrl, outlookWebUrl, type CalendarEvent } from '../../lib/calendar'
 
 const DATE_LABELS: Record<string, string> = {
   option_notice_deadline: 'Option Notice',
@@ -25,6 +26,23 @@ const RESOLUTIONS = [
   { value: 'received',  label: 'Received' },
   { value: 'waived',    label: 'Waived' },
 ]
+
+function toCalendarEvent(row: CriticalDateRow): CalendarEvent {
+  const label = DATE_LABELS[row.dateType] ?? row.dateType
+  return {
+    title:       `${label} — ${row.propertyName}`,
+    date:        row.dueDate,
+    description: row.description ?? undefined,
+    url:         `${window.location.origin}/properties/${row.propertyId}`,
+  }
+}
+
+function addToCalendar(row: CriticalDateRow, target: string) {
+  const ev = toCalendarEvent(row)
+  if (target === 'outlook') window.open(outlookWebUrl(ev), '_blank', 'noopener')
+  else if (target === 'google') window.open(googleCalendarUrl(ev), '_blank', 'noopener')
+  else if (target === 'ics') downloadIcs(ev, row.id)
+}
 
 interface CriticalDatesWidgetProps {
   propertyIds: string[]
@@ -136,6 +154,27 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
                 >
                   <option value="">Mark ▾</option>
                   {RESOLUTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                {/* Add to calendar: all-day event on the due date with a 1-week reminder */}
+                <select
+                  value=""
+                  onChange={e => { if (e.target.value) addToCalendar(row, e.target.value) }}
+                  title="Add this date to your calendar"
+                  style={{
+                    fontSize:     10,
+                    color:        'var(--text-muted)',
+                    background:   'var(--surface)',
+                    border:       '1px solid var(--border-2)',
+                    borderRadius: 6,
+                    padding:      '2px 4px',
+                    cursor:       'pointer',
+                    outline:      'none',
+                  }}
+                >
+                  <option value="">📅 Cal ▾</option>
+                  <option value="outlook">Outlook</option>
+                  <option value="google">Google</option>
+                  <option value="ics">.ics file</option>
                 </select>
               </div>
             </div>
