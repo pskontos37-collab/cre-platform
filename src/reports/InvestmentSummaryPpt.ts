@@ -33,6 +33,7 @@ const LP_LABEL: Record<string, string> = { identified: 'Identified', teaser_sent
 const fmt$ = (n: number | null | undefined) =>
   n == null ? '—' : '$' + Math.round(n).toLocaleString('en-US')
 const pct = (d: number | null | undefined, dp = 1) => (d == null ? '—' : `${(d * 100).toFixed(dp)}%`)
+const clip = (s: string | null | undefined, n: number): string => (s && s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : (s || ''))
 
 const DISCLAIMER =
   'THIS MATERIAL IS FOR INFORMATIONAL PURPOSES ONLY AND IS DIRECTED ONLY TO QUALIFIED PERSONS OR ENTITIES IN ANY JURISDICTION WHERE ACCESS TO SUCH INFORMATION AND ITS USE IS PERMISSIBLE UNDER APPLICABLE LAWS AND REGULATIONS. THIS SUMMARY DOES NOT CONSTITUTE AN OFFER TO SELL OR THE SOLICITATION OF AN OFFER TO BUY ANY SECURITIES. ANY OFFER OF INTERESTS IN THE “WILKOW INVESTOR COMPANY” (AS DEFINED HEREIN), WHEN AND IF MADE, WILL BE MADE ONLY BY MEANS OF A CONFIDENTIAL PRIVATE PLACEMENT MEMORANDUM (THE “MEMORANDUM”) AND ONLY TO PERSONS WHO MEET ALL APPLICABLE LEGAL AND SUITABILITY STANDARDS. PRIOR TO MAKING AN INVESTMENT DECISION WITH RESPECT TO THE UNITS REFERRED TO HEREIN, PROSPECTIVE INVESTORS AND THEIR ADVISORS MUST REVIEW THE OFFERING DOCUMENTS, INCLUDING THE COMPLETE MEMORANDUM AND THE EXHIBITS THERETO. THIS SUMMARY REFERS TO IMPORTANT ASPECTS OF THE TRANSACTION TO BE DISCUSSED, AND POSSIBLY SUPERSEDED, IN THE OFFERING DOCUMENTS WHICH MUST BE CAREFULLY CONSIDERED BY ALL POTENTIAL INVESTORS AND THEIR ADVISORS. AN INVESTMENT IN UNITS INVOLVES VARIOUS RISK FACTORS, CONFLICTS OF INTEREST AND COMPENSATION TO MANAGEMENT, ALL OF WHICH WILL BE DISCUSSED MORE FULLY IN THE MEMORANDUM. THE INFORMATION CONTAINED IN THIS SUMMARY IS CONFIDENTIAL AND MAY NOT BE DISTRIBUTED TO ANY OTHER PARTY.'
@@ -51,7 +52,7 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
   const loc = [deal.city, deal.state].filter(Boolean).join(', ')
   const priceLabel = deal.askPrice != null
     ? `${fmt$(deal.askPrice)}${deal.glaSf ? ` ($${Math.round(deal.askPrice / deal.glaSf)}/sf)` : ''}`
-    : (deal.priceText || '—')
+    : (deal.priceText ? clip(deal.priceText, 40) : '—')
 
   // ── shared chrome: banner (cover) / footer + underlined title (body) ──
   let pageNo = 0
@@ -105,7 +106,7 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
     const s = bodySlide('Executive Summary')
     const paras = (memo.executive_summary || deal.thesis || '').split(/\n\n+/).filter(Boolean)
     s.addText(paras.map((p, i) => ({ text: p, options: { breakLine: true, paraSpaceAfter: i < paras.length - 1 ? 10 : 0 } })),
-      { x: 0.45, y: 1.15, w: 4.9, h: 6.7, fontFace: SERIF, fontSize: 13, color: TEXT, lineSpacingMultiple: 1.25, valign: 'top' })
+      { x: 0.45, y: 1.15, w: 4.9, h: 6.7, fontFace: SERIF, fontSize: 13, color: TEXT, lineSpacingMultiple: 1.25, valign: 'top', fit: 'shrink' } as any)
 
     const committed = deal.lps.reduce((a, l) => a + (l.committed ?? 0), 0)
     const rows: [string, string][] = [
@@ -130,7 +131,7 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
       ],
       ...rows.map(([k, v], i) => [
         { text: k, options: { bold: true, color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
-        { text: v, options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
+        { text: clip(v, 46), options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A } } },
       ]),
     ]
     s.addTable(tableRows as any, {
@@ -151,7 +152,7 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
       runs.push({ text: `${r.title}: `, options: { bold: true, color: STEEL } })
       runs.push({ text: r.body, options: { color: TEXT, breakLine: true, paraSpaceAfter: 12 } })
     }
-    s.addText(runs.length ? runs : 'No rationale drafted.', { x: 0.45, y: 1.2, w: 10.1, h: 6.6, fontFace: SERIF, fontSize: 13.5, lineSpacingMultiple: 1.25, valign: 'top' })
+    s.addText(runs.length ? runs : 'No rationale drafted.', { x: 0.45, y: 1.2, w: 10.1, h: 6.6, fontFace: SERIF, fontSize: 13.5, lineSpacingMultiple: 1.25, valign: 'top', fit: 'shrink' } as any)
   }
 
   // ── 5. Tenancy Overview (when the OM gave us a roster) ──
@@ -185,7 +186,7 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
       s.addText(quad.label, { x: quad.x + 0.1, y: quad.y + 0.02, w: 4.7, h: 0.36, fontFace: SERIF, fontSize: 14, bold: true, color: 'FFFFFF' })
       s.addShape(pptx.ShapeType.rect, { x: quad.x, y: quad.y + 0.4, w: 4.95, h: 2.75, fill: { color: ROW_B }, line: { color: 'D3DEE8', width: 0.75 } })
       s.addText((quad.items.length ? quad.items : ['—']).map(t => ({ text: t, options: { bullet: { characterCode: '2022', indent: 12 }, breakLine: true, paraSpaceAfter: 6 } })),
-        { x: quad.x + 0.12, y: quad.y + 0.5, w: 4.7, h: 2.55, fontFace: SERIF, fontSize: 11.5, color: TEXT, valign: 'top' })
+        { x: quad.x + 0.12, y: quad.y + 0.5, w: 4.7, h: 2.55, fontFace: SERIF, fontSize: 11.5, color: TEXT, valign: 'top', fit: 'shrink' } as any)
     }
   }
 
@@ -220,12 +221,12 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
 
     if (memo.recommendation) {
       s.addText([{ text: 'Recommendation:  ', options: { bold: true, color: STEEL } }, { text: memo.recommendation, options: { color: TEXT } }],
-        { x: 0.45, y: 4.35, w: 10.1, h: 1.1, fontFace: SERIF, fontSize: 13, lineSpacingMultiple: 1.25, valign: 'top' })
+        { x: 0.45, y: 4.35, w: 10.1, h: 1.1, fontFace: SERIF, fontSize: 13, lineSpacingMultiple: 1.25, valign: 'top', fit: 'shrink' } as any)
     }
     if (memo.ask) {
       s.addShape(pptx.ShapeType.rect, { x: 0.45, y: 5.7, w: 10.1, h: 1.05, fill: { color: ROW_A }, line: { color: STEEL, width: 1.5 } })
       s.addText([{ text: 'THE ASK   ', options: { bold: true, color: STEEL, charSpacing: 2 } }, { text: memo.ask, options: { color: TEXT } }],
-        { x: 0.65, y: 5.82, w: 9.7, h: 0.8, fontFace: SERIF, fontSize: 13.5, valign: 'middle' })
+        { x: 0.65, y: 5.82, w: 9.7, h: 0.8, fontFace: SERIF, fontSize: 13.5, valign: 'middle', fit: 'shrink' } as any)
     }
     s.addText('Narrative sections are AI-drafted from the deal record — verify against source materials before distribution.', { x: 0.45, y: 7.5, w: 10.1, h: 0.3, fontSize: 9.5, italic: true, color: MUTED })
   }
