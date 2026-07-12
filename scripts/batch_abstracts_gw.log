@@ -1,0 +1,24 @@
+﻿2026-07-05 12:12:36 gateway batch: 25 active leases, 22 to generate
+2026-07-05 12:12:37 1/22 FAIL 1s :: Additional Space 0840 - 024 :: {"error":"No documents found for \"Additional Space 0840 - 024\" at this property"}
+2026-07-05 12:12:53 2/22 FAIL 1s :: BEV MAX LIQUORS :: {"error":"No documents found for \"BEV MAX LIQUORS\" at this property"}
+2026-07-05 12:14:50 3/22 OK 102s docs=20 pdfs=5 :: CKE Fitness Corp
+2026-07-05 12:16:36 4/22 OK 106s docs=15 pdfs=5 :: Club Pilates
+2026-07-05 12:18:00 5/22 OK 83s docs=30 pdfs=5 :: DSW 29193
+2026-07-05 12:19:46 6/22 OK 106s docs=30 pdfs=5 :: HOMEGOODS  LLC 507
+2026-07-05 12:20:58 7/22 OK 72s docs=6 pdfs=4 :: J. Crew
+2026-07-05 12:23:19 8/22 OK 141s docs=30 pdfs=5 :: JEMBRO/DAVES DOLLAR
+2026-07-05 12:25:25 9/22 OK 127s docs=30 pdfs=5 :: Old Navy #4885
+2026-07-05 12:26:27 10/22 OK 62s docs=10 pdfs=5 :: Restore Hyper Wellness of Port Chester
+2026-07-05 12:27:58 11/22 OK 91s docs=30 pdfs=5 :: Shake Shack New York LLC
+2026-07-05 12:29:17 12/22 OK 80s docs=30 pdfs=5 :: Staples #4
+2026-07-05 12:31:00 13/22 OK 103s docs=30 pdfs=5 :: Target
+2026-07-05 12:32:21 14/22 OK 80s docs=21 pdfs=5 :: TRIPODIS APPLIANCES
+2026-07-05 12:33:36 15/22 OK 75s docs=30 pdfs=5 :: ULTA 594
+2026-07-05 12:35:14 16/22 OK 98s docs=10 pdfs=5 :: US ALLIANCE FEDERAL CREDIT
+2026-07-05 12:36:26 17/22 OK 72s docs=24 pdfs=5 :: V NAIL BAR AND LASH INC
+2026-07-05 12:37:34 18/22 OK 68s docs=30 pdfs=5 :: VERIZON 168503
+2026-07-05 12:39:07 19/22 OK 93s docs=11 pdfs=5 :: VISION WORLD
+2026-07-05 12:41:12 20/22 OK 125s docs=30 pdfs=5 :: VITAMIN SHOPPE 39
+2026-07-05 12:43:24 21/22 OK 132s docs=8 pdfs=5 :: Warby Parker
+2026-07-05 12:44:38 22/22 OK 73s docs=30 pdfs=5 :: WHOLE FOODS 10483
+2026-07-05 12:44:38 gateway batch complete

@@ -1,0 +1,7 @@
+﻿2026-07-09 11:32:26 [hygiene] === HYGIENE SWEEP START ===
+2026-07-09 11:32:26 [hygiene] --- phase: text reindex (new digital docs) ---
+2026-07-09 11:34:37 [hygiene] --- phase: OCR (new scanned docs) ---
+2026-07-09 11:39:00 [hygiene] --- phase: embedding backfill ---
+2026-07-09 11:39:01 [hygiene] --- phase: lease critical-dates refresh ---
+2026-07-09 11:39:01 [hygiene] critical-dates sync http=200
+2026-07-09 11:39:01 [hygiene] === HYGIENE SWEEP COMPLETE ===

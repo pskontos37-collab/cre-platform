@@ -1,0 +1,52 @@
+﻿2026-07-08 22:20:18 [s3] regen: 98 total older than 2026-07-09T12:00:00Z; this shard 3/4 handles 24
+2026-07-08 22:22:06 [s3] 1/24 OK 109s docs= pdfs= :: Batteries Plus Bulbs
+2026-07-08 22:23:24 [s3] 2/24 OK 78s docs= pdfs= :: Island Nails Spa
+2026-07-08 22:24:30 [s3] 3/24 OK 66s docs= pdfs= :: Krispy Kreme
+2026-07-08 22:25:56 [s3] 4/24 OK 86s docs= pdfs= :: Moe's Southwest Grill
+2026-07-08 22:28:10 [s3] 5/24 OK 134s docs= pdfs= :: Rainbow
+2026-07-08 22:30:01 [s3] 6/24 OK 111s docs= pdfs= :: Sport Clips
+2026-07-08 22:31:07 [s3] 7/24 OK 66s docs= pdfs= :: Visionworks
+2026-07-08 22:32:24 [s3] 8/24 OK 77s docs= pdfs= :: Avance Primary Care
+2026-07-08 22:32:48 [s3] 9/24 OK 24s docs= pdfs= :: European Wax Center
+2026-07-08 22:33:55 [s3] 10/24 OK 68s docs= pdfs= :: Starbuck's
+2026-07-08 22:35:01 [s3] 11/24 OK 65s docs= pdfs= :: Another Broken Egg Café
+2026-07-08 22:36:39 [s3] 12/24 OK 99s docs= pdfs= :: Bober Tea Greenville LLC
+2026-07-08 22:37:59 [s3] 13/24 OK 80s docs= pdfs= :: Destination XL
+2026-07-08 22:39:12 [s3] 14/24 OK 73s docs= pdfs= :: Firebird's Wood Fired Grill
+2026-07-08 22:40:18 [s3] 15/24 OK 66s docs= pdfs= :: Kirkland's
+2026-07-08 22:42:23 [s3] 16/24 OK 125s docs= pdfs= :: MyEyeDr.
+2026-07-08 22:44:40 [s3] 17/24 OK 136s docs= pdfs= :: SSI Greenville LLC
+2026-07-08 22:45:47 [s3] 18/24 OK 67s docs= pdfs= :: Woodhouse Day Spa
+2026-07-08 22:47:09 [s3] 19/24 OK 82s docs= pdfs= :: BEV MAX LIQUORS
+2026-07-08 22:48:17 [s3] 20/24 OK 69s docs= pdfs= :: DSW 29193
+2026-07-08 22:50:10 [s3] 21/24 OK 112s docs= pdfs= :: KOHLS 397
+2026-07-08 22:51:31 [s3] 22/24 OK 81s docs= pdfs= :: Staples #4
+2026-07-08 22:52:45 [s3] 23/24 OK 74s docs= pdfs= :: US ALLIANCE FEDERAL CREDIT
+2026-07-08 22:53:53 [s3] 24/24 OK 68s docs= pdfs= :: VITAMIN SHOPPE 39
+2026-07-08 22:53:53 [s3] regen batch complete
+2026-07-08 23:47:40 [s3] regen: 98 total older than 2026-07-09T12:00:00Z; this shard 3/4 handles 24
+2026-07-08 23:49:29 [s3] 1/24 OK 109s docs= pdfs= :: Batteries Plus Bulbs
+2026-07-08 23:50:51 [s3] 2/24 OK 83s docs= pdfs= :: Island Nails Spa
+2026-07-08 23:51:48 [s3] 3/24 OK 57s docs= pdfs= :: Krispy Kreme
+2026-07-08 23:53:34 [s3] 4/24 OK 106s docs= pdfs= :: Moe's Southwest Grill
+2026-07-08 23:55:43 [s3] 5/24 OK 130s docs= pdfs= :: Rainbow
+2026-07-08 23:57:22 [s3] 6/24 OK 99s docs= pdfs= :: Sport Clips
+2026-07-08 23:58:18 [s3] 7/24 OK 55s docs= pdfs= :: Visionworks
+2026-07-08 23:59:34 [s3] 8/24 OK 77s docs= pdfs= :: Avance Primary Care
+2026-07-09 00:00:04 [s3] 9/24 OK 30s docs= pdfs= :: European Wax Center
+2026-07-09 00:01:16 [s3] 10/24 OK 72s docs= pdfs= :: Starbuck's
+2026-07-09 00:02:37 [s3] 11/24 OK 81s docs= pdfs= :: Another Broken Egg Café
+2026-07-09 00:04:11 [s3] 12/24 OK 94s docs= pdfs= :: Bober Tea Greenville LLC
+2026-07-09 00:05:21 [s3] 13/24 OK 71s docs= pdfs= :: Destination XL
+2026-07-09 00:06:28 [s3] 14/24 OK 67s docs= pdfs= :: Firebird's Wood Fired Grill
+2026-07-09 00:07:33 [s3] 15/24 OK 65s docs= pdfs= :: Kirkland's
+2026-07-09 00:09:16 [s3] 16/24 OK 102s docs= pdfs= :: MyEyeDr.
+2026-07-09 00:11:32 [s3] 17/24 OK 137s docs= pdfs= :: SSI Greenville LLC
+2026-07-09 00:12:42 [s3] 18/24 OK 70s docs= pdfs= :: Woodhouse Day Spa
+2026-07-09 00:14:06 [s3] 19/24 OK 84s docs= pdfs= :: BEV MAX LIQUORS
+2026-07-09 00:15:11 [s3] 20/24 OK 65s docs= pdfs= :: DSW 29193
+2026-07-09 00:16:53 [s3] 21/24 OK 101s docs= pdfs= :: KOHLS 397
+2026-07-09 00:18:03 [s3] 22/24 OK 70s docs= pdfs= :: Staples #4
+2026-07-09 00:19:41 [s3] 23/24 OK 98s docs= pdfs= :: US ALLIANCE FEDERAL CREDIT
+2026-07-09 00:20:45 [s3] 24/24 OK 63s docs= pdfs= :: VITAMIN SHOPPE 39
+2026-07-09 00:20:45 [s3] regen batch complete

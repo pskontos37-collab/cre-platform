@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 
-export type ThemeId = 'dark-pro' | 'light' | 'ocean' | 'midnight'
+export type ThemeId = 'wilkow' | 'dark-pro' | 'light' | 'ocean' | 'midnight'
 
 export interface ThemeOption {
   id: ThemeId
@@ -10,6 +10,7 @@ export interface ThemeOption {
 }
 
 export const THEMES: ThemeOption[] = [
+  { id: 'wilkow',    name: 'M&J Wilkow', preview: '#123a4b', textPreview: '#a9c6da' },
   { id: 'dark-pro',  name: 'Dark Pro',   preview: '#030712', textPreview: '#f9fafb' },
   { id: 'light',     name: 'Light',      preview: '#f8fafc', textPreview: '#0f172a' },
   { id: 'ocean',     name: 'Ocean',      preview: '#040d18', textPreview: '#e0f2fe' },
@@ -28,11 +29,11 @@ const STORAGE_KEY = 'cre-theme'
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>(() => {
     const saved = localStorage.getItem(STORAGE_KEY) as ThemeId | null
-    return saved && THEMES.some(t => t.id === saved) ? saved : 'dark-pro'
+    return saved && THEMES.some(t => t.id === saved) ? saved : 'wilkow'
   })
 
   useEffect(() => {
-    if (theme === 'dark-pro') {
+    if (theme === 'wilkow') {
       document.documentElement.removeAttribute('data-theme')
     } else {
       document.documentElement.setAttribute('data-theme', theme)

@@ -53,6 +53,9 @@ Use the Supabase dashboard → SQL editor, or the Supabase CLI (`supabase db pus
 | 20240010_audit_log.sql | audit_log with auto-triggers |
 | 20240011_indexes.sql | Performance indexes |
 
+Later migrations (20240012+) are feature migrations — see each feature's notes in the
+project memory. Highest applied as of 2026-07-11: 20240074_property_nca.
+
 ## Architecture decisions
 
 ### Why Supabase
@@ -79,6 +82,19 @@ They live inside the database and cannot be spoofed by the application.
 `src/lib/waterfall.ts` — pure TypeScript, zero database calls, fully testable.
 Tests: `src/lib/__tests__/waterfall.test.ts`
 
+Three engines live here:
+- `computeWaterfall(input)` — the simple single-lump sequential distributor described below.
+- `computeIrrWaterfall(input)` / `runIrrWaterfall(...)` — a **true IRR-hurdle solver** over *dated* cash flows.
+  It finds the exact distribution that carries the LP to each tier's `hurdle_irr` before the promote steps up,
+  using the fact that XNPV is linear in an added cash flow at a fixed rate (`cashToHitIrr` is closed-form, no
+  nested root-finding). Supports equity-multiple caps (`hurdle_em`, lesser-of semantics), hurdle-freeze dates,
+  and senior unit classes (`SeniorClassPosition`, e.g. Gateway's Class D). Also exports `xnpv` / `xirr`
+  (Actual/365). Tests: `src/lib/__tests__/irrWaterfall.test.ts`.
+- `computeSellToday(input)` — the "sold today" orchestrator used by `/waterfall`: turns a hypothetical sale
+  (value, closing %, net current assets, payoff) into net proceeds and runs them through BOTH waterfall layers
+  on each partner's actual dated flow history (`capital_flows` table), including Knightdale's $73M sale-price
+  override and cash-on-hand split. Layer 2 values each unit class (B-unit hypothetical liquidation value).
+
 Payment order per distribution event:
 1. Preferred equity: pay return (cash or PIK accrual) + redeem principal when current
 2. Return of LP capital (pro-rata by initial contribution)
@@ -87,7 +103,9 @@ Payment order per distribution event:
 5. Promote split (remaining cash splits LP/GP per the tier percentages)
 
 All parameters are deal-specific — nothing is hard-coded.
-Stored in `waterfall_tiers` table; entered via the property onboarding screen.
+Stored in `waterfall_tiers` table; sell-today defaults in `deals.selltoday` jsonb.
+Net current assets default is computed from the latest GL year via the `property_nca(pid)` RPC
+(migration 20240074) with a manual override in the UI.
 
 ### Financial calculations
 `src/lib/financials.ts` — NOI, DSCR, WALT, occupancy, trailing-12.
@@ -112,16 +130,6 @@ Import jobs tracked in `import_jobs` with `column_mapping` jsonb (user maps colu
 
 ### Document AI / RAG (Phase 4)
 `document_chunks` stores text with `vector(1536)` embeddings via pgvector.
-After loading embeddings, uncomment the IVFFlat index in 20240011_indexes.sql.
-
-## Phase plan
-
-| Phase | Status | Deliverable |
-|---|---|---|
-| 1 | ✅ Complete | Data model + auth + RLS + unit tests |
-| 2 | Pending | Portfolio dashboard (NOI, DSCR, occupancy, rollover, critical dates) |
-| 3 | Pending | Document repository + Excel import + inspections |
-| 4 | Pending | AI assistant (RAG, lease abstraction, scenario analysis) |
 
 ## Conventions
 
@@ -133,6 +141,17 @@ After loading embeddings, uncomment the IVFFlat index in 20240011_indexes.sql.
 - Retail-specific fields (`has_co_tenancy_clause`, `has_exclusives`, `percentage_rent_rate`, etc.)
   are stored on all leases but only shown in the UI when `lease.lease_type = 'retail'`
 - Office-specific fields (`base_year`, `expense_stop_amount`) same pattern
+- Keep PowerShell scripts ASCII (no smart quotes / em dashes) — PS 5.1 reads them as ANSI
+- Straight quotes only in TS/TSX code (smart-quote delimiters break esbuild)
+
+## Deploys
+
+- Frontend: `scripts/deploy_vercel.ps1` (SHA upload of the working tree; Vercel builds with
+  `vite build` per vercel.json — tsc is NOT run, so type errors do not block deploys)
+- Edge functions: `scripts/deploy_edge.ps1 -Slug <fn>`
+- ⚠️ The working tree IS the deploy source. Commit regularly — on 2026-07-11 a stray
+  `git checkout`-style revert of tracked files shipped a months-old app shell to production
+  (recovered from Vercel deployment file APIs: v6 tree + v8 file contents).
 
 ## Key accounts you will need
 

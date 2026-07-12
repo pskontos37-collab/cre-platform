@@ -1,0 +1,52 @@
+﻿2026-07-08 22:20:15 [s2] regen: 98 total older than 2026-07-09T12:00:00Z; this shard 2/4 handles 24
+2026-07-08 22:21:23 [s2] 1/24 OK 68s docs= pdfs= :: Athlete's Foot
+2026-07-08 22:22:41 [s2] 2/24 OK 78s docs= pdfs= :: HomeGoods, Inc.
+2026-07-08 22:24:21 [s2] 3/24 OK 100s docs= pdfs= :: Kirklands #523
+2026-07-08 22:25:37 [s2] 4/24 OK 76s docs= pdfs= :: Michaels #6725
+2026-07-08 22:26:49 [s2] 5/24 OK 72s docs= pdfs= :: Rack Room Shoes #474
+2026-07-08 22:28:25 [s2] 6/24 OK 95s docs= pdfs= :: Slice of NY Pizza
+2026-07-08 22:29:53 [s2] 7/24 OK 89s docs= pdfs= :: Vida Dulce of Knightdale, Inc
+2026-07-08 22:31:02 [s2] 8/24 OK 69s docs= pdfs= :: Academy, Ltd.
+2026-07-08 22:32:20 [s2] 9/24 OK 78s docs= pdfs= :: Embassy Nails
+2026-07-08 22:33:30 [s2] 10/24 OK 70s docs= pdfs= :: Results Physiotherapy
+2026-07-08 22:35:13 [s2] 11/24 OK 103s docs= pdfs= :: 100 Chiro Fehrman, LLC
+2026-07-08 22:36:14 [s2] 12/24 OK 61s docs= pdfs= :: Blue Cross Blue Shield
+2026-07-08 22:37:35 [s2] 13/24 OK 82s docs= pdfs= :: Dave and Busters
+2026-07-08 22:39:27 [s2] 14/24 OK 111s docs= pdfs= :: Elmer Swim School
+2026-07-08 22:40:53 [s2] 15/24 OK 86s docs= pdfs= :: JINYA Ramen Bar
+2026-07-08 22:41:52 [s2] 16/24 OK 59s docs= pdfs= :: Music and Arts
+2026-07-08 22:42:46 [s2] 17/24 OK 55s docs= pdfs= :: Select Comfort #10264
+2026-07-08 22:44:00 [s2] 18/24 OK 73s docs= pdfs= :: Wild Wings Cafe
+2026-07-08 22:45:10 [s2] 19/24 OK 70s docs= pdfs= :: BANK OF AMERICA PNY53240000
+2026-07-08 22:46:13 [s2] 20/24 OK 62s docs= pdfs= :: Club Pilates
+2026-07-08 22:47:27 [s2] 21/24 OK 75s docs= pdfs= :: JEMBRO/DAVES DOLLAR
+2026-07-08 22:48:42 [s2] 22/24 OK 75s docs= pdfs= :: Shake Shack New York LLC
+2026-07-08 22:49:49 [s2] 23/24 OK 66s docs= pdfs= :: ULTA 594
+2026-07-08 22:51:10 [s2] 24/24 OK 81s docs= pdfs= :: VISION WORLD
+2026-07-08 22:51:10 [s2] regen batch complete
+2026-07-08 23:47:38 [s2] regen: 98 total older than 2026-07-09T12:00:00Z; this shard 2/4 handles 24
+2026-07-08 23:48:41 [s2] 1/24 OK 64s docs= pdfs= :: Athlete's Foot
+2026-07-08 23:50:00 [s2] 2/24 OK 79s docs= pdfs= :: HomeGoods, Inc.
+2026-07-08 23:51:34 [s2] 3/24 OK 93s docs= pdfs= :: Kirklands #523
+2026-07-08 23:52:45 [s2] 4/24 OK 72s docs= pdfs= :: Michaels #6725
+2026-07-08 23:53:51 [s2] 5/24 OK 65s docs= pdfs= :: Rack Room Shoes #474
+2026-07-08 23:55:06 [s2] 6/24 OK 75s docs= pdfs= :: Slice of NY Pizza
+2026-07-08 23:56:34 [s2] 7/24 OK 88s docs= pdfs= :: Vida Dulce of Knightdale, Inc
+2026-07-08 23:57:36 [s2] 8/24 OK 62s docs= pdfs= :: Academy, Ltd.
+2026-07-08 23:58:44 [s2] 9/24 OK 68s docs= pdfs= :: Embassy Nails
+2026-07-08 23:59:53 [s2] 10/24 OK 69s docs= pdfs= :: Results Physiotherapy
+2026-07-09 00:01:49 [s2] 11/24 OK 115s docs= pdfs= :: 100 Chiro Fehrman, LLC
+2026-07-09 00:02:50 [s2] 12/24 OK 61s docs= pdfs= :: Blue Cross Blue Shield
+2026-07-09 00:04:09 [s2] 13/24 OK 79s docs= pdfs= :: Dave and Busters
+2026-07-09 00:05:51 [s2] 14/24 OK 102s docs= pdfs= :: Elmer Swim School
+2026-07-09 00:07:07 [s2] 15/24 OK 76s docs= pdfs= :: JINYA Ramen Bar
+2026-07-09 00:08:04 [s2] 16/24 OK 57s docs= pdfs= :: Music and Arts
+2026-07-09 00:08:58 [s2] 17/24 OK 54s docs= pdfs= :: Select Comfort #10264
+2026-07-09 00:09:56 [s2] 18/24 OK 58s docs= pdfs= :: Wild Wings Cafe
+2026-07-09 00:11:02 [s2] 19/24 OK 66s docs= pdfs= :: BANK OF AMERICA PNY53240000
+2026-07-09 00:12:07 [s2] 20/24 OK 65s docs= pdfs= :: Club Pilates
+2026-07-09 00:13:28 [s2] 21/24 OK 81s docs= pdfs= :: JEMBRO/DAVES DOLLAR
+2026-07-09 00:14:46 [s2] 22/24 OK 78s docs= pdfs= :: Shake Shack New York LLC
+2026-07-09 00:15:50 [s2] 23/24 OK 63s docs= pdfs= :: ULTA 594
+2026-07-09 00:17:03 [s2] 24/24 OK 74s docs= pdfs= :: VISION WORLD
+2026-07-09 00:17:03 [s2] regen batch complete

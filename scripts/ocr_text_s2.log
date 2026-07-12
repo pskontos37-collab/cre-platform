@@ -1,0 +1,95 @@
+﻿2026-07-08 00:04:16 [ocr s2] corpus target: 9560 docs
+2026-07-08 00:04:31 [ocr s2] skip set (has text / done): 5789 - OCR targets the rest
+2026-07-08 00:09:58 [ocr s2] done=174 OK 1s too-large 163 pg (proc=12 chunks=91 big=1 empty=0 fail=0)
+2026-07-08 00:11:53 [ocr s2] done=242 OK 7s 1 chunks (proc=20 chunks=118 big=1 empty=1 fail=0)
+2026-07-08 00:27:11 [ocr s2] done=402 OK 1s too-large 159 pg (proc=37 chunks=388 big=2 empty=1 fail=0)
+2026-07-08 00:29:00 [ocr s2] done=418 OK 1s too-large 124 pg (proc=39 chunks=421 big=3 empty=1 fail=0)
+2026-07-08 00:29:30 [ocr s2] done=430 OK 30s 7 chunks (proc=40 chunks=428 big=3 empty=1 fail=0)
+2026-07-08 00:39:50 [ocr s2] done=602 OK 10s 3 chunks (proc=60 chunks=597 big=3 empty=1 fail=0)
+2026-07-08 00:45:53 [ocr s2] idx=762 FAIL 4s :: 1418600c-6f11-484f-921d-1c92f52eb9aa :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 00:48:27 [ocr s2] done=826 OK 37s 11 chunks (proc=80 chunks=740 big=3 empty=1 fail=1)
+2026-07-08 00:59:45 [ocr s2] done=1034 OK 43s 10 chunks (proc=100 chunks=930 big=3 empty=1 fail=1)
+2026-07-08 01:08:11 [ocr s2] idx=1166 FAIL 33s :: 1f3a2635-8970-4eb0-8ae3-c84dd351a809 :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Output blocked by content filtering policy\"},\"request_id\":\"req_011Ccp6AY3X8f2TyrfbJ52A1\"}"
+2026-07-08 01:09:41 [ocr s2] done=1210 OK 6s 1 chunks (proc=120 chunks=1087 big=3 empty=1 fail=2)
+2026-07-08 01:09:45 [ocr s2] idx=1214 FAIL 4s :: 209ae423-fa9c-4542-bebf-d2e3cc9a08f7 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 01:18:58 [ocr s2] done=1450 OK 54s 18 chunks (proc=140 chunks=1230 big=3 empty=1 fail=3)
+2026-07-08 01:27:28 [ocr s2] done=1726 OK 10s 2 chunks (proc=160 chunks=1358 big=3 empty=1 fail=3)
+2026-07-08 01:38:33 [ocr s2] done=1950 OK 31s 7 chunks (proc=180 chunks=1542 big=3 empty=2 fail=3)
+2026-07-08 01:43:34 [ocr s2] done=2066 OK 1s too-large 327 pg (proc=191 chunks=1633 big=4 empty=2 fail=3)
+2026-07-08 01:47:29 [ocr s2] done=2150 OK 33s 9 chunks (proc=200 chunks=1705 big=4 empty=2 fail=3)
+2026-07-08 01:48:04 [ocr s2] idx=2158 FAIL 3s :: 39db6eeb-e50a-4cae-aabc-a84128590602 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 01:48:31 [ocr s2] idx=2178 FAIL 4s :: 3a42cb5f-5011-4706-8a61-b1edf4f85e28 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 01:53:30 [ocr s2] done=2334 OK 1s too-large 186 pg (proc=214 chunks=1795 big=5 empty=2 fail=5)
+2026-07-08 01:55:47 [ocr s2] done=2390 OK 30s 9 chunks (proc=220 chunks=1833 big=5 empty=2 fail=5)
+2026-07-08 02:07:51 [ocr s2] done=2626 OK 17s 3 chunks (proc=240 chunks=2039 big=5 empty=2 fail=5)
+2026-07-08 02:16:45 [ocr s2] done=2802 OK 13s 2 chunks (proc=260 chunks=2174 big=5 empty=2 fail=5)
+2026-07-08 02:23:12 [ocr s2] done=2994 OK 14s 3 chunks (proc=280 chunks=2271 big=5 empty=3 fail=5)
+2026-07-08 02:23:38 [ocr s2] done=3010 OK 1s too-large 123 pg (proc=283 chunks=2277 big=6 empty=3 fail=5)
+2026-07-08 02:33:36 [ocr s2] done=3150 OK 62s 20 chunks (proc=300 chunks=2441 big=6 empty=4 fail=5)
+2026-07-08 02:34:28 [ocr s2] done=3198 OK 1s too-large 124 pg (proc=306 chunks=2450 big=7 empty=5 fail=5)
+2026-07-08 02:35:37 [ocr s2] done=3222 OK 1s too-large 126 pg (proc=309 chunks=2469 big=8 empty=5 fail=5)
+2026-07-08 02:44:38 [ocr s2] done=3334 OK 99s 30 chunks TRUNC (proc=320 chunks=2625 big=8 empty=5 fail=5)
+2026-07-08 02:54:20 [ocr s2] done=3470 OK 16s 3 chunks (proc=340 chunks=2790 big=8 empty=5 fail=5)
+2026-07-08 03:06:44 [ocr s2] done=3662 OK 21s 5 chunks (proc=360 chunks=3005 big=8 empty=5 fail=5)
+2026-07-08 03:08:09 [ocr s2] done=3778 OK 1s too-large 107 pg (proc=367 chunks=3025 big=9 empty=7 fail=5)
+2026-07-08 03:09:11 [ocr s2] idx=3866 FAIL 2s :: 66c2da53-761c-4f43-9657-a84c0bc58962 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 03:11:52 [ocr s2] idx=3954 FAIL 2s :: 697e0167-f040-4583-a267-a58143dd7fd0 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 03:12:21 [ocr s2] done=3962 OK 16s 3 chunks (proc=380 chunks=3089 big=9 empty=9 fail=7)
+2026-07-08 03:21:14 [ocr s2] done=4178 OK 69s 19 chunks (proc=400 chunks=3233 big=9 empty=9 fail=7)
+2026-07-08 03:32:42 [ocr s2] done=4354 OK 24s 5 chunks (proc=420 chunks=3425 big=9 empty=9 fail=7)
+2026-07-08 03:40:24 [ocr s2] done=4514 OK 1s too-large 291 pg (proc=433 chunks=3576 big=10 empty=9 fail=7)
+2026-07-08 03:43:18 [ocr s2] done=4574 OK 45s 12 chunks (proc=440 chunks=3632 big=10 empty=10 fail=7)
+2026-07-08 03:56:43 [ocr s2] done=4762 OK 101s 33 chunks TRUNC (proc=460 chunks=3858 big=10 empty=10 fail=7)
+2026-07-08 04:07:28 [ocr s2] done=5042 OK 18s 8 chunks (proc=480 chunks=4033 big=10 empty=10 fail=7)
+2026-07-08 04:20:01 [ocr s2] done=5230 OK 49s 13 chunks (proc=500 chunks=4232 big=10 empty=10 fail=7)
+2026-07-08 04:29:28 [ocr s2] done=5514 OK 66s 24 chunks (proc=520 chunks=4390 big=10 empty=10 fail=7)
+2026-07-08 04:42:33 [ocr s2] done=5750 OK 8s 2 chunks (proc=540 chunks=4606 big=10 empty=10 fail=7)
+2026-07-08 04:53:32 [ocr s2] done=5950 OK 16s 4 chunks (proc=560 chunks=4810 big=10 empty=10 fail=7)
+2026-07-08 05:02:25 [ocr s2] done=6166 OK 14s 3 chunks (proc=580 chunks=4953 big=10 empty=10 fail=7)
+2026-07-08 05:15:10 [ocr s2] done=6342 OK 1s too-large 136 pg (proc=598 chunks=5175 big=11 empty=10 fail=7)
+2026-07-08 05:16:51 [ocr s2] done=6354 OK 95s 31 chunks TRUNC (proc=600 chunks=5207 big=11 empty=10 fail=7)
+2026-07-08 05:28:51 [ocr s2] done=6542 OK 31s 10 chunks (proc=620 chunks=5418 big=11 empty=10 fail=7)
+2026-07-08 05:39:28 [ocr s2] done=6666 OK 6s 1 chunks (proc=640 chunks=5613 big=11 empty=10 fail=7)
+2026-07-08 05:51:58 [ocr s2] done=6878 OK 19s 3 chunks (proc=660 chunks=5827 big=11 empty=10 fail=7)
+2026-07-08 05:58:00 [ocr s2] done=7074 OK 1s too-large 128 pg (proc=680 chunks=5928 big=12 empty=11 fail=7)
+2026-07-08 05:58:08 [ocr s2] done=7118 OK 1s too-large 121 pg (proc=682 chunks=5929 big=13 empty=11 fail=7)
+2026-07-08 06:11:09 [ocr s2] done=7386 OK 67s 20 chunks (proc=700 chunks=6150 big=13 empty=13 fail=7)
+2026-07-08 06:20:23 [ocr s2] done=7566 OK 21s 5 chunks (proc=720 chunks=6298 big=13 empty=13 fail=7)
+2026-07-08 06:29:11 [ocr s2] done=7710 OK 35s 12 chunks (proc=740 chunks=6444 big=13 empty=14 fail=7)
+2026-07-08 06:43:01 [ocr s2] done=7914 OK 6s 1 chunks (proc=760 chunks=6680 big=13 empty=15 fail=7)
+2026-07-08 06:47:30 [ocr s2] done=7994 OK 1s too-large 104 pg (proc=769 chunks=6756 big=14 empty=15 fail=7)
+2026-07-08 06:49:53 [ocr s2] done=8142 OK 23s 7 chunks (proc=780 chunks=6790 big=14 empty=16 fail=7)
+2026-07-08 06:58:54 [ocr s2] done=8306 OK 20s 6 chunks (proc=800 chunks=6933 big=14 empty=16 fail=7)
+2026-07-08 07:09:54 [ocr s2] done=8466 OK 37s 16 chunks (proc=820 chunks=7117 big=14 empty=16 fail=7)
+2026-07-08 07:20:13 [ocr s2] done=8686 OK 13s 2 chunks (proc=840 chunks=7268 big=14 empty=16 fail=7)
+2026-07-08 07:33:34 [ocr s2] done=8834 OK 19s 5 chunks (proc=860 chunks=7509 big=14 empty=16 fail=7)
+2026-07-08 07:40:33 [ocr s2] done=9046 OK 12s 3 chunks (proc=880 chunks=7616 big=14 empty=17 fail=7)
+2026-07-08 07:49:53 [ocr s2] done=9226 OK 8s 2 chunks (proc=900 chunks=7761 big=14 empty=18 fail=7)
+2026-07-08 07:54:37 [ocr s2] done=9258 OK 1s too-large 103 pg (proc=907 chunks=7838 big=15 empty=18 fail=7)
+2026-07-08 08:00:52 [ocr s2] done=9398 OK 56s 18 chunks (proc=920 chunks=7940 big=15 empty=18 fail=7)
+2026-07-08 08:04:40 [ocr s2] done=9418 OK 1s too-large 195 pg (proc=924 chunks=8016 big=16 empty=18 fail=7)
+2026-07-08 08:10:23 [ocr s2] OCR SHARD DONE: processed=936, text chunks=8102, too-large=16, empty=18, failed=7
+2026-07-08 23:27:56 [ocr s2] corpus target: 9987 docs
+2026-07-08 23:28:15 [ocr s2] skip set (has text / done): 9787 - OCR targets the rest
+2026-07-08 23:31:12 [ocr s2] idx=902 FAIL 3s :: 16b56620-49c6-4e67-9b67-b4fab5dcf696 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 23:37:13 [ocr s2] idx=2267 FAIL 4s :: 39db6eeb-e50a-4cae-aabc-a84128590602 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 23:40:48 [ocr s2] idx=3377 FAIL 10s :: 56618b3a-799f-4ed5-919f-7be11247810a :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Output blocked by content filtering policy\"},\"request_id\":\"req_011CcqsLtcYd6YJUZ5945Wgt\"}"
+2026-07-08 23:42:09 [ocr s2] done=3404 OK 81s 26 chunks TRUNC (proc=20 chunks=241 big=0 empty=0 fail=3)
+2026-07-08 23:42:12 [ocr s2] idx=4025 FAIL 2s :: 66514360-1ff1-4a5c-99c5-9cd30dee78b3 :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"prompt is too long: 279403 tokens > 200000 maximum\"},\"request_id\":\"req_011CcqsTetzJhruWKc3D
+2026-07-08 23:43:38 [ocr s2] idx=4130 FAIL 3s :: 697e0167-f040-4583-a267-a58143dd7fd0 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-08 23:46:21 [ocr s2] idx=4910 FAIL 21s :: 7dc9b4f4-d466-4678-9473-6e267b965b99 :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Output blocked by content filtering policy\"},\"request_id\":\"req_011CcqskZy3d38JLwfkpNKo8\"}"
+2026-07-09 01:16:40 [ocr s2] corpus target: 9987 docs
+2026-07-09 01:16:59 [ocr s2] skip set (has text / done): 9886 - OCR targets the rest
+2026-07-09 01:17:02 [ocr s2] idx=902 FAIL 2s :: 16b56620-49c6-4e67-9b67-b4fab5dcf696 :: {"error":"OCR API error: {\"error\":{\"type\":\"request_too_large\",\"message\":\"Request exceeds the maximum size\"}}"}
+2026-07-09 01:17:04 [ocr s2] idx=2267 FAIL 3s :: 39db6eeb-e50a-4cae-aabc-a84128590602 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-09 01:17:15 [ocr s2] idx=3377 FAIL 10s :: 56618b3a-799f-4ed5-919f-7be11247810a :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Output blocked by content filtering policy\"},\"request_id\":\"req_011CcqzhRCBct4zwaTsaeboc\"}"
+2026-07-09 01:17:18 [ocr s2] idx=4025 FAIL 3s :: 66514360-1ff1-4a5c-99c5-9cd30dee78b3 :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"prompt is too long: 279403 tokens > 200000 maximum\"},\"request_id\":\"req_011CcqziGnSrVWtA9oq9
+2026-07-09 01:17:21 [ocr s2] idx=4130 FAIL 3s :: 697e0167-f040-4583-a267-a58143dd7fd0 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-09 01:17:41 [ocr s2] idx=4910 FAIL 20s :: 7dc9b4f4-d466-4678-9473-6e267b965b99 :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Output blocked by content filtering policy\"},\"request_id\":\"req_011CcqzignpkyxwHKL9aw3PF\"}"
+2026-07-09 01:22:22 [ocr s2] idx=5906 FAIL 3s :: 97d1980e-2375-4feb-a50e-ee71faae7c70 :: {"code":"WORKER_RESOURCE_LIMIT","message":"Function failed due to not having enough compute resources (please check logs)"}
+2026-07-09 01:26:33 [ocr s2] done=6530 OK 1s too-large 298 pg (proc=18 chunks=154 big=1 empty=0 fail=7)
+2026-07-09 01:27:20 [ocr s2] idx=6653 FAIL 8s :: ab09fdc3-b508-4595-bc7a-24843e000d6d :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"prompt is too long: 279403 tokens > 200000 maximum\"},\"request_id\":\"req_011Ccr1UDkrj4kAzVJv8
+2026-07-09 01:27:38 [ocr s2] done=6770 OK 18s 5 chunks (proc=20 chunks=170 big=1 empty=0 fail=8)
+2026-07-09 01:29:52 [ocr s2] idx=8198 FAIL 16s :: d2111b92-5de6-4442-8840-2c3be38192ce :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"prompt is too long: 201888 tokens > 200000 maximum\"},\"request_id\":\"req_011Ccr1eu51tznveYGjJ
+2026-07-09 01:34:11 [ocr s2] idx=9023 FAIL 65s :: e71f3256-5e01-44ef-94ae-72f6ed71d756 :: {"error":"OCR API error: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Output blocked by content filtering policy\"},\"request_id\":\"req_011Ccr1vEsJsdrM63q73T2de\"}"
+2026-07-09 01:38:19 [ocr s2] OCR SHARD DONE: processed=36, text chunks=340, too-large=1, empty=0, failed=10

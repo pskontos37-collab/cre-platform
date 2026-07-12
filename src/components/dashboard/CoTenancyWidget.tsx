@@ -1,7 +1,9 @@
+import { useMemo } from 'react'
 import { Widget, WidgetSkeleton } from '../ui/Widget'
 import { Badge } from '../ui/Badge'
 import { EmptyState } from '../ui/EmptyState'
 import { useCoTenancyFlags } from '../../hooks/useDashboard'
+import { useCoTenancyRisk, useTerminationRisk, TIER_RANK, TIER_COLOR, TIER_LABEL } from '../../hooks/useLeaseRights'
 import { supabase } from '../../lib/supabase'
 
 interface CoTenancyWidgetProps {
@@ -13,6 +15,23 @@ interface CoTenancyWidgetProps {
 export function CoTenancyWidget({ propertyIds, propertyNames }: CoTenancyWidgetProps) {
   const { data, loading, error, refetch } = useCoTenancyFlags(propertyIds)
   const rows = data ?? []
+
+  // Forward-looking layer: projected co-tenancy risk + live termination rights
+  // (migration 20240072 RPCs). Triggered clauses become real flags via the sync
+  // RPC above; everything below "triggered" shows here as At Risk.
+  const risk = useCoTenancyRisk(propertyIds)
+  const term = useTerminationRisk(propertyIds)
+  const atRisk = useMemo(() => {
+    const ct = (risk.data ?? [])
+      .filter(r => r.tier !== 'ok' && r.tier !== 'triggered')
+      .map(r => ({ key: `ct-${r.clause_id}`, tenant: r.tenant_name, property_id: r.property_id, tier: r.tier, text: r.reasons.join(' · ') }))
+    const tr = (term.data ?? [])
+      .filter(r => ['triggered', 'open', 'high'].includes(r.tier))
+      .map(r => ({ key: `tr-${r.right_id}`, tenant: r.tenant_name, property_id: r.property_id, tier: r.tier, text: r.details ?? r.reasons.join(' · ') }))
+    return [...ct, ...tr]
+      .sort((a, b) => (TIER_RANK[a.tier] ?? 9) - (TIER_RANK[b.tier] ?? 9))
+      .slice(0, 8)
+  }, [risk.data, term.data])
 
   async function handleDismiss(flagId: string) {
     await supabase.from('co_tenancy_flags').update({ status: 'dismissed' }).eq('id', flagId)
@@ -28,8 +47,8 @@ export function CoTenancyWidget({ propertyIds, propertyNames }: CoTenancyWidgetP
     <Widget title="Co-Tenancy Alerts" chip={rows.length > 0 ? `${rows.length} pending` : undefined}>
       {loading && <WidgetSkeleton rows={2} />}
       {error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{error}</div>}
-      {!loading && !error && rows.length === 0 && (
-        <EmptyState icon="✅" title="No co-tenancy alerts" subtitle="No pending co-tenancy clause triggers" />
+      {!loading && !error && rows.length === 0 && atRisk.length === 0 && (
+        <EmptyState icon="✅" title="No co-tenancy alerts" subtitle="No triggered clauses or projected risks" />
       )}
       {!loading && !error && rows.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -98,6 +117,31 @@ export function CoTenancyWidget({ propertyIds, propertyNames }: CoTenancyWidgetP
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {!loading && !error && atRisk.length > 0 && (
+        <div style={{ marginTop: rows.length > 0 ? 12 : 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 6 }}>
+            At risk — projected
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {atRisk.map(r => {
+              const c = TIER_COLOR[r.tier] ?? TIER_COLOR.unknown
+              return (
+                <div key={r.key} style={{ padding: '7px 10px', background: 'var(--surface-2)', borderRadius: 7, border: '1px solid var(--border-2)' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginBottom: 2 }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text)' }}>{r.tenant}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-faint)', flex: 1 }}>{propertyNames[r.property_id] ?? ''}</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 7px', borderRadius: 8, color: c.fg, background: c.bg }}>
+                      {TIER_LABEL[r.tier] ?? r.tier}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>{r.text}</div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </Widget>

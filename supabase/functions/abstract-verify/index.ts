@@ -1,0 +1,286 @@
+// abstract-verify — independent QA pass over an already-generated lease abstract.
+//
+// This is the human-in-the-loop assurance layer. Rather than trusting the
+// abstractor's own summary, a SECOND model call re-reads the SAME governing
+// PDFs the abstract was built from (source_doc_ids) and is told to REFUTE the
+// abstract: for every high-value field it must find the source text that
+// supports OR contradicts the stored value, quote it, and cite it. It also runs
+// arithmetic consistency checks and confirms the latest amendment's terms are
+// the ones reflected (the exact failure that left 9 KM tenants with stale
+// expirations).
+//
+// Grounding on the SAME documents (not a fresh search) guarantees the verifier
+// sees what the abstractor saw — a disagreement means the abstractor misread,
+// not that the two runs looked at different files.
+//
+// Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY.
+// Usage: POST JSON { property_id: uuid, tenant: string, max_pdfs?: number }
+
+import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+
+// Verification is a reasoning task, not a formatting one — use the strongest
+// model available. Override with QA_MODEL if needed.
+const MODEL = Deno.env.get('QA_MODEL') ?? 'claude-opus-4-8'
+const CHAR_BUDGET = 350_000
+
+// Forced tool-use so the verdict comes back as parsed JSON (quoted lease
+// language in source_quote can never break parsing).
+async function anthropicJson(key: string, model: string, content: any[], maxTokens: number): Promise<any> {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model, max_tokens: maxTokens,
+      tools: [{
+        name: 'submit_qa',
+        description: 'Submit the completed verification verdict.',
+        input_schema: { type: 'object', additionalProperties: true },
+      }],
+      tool_choice: { type: 'tool', name: 'submit_qa' },
+      messages: [{ role: 'user', content }],
+    }),
+  })
+  const d = await r.json()
+  if (!r.ok) throw new Error('Anthropic API error: ' + JSON.stringify(d))
+  if (d.stop_reason === 'max_tokens') throw new Error('Verdict truncated at max_tokens — retry')
+  const block = (d.content ?? []).find((c: { type: string }) => c.type === 'tool_use')
+  if (!block) throw new Error('Model returned no tool_use block')
+  return block.input
+}
+
+const QA_SCHEMA = `{
+ "confidence": "high"|"medium"|"low",
+ "summary": str,                                  // 1-2 sentences: is this abstract trustworthy, and where are the risks
+ "field_checks": [{                               // verify the abstract against the DOCUMENTS ONLY (never against MRI — that goes in mri_reconciliation)
+   "field": str,                                  // dotted path, e.g. "term.expiration", "base_rent_schedule[0].annual", "options[1]"
+   "abstract_value": str,                         // what the abstract currently says (stringify)
+   "verdict": "confirmed"|"discrepancy"|"unsupported"|"needs_source",
+   "source_quote": str,                           // VERBATIM text from the documents that supports or contradicts the value ("" if none exists)
+   "citation": str,                               // document title + section/article where the quote lives
+   "severity": "high"|"medium"|"low",             // economic/legal impact of the field being wrong
+   "note": str                                    // what is right/wrong and, if a discrepancy, the correct value
+ }],
+ "mri_reconciliation": [{                          // where the abstract/documents DISAGREE with the MRI system-of-record. This is a data-reconciliation signal, NOT an abstract defect — the abstract can be correct and MRI stale/mismatched.
+   "field": str,
+   "abstract_value": str,
+   "mri_value": str,
+   "governs": "abstract"|"mri"|"unclear",         // which source is authoritative: 'abstract' when the documents (esp. the latest amendment) clearly control; 'mri' when MRI is right and the abstract is wrong; 'unclear' otherwise
+   "note": str
+ }],
+ "arithmetic": [{ "check": str, "ok": bool, "detail": str }],   // monthly*12 vs annual; annual vs psf*sf; commencement+term vs expiration. ok=false ONLY for a GENUINE numeric contradiction between STATED values; a value that merely cannot be computed/confirmed is NOT an arithmetic failure (record that as a needs_source field_check instead).
+ "amendment_currency": { "current": bool, "note": str },        // are the CURRENT (latest-amendment) terms the ones abstracted, not a superseded earlier value? Judge against the DOCUMENTS' amendment chain — do NOT set current=false merely because MRI shows different values (that is an mri_reconciliation item).
+ "fabrication_risk": [str],                       // any abstract value that no attached/excerpted document supports (specific field + value)
+ "recommended_fixes": [str]                       // concrete edits to make the abstract correct (empty if none)
+}`
+
+// verdict → row status. 'issues' = something a human must fix before relying on
+// the abstract; 'review' = softer flags worth a look; 'verified' = clean.
+function deriveStatus(qa: any): string {
+  const checks = Array.isArray(qa?.field_checks) ? qa.field_checks : []
+  const arith = Array.isArray(qa?.arithmetic) ? qa.arithmetic : []
+  const badVerdict = (v: string) => v === 'discrepancy' || v === 'unsupported'
+  // ISSUES = something a human must fix before relying on the abstract: a
+  // HIGH-severity discrepancy/unsupported claim, failed arithmetic, or a stale
+  // (superseded-amendment) term.
+  const highIssue = checks.some((c: any) => badVerdict(c?.verdict) && c?.severity === 'high')
+  const arithFail = arith.some((a: any) => a?.ok === false)
+  const stale = qa?.amendment_currency?.current === false
+  if (highIssue || arithFail || stale) return 'issues'
+  // REVIEW = softer flags worth a look: medium/low discrepancies, needs-source,
+  // or derived-value disclosures. fabrication_risk is NOT an issues trigger — post
+  // grounding-fix it mostly holds "computed, not quoted verbatim" notes, and a
+  // genuinely invented fact also surfaces as a HIGH 'unsupported' field_check above.
+  const softFlag = checks.some((c: any) => badVerdict(c?.verdict) || c?.verdict === 'needs_source')
+  const fabrication = Array.isArray(qa?.fabrication_risk) && qa.fabrication_risk.length > 0
+  if (softFlag || fabrication) return 'review'
+  return 'verified'
+}
+
+serve(async (req) => {
+  const CORS = corsHeaders(req)
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
+  try {
+    const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+    const caller = await requireUser(req, sb)
+
+    const body = await req.json().catch(() => ({}))
+    const propertyId: string = body.property_id ?? ''
+    const tenant: string = (body.tenant ?? '').trim()
+    if (!propertyId || !tenant) throw new Error('property_id and tenant are required')
+    if (!canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+
+    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
+    if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')
+
+    // ── 1. The abstract to verify ──
+    const { data: row, error: rErr } = await sb.from('lease_abstracts')
+      .select('id, abstract, source_doc_ids, model')
+      .eq('property_id', propertyId)
+      .eq('tenant_name', tenant)
+      .maybeSingle()
+    if (rErr) throw new Error('load abstract failed: ' + rErr.message)
+    if (!row || !row.abstract) throw new Error(`No abstract exists for "${tenant}" — generate it first`)
+    const sourceIds: string[] = Array.isArray(row.source_doc_ids) ? row.source_doc_ids : []
+    if (!sourceIds.length) throw new Error('Abstract has no recorded source documents — regenerate it before verifying')
+
+    // ── 2. The SAME source documents the abstractor used ──
+    const { data: sdocs, error: dErr } = await sb.from('documents')
+      .select('id, doc_type, title, file_name, file_path, storage_path, file_size_bytes')
+      .in('id', sourceIds)
+    if (dErr) throw new Error('document load failed: ' + dErr.message)
+    // Preserve the abstractor's ordering (governing lease + newest amendments
+    // first) so the attach/text budget favours the same primary sources.
+    const orderIdx = new Map(sourceIds.map((id, i) => [id, i]))
+    const docs = ((sdocs ?? []) as any[]).sort(
+      (a, b) => (orderIdx.get(a.id) ?? 999) - (orderIdx.get(b.id) ?? 999))
+    if (!docs.length) throw new Error('Source documents no longer available')
+
+    // ── 3. Full chunk text, capped ──
+    const { data: chunks } = await sb.from('document_chunks')
+      .select('document_id, chunk_index, content')
+      .in('document_id', docs.map(d => d.id))
+      .order('chunk_index')
+    const byDoc = new Map<string, string[]>()
+    for (const c of (chunks ?? []) as any[]) {
+      if (!byDoc.has(c.document_id)) byDoc.set(c.document_id, [])
+      byDoc.get(c.document_id)!.push(c.content ?? '')
+    }
+    let used = 0
+    const parts: string[] = []
+    for (const d of docs) {
+      const text = (byDoc.get(d.id) ?? []).join('\n')
+      if (!text) continue
+      const room = CHAR_BUDGET - used
+      if (room < 2000) break
+      const slice = text.slice(0, room)
+      parts.push(`===== DOCUMENT: "${d.title ?? d.file_name}" (type: ${d.doc_type}) =====\n${slice}`)
+      used += slice.length
+    }
+
+    // ── 3b. Re-attach the governing PDFs (primary sources for verbatim quotes) ──
+    const MAX_ATTACH_BYTES = 8_000_000
+    const MAX_ATTACH_TOTAL = 20_000_000
+    const mp = Number(body.max_pdfs)
+    const MAX_ATTACH_DOCS = Number.isFinite(mp) ? Math.max(0, Math.min(mp, 5)) : 5
+    let attachBytes = 0
+    const attachable: any[] = []
+    for (const d of docs) {
+      if (attachable.length >= MAX_ATTACH_DOCS) break
+      if (typeof d.storage_path !== 'string' || !d.storage_path.startsWith('p/')) continue
+      const sz = Number(d.file_size_bytes)
+      if (!(sz > 0) || sz > MAX_ATTACH_BYTES || attachBytes + sz > MAX_ATTACH_TOTAL) continue
+      attachable.push(d)
+      attachBytes += sz
+    }
+    let attachments: any[] = []
+    if (attachable.length) {
+      const { data: signedUrls } = await sb.storage.from('documents')
+        .createSignedUrls(attachable.map((d: any) => d.storage_path), 3600)
+      attachments = (signedUrls ?? [])
+        .filter((s: any) => s.signedUrl)
+        .map((s: any) => ({ type: 'document', source: { type: 'url', url: s.signedUrl } }))
+    }
+
+    // ── 3c. MRI system-of-record cross-check (independent ground truth) ──
+    const { data: leaseRows } = await sb.from('leases')
+      .select('status, commencement_date, expiration_date, leased_sf, security_deposit, ti_allowance, has_percentage_rent, percentage_rent_rate, natural_breakpoint, artificial_breakpoint, tenants!inner(name, trade_name)')
+      .eq('property_id', propertyId)
+    const tl = tenant.toLowerCase().trim()
+    const norm = (s: string | null | undefined) => (s ?? '').toLowerCase().trim()
+    // Match the abstract's tenant to its MRI lease row. Exact match on trade
+    // name or legal name FIRST; then a GUARDED substring match (both sides
+    // non-empty, ≥4 chars). Never use includes('') — a null/empty trade_name
+    // would otherwise match every tenant and feed the wrong row as ground truth.
+    const leaseCands = (leaseRows ?? []) as any[]
+    const leaseRow =
+      leaseCands.find(l => { const t = norm(l.tenants?.trade_name), n = norm(l.tenants?.name); return (!!t && t === tl) || (!!n && n === tl) }) ??
+      leaseCands.find(l => {
+        for (const cand of [norm(l.tenants?.trade_name), norm(l.tenants?.name)]) {
+          if (cand.length >= 4 && (tl.includes(cand) || cand.includes(tl))) return true
+        }
+        return false
+      }) ?? null
+
+    // ── 4. Verify ──
+    const attachNote = attachments.length
+      ? `\nThe ${attachments.length} attached PDF(s) are the PRIMARY SOURCES (${attachable.map((d: any) => `"${d.title ?? d.file_name}"`).join(', ')}). Quote from them for source_quote; the text excerpts below cover the remaining instruments.`
+      : ''
+    const prompt = `You are an independent QA reviewer auditing a commercial lease abstract produced by another analyst for M&J Wilkow. Your job is NOT to re-abstract the lease — it is to ADVERSARIALLY VERIFY the abstract below against the source documents. Assume it may contain errors and try to prove each material value wrong.${attachNote}
+
+Method:
+- For every HIGH-VALUE field (tenant legal name, suite, square footage, rent commencement, expiration, term length, every base_rent_schedule row, options, percentage rent rate/breakpoint, CAM methodology, guarantor, security deposit, tenant allowance, co-tenancy, exclusives, kickout/termination), locate the governing language in the documents and decide:
+    confirmed    — the abstract value matches the source (quote it).
+    discrepancy  — the source says something different (quote it; give the correct value in "note").
+    unsupported  — the abstract asserts a value no document backs up.
+    needs_source — the field can only be confirmed from a document NOT in this request (say which).
+- THE LATEST AMENDMENT CONTROLS. Establish the amendment chain from the recitals. If the abstract reflects a term that a later amendment superseded (e.g. an expiration or rent step from the original lease when a Fourth Amendment extended it), that is a discrepancy AND set amendment_currency.current = false. This is the single most important check. Judge currency against the DOCUMENTS only — never set current=false just because MRI differs.
+- MRI IS NOT A DOCUMENT. field_checks and amendment_currency judge the abstract against the LEASE DOCUMENTS ONLY. Any disagreement with the MRI system-of-record values goes in the separate "mri_reconciliation" array — NOT in field_checks. MRI is frequently stale or points to a different tenant/space (renamed units, old records); when the documents (especially the latest amendment) clearly control, set governs="abstract" and do NOT treat the abstract as wrong. Only when MRI is right and the abstract misread the documents does the abstract itself get a field_checks discrepancy.
+- Run the arithmetic checks: monthly rent × 12 vs. annual; annual vs. $PSF × square footage; rent_commencement + term_years vs. expiration. Set ok=false ONLY for a GENUINE numeric contradiction between values the documents STATE. If a figure simply cannot be computed or confirmed (e.g. a formula-based date with an unknown input), that is NOT an arithmetic failure — leave it out of arithmetic and record a needs_source field_check instead.
+- source_quote MUST be verbatim text copied from the documents — never paraphrase, never invent a citation. If you cannot find supporting text, source_quote = "" and verdict is unsupported or needs_source.
+- Only list a field in field_checks if you actually examined the source for it. Do not pad with trivially-confirmed fields; prioritise money, dates, and the amendment chain.
+
+Call the submit_qa tool with an object matching this schema exactly (all keys present):
+${QA_SCHEMA}
+${leaseRow ? `\nMRI system-of-record values (a SEPARATE system, NOT one of the lease documents — use ONLY to populate mri_reconciliation; do not treat as document truth): ${JSON.stringify(leaseRow)}` : ''}
+
+THE ABSTRACT UNDER REVIEW (produced by model "${row.model ?? 'unknown'}"):
+${JSON.stringify(row.abstract)}
+
+SOURCE DOCUMENTS:
+${parts.join('\n\n')}`
+
+    const textPrompt = attachments.length && used > 150_000
+      ? prompt.slice(0, prompt.length - used + 150_000)
+      : prompt
+    const isCapError = (e: unknown) =>
+      /page|too long|too large|exceed|prompt is too long/i.test(e instanceof Error ? e.message : String(e))
+    let qa: any
+    try {
+      qa = await anthropicJson(anthropicKey, MODEL, [...attachments, { type: 'text', text: textPrompt }], 16000)
+    } catch (e) {
+      if (!attachments.length || !isCapError(e)) throw e
+      if (attachments.length > 2) {
+        try {
+          attachments = attachments.slice(0, 2)
+          qa = await anthropicJson(anthropicKey, MODEL, [...attachments, { type: 'text', text: textPrompt }], 16000)
+        } catch (e2) {
+          if (!isCapError(e2)) throw e2
+          qa = await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }], 16000)
+          attachments = []
+        }
+      } else {
+        qa = await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }], 16000)
+        attachments = []
+      }
+    }
+
+    const qaStatus = deriveStatus(qa)
+
+    // ── 5. Save ──
+    const { error: upErr } = await sb.from('lease_abstracts')
+      .update({
+        qa,
+        qa_status: qaStatus,
+        qa_model: MODEL,
+        qa_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('property_id', propertyId)
+      .eq('tenant_name', tenant)
+    if (upErr) throw new Error('save failed: ' + upErr.message)
+
+    return new Response(JSON.stringify({
+      success: true, tenant, property_id: propertyId,
+      qa_status: qaStatus, pdf_sources: attachments.length, docs_reviewed: docs.length, qa,
+    }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const status = err instanceof AuthError ? err.status : 500
+    return new Response(JSON.stringify({ error: msg }), {
+      status, headers: { ...CORS, 'Content-Type': 'application/json' },
+    })
+  }
+})

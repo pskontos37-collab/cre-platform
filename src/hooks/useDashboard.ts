@@ -157,7 +157,10 @@ export interface LoanDSCRRow {
   t12Noi: number | null
   dscr: number | null
   debtYield: number | null
+  ltv: number | null
+  /** Headroom vs the governing covenant — DSCR points (x) for dscr, decimal pct points for debt_yield. */
   headroom: number | null
+  covenantType: 'debt_yield' | 'dscr' | null
   isNear: boolean
   isBreach: boolean
 }
@@ -175,54 +178,69 @@ export function useDSCR(propertyIds: string[], propertyNames: Record<string, str
     const loansArr = (loans ?? []) as Loan[]
     if (!loansArr.length) return []
 
-    // Batch-fetch all periods + items for all relevant properties
-    const oneYearAgo = new Date()
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+    // A loan's covenants measure against the NOI of the assets that secure it.
+    // collateral_property_ids names the GL-bearing properties; fall back to the loan's
+    // own property (e.g. the cross-collateralized MetLife loan sits on the KM
+    // "Consolidated" entity, which has no GL — its NOI is KM East + KM West).
+    const collateralOf = (l: Loan): string[] =>
+      l.collateral_property_ids && l.collateral_property_ids.length ? l.collateral_property_ids : [l.property_id]
+    const allCollateral = [...new Set(loansArr.flatMap(collateralOf))]
 
-    const { data: periods } = await supabase
-      .from('financial_periods')
-      .select('id, property_id, period_start, is_budget')
-      .in('property_id', propertyIds)
-      .eq('is_budget', false)
-      .gte('period_start', oneYearAgo.toISOString().split('T')[0])
-      .order('period_start', { ascending: true })
+    // GL-derived monthly NOI (the reliable, penny-accurate source) for every collateral property.
+    const { data: monthly, error: mErr } = await supabase
+      .from('v_gl_pnl_monthly')
+      .select('property_id, period_year, period_month, noi')
+      .in('property_id', allCollateral)
+    if (mErr) throw new Error(mErr.message)
+    const monthlyArr = (monthly ?? []) as Array<{ property_id: string; period_year: number; period_month: number; noi: number | null }>
 
-    const { data: items } = await supabase
-      .from('operating_line_items')
-      .select('financial_period_id, category, amount')
-      .in('financial_period_id', (periods ?? []).map((p: any) => p.id))
-
-    const periodsArr = (periods ?? []) as Pick<FinancialPeriod, 'id' | 'property_id' | 'period_start' | 'is_budget'>[]
-    const itemsArr = (items ?? []) as Pick<OperatingLineItem, 'financial_period_id' | 'category' | 'amount'>[]
+    // Trailing-12 NOI combined across a set of properties: aggregate by calendar month,
+    // then sum the most recent 12 months present (matches useGlPnl's T12 window).
+    const t12For = (propIds: string[]): number | null => {
+      const set = new Set(propIds)
+      const byKey = new Map<number, number>()
+      for (const r of monthlyArr) {
+        if (!set.has(r.property_id)) continue
+        const key = Number(r.period_year) * 12 + Number(r.period_month)
+        byKey.set(key, (byKey.get(key) ?? 0) + Number(r.noi ?? 0))
+      }
+      if (!byKey.size) return null
+      return [...byKey.keys()].sort((a, b) => a - b).slice(-12).reduce((s, k) => s + (byKey.get(k) ?? 0), 0)
+    }
 
     return loansArr.map(loan => {
-      const propPeriods = periodsArr.filter(p => p.property_id === loan.property_id)
-      const t12Noi = propPeriods.length
-        ? computeTrailing12NOI(propPeriods.map(p => ({
-            isActual: !p.is_budget,
-            lineItems: itemsArr.filter(i => i.financial_period_id === p.id),
-          })))
-        : null
+      const t12Noi = t12For(collateralOf(loan))
+      const ads = loan.annual_debt_service
+      const bal = loan.outstanding_balance
 
-      const dscr = loan.annual_debt_service && t12Noi !== null
-        ? computeDSCR(t12Noi, loan.annual_debt_service) : null
+      const dscr = ads && t12Noi !== null ? computeDSCR(t12Noi, ads) : null
+      const debtYield = bal && bal > 0 && t12Noi !== null ? t12Noi / bal : null
+      // LTV needs a current appraised value, which we don't track yet.
+      const ltv: number | null = null
 
-      const headroomResult = dscr !== null && loan.dscr_covenant && loan.annual_debt_service && t12Noi !== null
-        ? computeDSCRHeadroom(t12Noi, loan.annual_debt_service, loan.dscr_covenant)
-        : null
-
-      const debtYield = loan.outstanding_balance && loan.outstanding_balance > 0 && t12Noi !== null
-        ? t12Noi / loan.outstanding_balance : null
+      // Evaluate the covenant that actually governs this loan: debt yield (MetLife) or DSCR.
+      let covenantType: 'debt_yield' | 'dscr' | null = null
+      let headroom: number | null = null
+      let isBreach = false
+      let isNear = false
+      if (loan.debt_yield_covenant != null && debtYield != null) {
+        covenantType = 'debt_yield'
+        headroom = debtYield - loan.debt_yield_covenant
+        isBreach = headroom < 0
+        isNear = !isBreach && headroom < 0.01            // within 1 percentage point
+      } else if (loan.dscr_covenant != null && dscr != null && ads && t12Noi !== null) {
+        covenantType = 'dscr'
+        const hr = computeDSCRHeadroom(t12Noi, ads, loan.dscr_covenant)
+        headroom = hr.headroom
+        isBreach = hr.isBreach
+        isNear = !hr.isBreach && (hr.headroom ?? 0) < 0.10
+      }
 
       return {
         loan,
         propertyName: propertyNames[loan.property_id] ?? 'Unknown',
-        t12Noi,
-        dscr,
-        debtYield,
-        headroom:  headroomResult?.headroom ?? null,
-        isNear:    headroomResult ? (!headroomResult.isBreach && (headroomResult.headroom ?? 0) < 0.10) : false,
-        isBreach:  headroomResult?.isBreach ?? false,
+        t12Noi, dscr, debtYield, ltv,
+        headroom, covenantType, isNear, isBreach,
       }
     })
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
@@ -349,6 +367,7 @@ export function useLeaseRollover(propertyIds: string[]) {
 
 export interface CriticalDateRow {
   id: string
+  propertyId: string
   propertyName: string
   tenantName: string | null
   dateType: string
@@ -359,13 +378,13 @@ export interface CriticalDateRow {
   leaseId: string | null
 }
 
-export function useCriticalDates(propertyIds: string[], propertyNames: Record<string, string>) {
+export function useCriticalDates(propertyIds: string[], propertyNames: Record<string, string>, days = 90) {
   return useQuery<CriticalDateRow[]>(async () => {
     if (!propertyIds.length) return []
 
     const today = new Date()
     const horizon = new Date()
-    horizon.setDate(horizon.getDate() + 90)
+    horizon.setDate(horizon.getDate() + days)
 
     const { data, error } = await supabase
       .from('critical_dates')
@@ -375,12 +394,13 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
       .gte('due_date', today.toISOString().split('T')[0])
       .lte('due_date', horizon.toISOString().split('T')[0])
       .order('due_date')
-      .limit(20)
+      .limit(50)
 
     if (error) throw new Error(error.message)
 
     return ((data ?? []) as any[]).map(row => ({
       id:           row.id,
+      propertyId:   row.property_id,
       propertyName: propertyNames[row.property_id] ?? 'Unknown',
       tenantName:   null,
       dateType:     row.date_type,
@@ -390,6 +410,57 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
       loanId:       row.loan_id,
       leaseId:      row.lease_id,
     }))
+  }, [propertyIds.join(','), JSON.stringify(propertyNames), days])
+}
+
+// ── Accounts Receivable (GL-derived net A/R) ─────────────────────────────────
+
+export interface ArTrendData {
+  latestMonth: number
+  totalLatest: number
+  trend: Array<{ month: number; balance: number }>          // portfolio, months 1..latest
+  // monthly = forward-filled balances for months 1..latest (same window as trend)
+  byProperty: Array<{ propertyId: string; propertyName: string; balance: number; monthly: number[] }>
+}
+
+export function useArTrend(propertyIds: string[], propertyNames: Record<string, string>) {
+  return useQuery<ArTrendData | null>(async () => {
+    if (!propertyIds.length) return null
+    const { data, error } = await supabase
+      .from('v_gl_ar_monthly')
+      .select('property_id, period_month, ar_balance')
+      .in('property_id', propertyIds)
+    if (error) throw new Error(error.message)
+    const rows = (data ?? []) as any[]
+    if (!rows.length) return null
+
+    // Forward-fill each property's cumulative balance across months so a month
+    // with no A/R activity carries the prior balance.
+    const byProp = new Map<string, Map<number, number>>()
+    let latestMonth = 1
+    for (const r of rows) {
+      if (!byProp.has(r.property_id)) byProp.set(r.property_id, new Map())
+      byProp.get(r.property_id)!.set(Number(r.period_month), Number(r.ar_balance))
+      latestMonth = Math.max(latestMonth, Number(r.period_month))
+    }
+    const filled = new Map<string, number[]>()   // property -> balance[month 1..latest]
+    for (const [pid, months] of byProp) {
+      const arr: number[] = []
+      let last = 0
+      for (let m = 1; m <= latestMonth; m++) {
+        if (months.has(m)) last = months.get(m)!
+        arr.push(last)
+      }
+      filled.set(pid, arr)
+    }
+    const trend = Array.from({ length: latestMonth }, (_, i) => ({
+      month: i + 1,
+      balance: [...filled.values()].reduce((s, arr) => s + arr[i], 0),
+    }))
+    const byProperty = [...filled.entries()]
+      .map(([pid, arr]) => ({ propertyId: pid, propertyName: propertyNames[pid] ?? 'Unknown', balance: arr[latestMonth - 1], monthly: arr }))
+      .sort((a, b) => b.balance - a.balance)
+    return { latestMonth, totalLatest: trend[latestMonth - 1].balance, trend, byProperty }
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
 }
 
@@ -398,6 +469,11 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
 export function useCoTenancyFlags(propertyIds: string[]) {
   return useQuery<CoTenancyFlag[]>(async () => {
     if (!propertyIds.length) return []
+
+    // Auto-flag: materialize pending flags for clauses whose conditions currently fail
+    // (sync_co_tenancy_flags RPC, migration 20240072). Best-effort — reading existing
+    // flags still works if the RPC isn't deployed yet.
+    try { await supabase.rpc('sync_co_tenancy_flags') } catch { /* pre-20240072 */ }
 
     const { data, error } = await supabase
       .from('co_tenancy_flags')
@@ -428,7 +504,7 @@ export function useTenantConcentration(propertyIds: string[], propertyNames: Rec
 
     const { data, error } = await supabase
       .from('leases')
-      .select('tenant_id, property_id, leased_sf, lease_rent_schedules(annual_rent, effective_date), tenant:tenants(id, name)')
+      .select('tenant_id, property_id, leased_sf, lease_rent_schedule(annual_rent, effective_date), tenant:tenants(id, name)')
       .in('property_id', propertyIds)
       .eq('status', 'active')
 
@@ -438,7 +514,7 @@ export function useTenantConcentration(propertyIds: string[], propertyNames: Rec
     const tenantMap = new Map<string, { name: string; rent: number; sf: number; propId: string }>()
 
     for (const lease of (data ?? []) as any[]) {
-      const schedules: any[] = (lease.lease_rent_schedules ?? [])
+      const schedules: any[] = (lease.lease_rent_schedule ?? [])
         .filter((s: any) => new Date(s.effective_date) <= today)
         .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
 
@@ -464,46 +540,64 @@ export function useTenantConcentration(propertyIds: string[], propertyNames: Rec
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
 }
 
-// ── Delinquency ───────────────────────────────────────────────────────────────
+// ── Delinquency (MRI A/R aging snapshots) ─────────────────────────────────────
 
 export interface DelinquencyRow {
   id: string
   tenantName: string
   propertyName: string
-  unitNumber: string | null
-  balance: number
-  dueDate: string
-  daysLate: number
-  paymentType: string
+  suite: string | null
+  total: number
+  current: number
+  b30: number
+  b60: number
+  b90: number
+  b120: number
+  pastDue: number
+  lastPaymentDate: string | null
+  asOf: string
 }
 
 export function useDelinquency(propertyIds: string[], propertyNames: Record<string, string>) {
   return useQuery<DelinquencyRow[]>(async () => {
     if (!propertyIds.length) return []
 
-    const today = new Date().toISOString().split('T')[0]
-
     const { data, error } = await supabase
-      .from('lease_payments')
-      .select('id, property_id, amount_due, amount_paid, due_date, payment_type, tenant:tenants(name), lease:leases(unit_id)')
+      .from('ar_aging')
+      .select('id, property_id, as_of_date, tenant_label, suite, total, bucket_current, bucket_30, bucket_60, bucket_90, bucket_120, last_payment_date, tenant:tenants(name)')
       .in('property_id', propertyIds)
-      .lt('due_date', today)
-      .is('paid_date', null)
-      .order('due_date')
+      .order('as_of_date', { ascending: false })
+      .limit(500)
 
     if (error) throw new Error(error.message)
 
-    const todayMs = Date.now()
-    return ((data ?? []) as any[]).map(row => ({
-      id:           row.id,
-      tenantName:   row.tenant?.name ?? 'Unknown',
-      propertyName: propertyNames[row.property_id] ?? 'Unknown',
-      unitNumber:   null,
-      balance:      row.amount_due - row.amount_paid,
-      dueDate:      row.due_date,
-      daysLate:     Math.floor((todayMs - new Date(row.due_date).getTime()) / 86_400_000),
-      paymentType:  row.payment_type,
-    }))
+    const rows = (data ?? []) as any[]
+    if (!rows.length) return []
+    // keep only the latest snapshot per property
+    const latest: Record<string, string> = {}
+    for (const r of rows) {
+      if (!latest[r.property_id] || r.as_of_date > latest[r.property_id]) latest[r.property_id] = r.as_of_date
+    }
+    return rows
+      .filter(r => r.as_of_date === latest[r.property_id])
+      .map(row => {
+        const b30 = Number(row.bucket_30 ?? 0), b60 = Number(row.bucket_60 ?? 0)
+        const b90 = Number(row.bucket_90 ?? 0), b120 = Number(row.bucket_120 ?? 0)
+        return {
+          id:              row.id,
+          tenantName:      row.tenant?.name ?? row.tenant_label,
+          propertyName:    propertyNames[row.property_id] ?? 'Unknown',
+          suite:           row.suite,
+          total:           Number(row.total ?? 0),
+          current:         Number(row.bucket_current ?? 0),
+          b30, b60, b90, b120,
+          pastDue:         b30 + b60 + b90 + b120,
+          lastPaymentDate: row.last_payment_date,
+          asOf:            row.as_of_date,
+        }
+      })
+      .filter(r => r.pastDue > 0.005)
+      .sort((a, b) => b.pastDue - a.pastDue)
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
 }
 
@@ -514,6 +608,7 @@ export interface CAMReconRow {
   propertyName: string
   tenantName: string | null
   periodYear: number
+  recType: 'cam' | 'ins' | 'ret'
   estimatedAmount: number | null
   actualAmount: number | null
   variance: number | null
@@ -527,19 +622,21 @@ export function useCAMRecon(propertyIds: string[], propertyNames: Record<string,
 
     const { data, error } = await supabase
       .from('cam_reconciliations')
-      .select('id, property_id, period_year, estimated_amount, actual_amount, status, due_date, tenant:tenants(name)')
+      .select('id, property_id, period_year, rec_type, estimated_amount, actual_amount, status, due_date, notes, tenant:tenants(name)')
       .in('property_id', propertyIds)
       .neq('status', 'complete')
       .order('due_date', { nullsFirst: false })
-      .limit(20)
+      .limit(100)
 
     if (error) throw new Error(error.message)
 
     return ((data ?? []) as any[]).map(row => ({
       id:               row.id,
       propertyName:     propertyNames[row.property_id] ?? 'Unknown',
-      tenantName:       row.tenant?.name ?? null,
+      // loader notes carry "tenant: <name>" for rows without a lease-model match
+      tenantName:       row.tenant?.name ?? (row.notes?.match(/tenant: ([^|]+)/)?.[1]?.trim() || null),
       periodYear:       row.period_year,
+      recType:          row.rec_type ?? 'cam',
       estimatedAmount:  row.estimated_amount,
       actualAmount:     row.actual_amount,
       variance:         row.actual_amount != null && row.estimated_amount != null
@@ -593,15 +690,15 @@ export function usePercentageRent(propertyIds: string[], propertyNames: Record<s
 
     const salesByLease: Record<string, number> = {}
     for (const rec of (records ?? []) as any[]) {
-      salesByLease[rec.lease_id] = (salesByLease[rec.lease_id] ?? 0) + rec.reported_sales
+      salesByLease[rec.lease_id] = (salesByLease[rec.lease_id] ?? 0) + Number(rec.reported_sales ?? 0)
     }
 
     return (leases as any[]).map(lease => {
       const ytdSales = salesByLease[lease.id] ?? 0
-      const bp = lease.natural_breakpoint ?? lease.artificial_breakpoint ?? 0
+      const bp = Number(lease.natural_breakpoint ?? lease.artificial_breakpoint ?? 0)
       const pctToBreakpoint = bp > 0 ? Math.min(ytdSales / bp, 1) : 0
-      const rate = lease.percentage_rent_rate ?? 0
-      const excess = Math.max(ytdSales - bp, 0)
+      const rate = Number(lease.percentage_rent_rate ?? 0)
+      const excess = bp > 0 ? Math.max(ytdSales - bp, 0) : 0
 
       return {
         leaseId:          lease.id,
@@ -612,9 +709,150 @@ export function usePercentageRent(propertyIds: string[], propertyNames: Record<s
         pctRate:          lease.percentage_rent_rate,
         pctToBreakpoint,
         estimatedPctRent: excess * rate,
-        willTrigger:      ytdSales > bp,
+        willTrigger:      bp > 0 && ytdSales > bp,
       }
     })
+      // Keep the widget substantive: hide leases with neither reported sales
+      // nor a known breakpoint (data pending), sort by progress-to-breakpoint.
+      .filter(r => r.ytdSales > 0 || r.effectiveBreakpoint > 0)
+      .sort((a, b) => b.pctToBreakpoint - a.pctToBreakpoint || b.ytdSales - a.ytdSales)
+  }, [propertyIds.join(','), JSON.stringify(propertyNames)])
+}
+
+// ── Health Ratio (occupancy cost ÷ sales) ─────────────────────────────────────
+// The retail "health ratio" (a.k.a. occupancy-cost ratio) measures how much of a
+// tenant's sales is consumed by the cost of occupying the space. Lower = healthier;
+// a tenant paying a large share of sales in rent + recoveries is at renewal/closure
+// risk. Only tenants that REPORT SALES (percentage-rent leases with sales records)
+// can be measured. We use trailing-12-month (TTM) sales — 2026 sales are partial —
+// against annual base rent + latest-year expense recoveries (CAM / tax / insurance).
+
+export type HealthBand = 'healthy' | 'watch' | 'high'
+
+export interface HealthRatioRow {
+  leaseId: string
+  tenantName: string
+  propertyName: string
+  ttmSales: number
+  baseRent: number
+  recoveries: number
+  occupancyCost: number
+  ratio: number            // occupancyCost / ttmSales
+  hasRecoveries: boolean    // false → occupancy cost is rent-only (a floor)
+  band: HealthBand
+}
+
+export interface HealthRatioData {
+  rows: HealthRatioRow[]
+  portfolioRatio: number   // Σ occupancy cost ÷ Σ TTM sales across shown tenants
+  ttmLabel: string         // e.g. "Jun 2025 – May 2026"
+}
+
+// Occupancy-cost-ratio thresholds. General-retail rules of thumb: under ~10% is
+// healthy, 10–15% bears watching, above 15% is elevated (category-dependent —
+// restaurants run leaner than services, so treat as a screen, not a verdict).
+const HEALTH_WATCH = 0.10
+const HEALTH_HIGH  = 0.15
+
+export const healthBand = (ratio: number): HealthBand =>
+  ratio <= HEALTH_WATCH ? 'healthy' : ratio <= HEALTH_HIGH ? 'watch' : 'high'
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+export function useHealthRatio(propertyIds: string[], propertyNames: Record<string, string>) {
+  return useQuery<HealthRatioData>(async () => {
+    const empty: HealthRatioData = { rows: [], portfolioRatio: 0, ttmLabel: '' }
+    if (!propertyIds.length) return empty
+
+    const currentYear = new Date().getFullYear()
+
+    // Sales-reporting leases + their latest annual base rent.
+    const { data: leases, error: lErr } = await supabase
+      .from('leases')
+      .select('id, property_id, tenant:tenants(name), lease_rent_schedule(annual_rent, effective_date)')
+      .in('property_id', propertyIds)
+      .eq('status', 'active')
+      .eq('has_percentage_rent', true)
+    if (lErr) throw new Error(lErr.message)
+    if (!leases?.length) return empty
+
+    const leaseIds = (leases as any[]).map(l => l.id)
+
+    // Sales records for the current + prior year — enough to cover any TTM window.
+    const { data: records, error: rErr } = await supabase
+      .from('pct_rent_records')
+      .select('lease_id, period_year, period_month, reported_sales')
+      .in('lease_id', leaseIds)
+      .in('period_year', [currentYear - 1, currentYear])
+    if (rErr) throw new Error(rErr.message)
+
+    // Expense recoveries (CAM / tax / insurance) per lease.
+    const { data: recons, error: cErr } = await supabase
+      .from('cam_reconciliations')
+      .select('lease_id, period_year, actual_amount, estimated_amount')
+      .in('lease_id', leaseIds)
+    if (cErr) throw new Error(cErr.message)
+
+    // Anchor the TTM window on the latest reported month present in the data
+    // (sales lag the calendar), then take the 12 months ending there.
+    const monthKey = (y: number, m: number) => y * 12 + (m - 1)
+    const withMonth = (records ?? []).filter((r: any) => r.period_month != null)
+    if (!withMonth.length) return empty
+    const latest = Math.max(...withMonth.map((r: any) => monthKey(r.period_year, r.period_month)))
+    const windowKeys = new Set(Array.from({ length: 12 }, (_, i) => latest - i))
+
+    const ttmSalesByLease: Record<string, number> = {}
+    for (const r of withMonth as any[]) {
+      if (windowKeys.has(monthKey(r.period_year, r.period_month)))
+        ttmSalesByLease[r.lease_id] = (ttmSalesByLease[r.lease_id] ?? 0) + Number(r.reported_sales ?? 0)
+    }
+
+    // Recoveries: use each lease's most recent reconciliation year, actual over estimated.
+    const recLatestYear: Record<string, number> = {}
+    for (const c of (recons ?? []) as any[]) {
+      const y = Number(c.period_year ?? 0)
+      if (y > (recLatestYear[c.lease_id] ?? 0)) recLatestYear[c.lease_id] = y
+    }
+    const recByLease: Record<string, number> = {}
+    for (const c of (recons ?? []) as any[]) {
+      if (Number(c.period_year ?? 0) !== recLatestYear[c.lease_id]) continue
+      recByLease[c.lease_id] = (recByLease[c.lease_id] ?? 0) + Number(c.actual_amount ?? c.estimated_amount ?? 0)
+    }
+
+    const rows: HealthRatioRow[] = (leases as any[])
+      .map(lease => {
+        const ttmSales = ttmSalesByLease[lease.id] ?? 0
+        const schedules = [...(lease.lease_rent_schedule ?? [])]
+          .sort((a: any, b: any) => String(b.effective_date).localeCompare(String(a.effective_date)))
+        const baseRent = Number(schedules[0]?.annual_rent ?? 0)
+        const recoveries = recByLease[lease.id] ?? 0
+        const occupancyCost = baseRent + recoveries
+        const ratio = ttmSales > 0 ? occupancyCost / ttmSales : 0
+        return {
+          leaseId:       lease.id,
+          tenantName:    lease.tenant?.name ?? 'Unknown',
+          propertyName:  propertyNames[lease.property_id] ?? 'Unknown',
+          ttmSales,
+          baseRent,
+          recoveries,
+          occupancyCost,
+          ratio,
+          hasRecoveries: recoveries > 0,
+          band:          healthBand(ratio),
+        }
+      })
+      // Need both sides of the ratio to say anything meaningful.
+      .filter(r => r.ttmSales > 0 && r.occupancyCost > 0)
+      .sort((a, b) => b.ratio - a.ratio)   // worst (highest cost burden) first
+
+    const totalCost  = rows.reduce((s, r) => s + r.occupancyCost, 0)
+    const totalSales = rows.reduce((s, r) => s + r.ttmSales, 0)
+
+    const ly = Math.floor((latest - 11) / 12), lm = (latest - 11) % 12
+    const ey = Math.floor(latest / 12),        em = latest % 12
+    const ttmLabel = `${MONTHS[lm]} ${ly} – ${MONTHS[em]} ${ey}`
+
+    return { rows, portfolioRatio: totalSales > 0 ? totalCost / totalSales : 0, ttmLabel }
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
 }
 

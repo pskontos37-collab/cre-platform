@@ -1,0 +1,117 @@
+﻿2026-07-08 22:20:06 [s0] regen: 98 total older than 2026-07-09T12:00:00Z; this shard 0/4 handles 25
+2026-07-08 22:21:32 [s0] 1/25 OK 85s docs= pdfs= :: Arby's
+2026-07-08 22:23:09 [s0] 2/25 OK 97s docs= pdfs= :: Five Guys Burgers and Fries
+2026-07-08 22:24:48 [s0] 3/25 OK 99s docs= pdfs= :: Jersey Mike's Subs
+2026-07-08 22:26:25 [s0] 4/25 OK 97s docs= pdfs= :: Little Caesars
+2026-07-08 22:27:51 [s0] 5/25 OK 86s docs= pdfs= :: New Japanese Express
+2026-07-08 22:29:17 [s0] 6/25 OK 86s docs= pdfs= :: Ross Dress for Less
+2026-07-08 22:30:57 [s0] 7/25 OK 101s docs= pdfs= :: Subway #37092
+2026-07-08 22:32:25 [s0] 8/25 OK 88s docs= pdfs= :: Wade Jurney Home
+2026-07-08 22:33:30 [s0] 9/25 OK 65s docs= pdfs= :: Best Buy
+2026-07-08 22:35:07 [s0] 10/25 OK 97s docs= pdfs= :: Grow Pediatric Dentistry
+2026-07-08 22:36:16 [s0] 11/25 OK 69s docs= pdfs= :: TJ Maxx
+2026-07-08 22:37:18 [s0] 12/25 OK 62s docs= pdfs= :: Bad Daddy's Burger Bar
+2026-07-08 22:38:25 [s0] 13/25 OK 67s docs= pdfs= :: Cheddar's Casual Café #0202058
+2026-07-08 22:40:24 [s0] 14/25 OK 119s docs= pdfs= :: Elase
+2026-07-08 22:41:32 [s0] 15/25 OK 67s docs= pdfs= :: Golf Galaxy
+2026-07-08 22:42:13 [s0] 16/25 OK 41s docs= pdfs= :: KPOT
+2026-07-08 22:43:28 [s0] 17/25 OK 75s docs= pdfs= :: Nordstrom Rack
+2026-07-08 22:44:19 [s0] 18/25 OK 51s docs= pdfs= :: The Good Feet Store
+2026-07-08 22:46:07 [s0] 19/25 OK 108s docs= pdfs= :: Woof Gang Bakery and Grooming
+2026-07-08 22:47:31 [s0] 20/25 OK 84s docs= pdfs= :: Burlington Coat Factory
+2026-07-08 22:48:50 [s0] 21/25 OK 79s docs= pdfs= :: HOMEGOODS  LLC 507
+2026-07-08 22:49:51 [s0] 22/25 OK 61s docs= pdfs= :: Old Navy #4885
+2026-07-08 22:50:59 [s0] 23/25 OK 68s docs= pdfs= :: Target
+2026-07-08 22:52:11 [s0] 24/25 OK 71s docs= pdfs= :: V NAIL BAR AND LASH INC
+2026-07-08 22:54:08 [s0] 25/25 OK 117s docs= pdfs= :: Warby Parker
+2026-07-08 22:54:08 [s0] regen batch complete
+2026-07-08 23:31:08 [s0] regen: 61 total older than 2026-07-09T03:42:00Z; this shard 0/1 handles 61
+2026-07-08 23:32:24 [s0] 1/61 OK 76s docs= pdfs= :: Arby's
+2026-07-08 23:33:41 [s0] 2/61 OK 77s docs= pdfs= :: AT AND T
+2026-07-08 23:35:01 [s0] 3/61 OK 79s docs= pdfs= :: Athlete's Foot
+2026-07-08 23:36:52 [s0] 4/61 OK 111s docs= pdfs= :: Batteries Plus Bulbs
+2026-07-08 23:38:42 [s0] 5/61 OK 110s docs= pdfs= :: Five Guys Burgers and Fries
+2026-07-08 23:39:55 [s0] 6/61 OK 73s docs= pdfs= :: GNC
+2026-07-08 23:41:14 [s0] 7/61 OK 79s docs= pdfs= :: HomeGoods, Inc.
+2026-07-08 23:42:32 [s0] 8/61 OK 78s docs= pdfs= :: Island Nails Spa
+2026-07-08 23:44:20 [s0] 9/61 OK 109s docs= pdfs= :: Jersey Mike's Subs
+2026-07-08 23:45:40 [s0] 10/61 OK 79s docs= pdfs= :: Kay Jewelers
+2026-07-08 23:47:24 [s0] 11/61 OK 105s docs= pdfs= :: Kirklands #523
+2026-07-08 23:47:35 [s0] regen: 98 total older than 2026-07-09T12:00:00Z; this shard 0/4 handles 25
+2026-07-08 23:48:21 [s0] 12/61 OK 57s docs= pdfs= :: Krispy Kreme
+2026-07-08 23:48:48 [s0] 1/25 OK 73s docs= pdfs= :: Arby's
+2026-07-08 23:50:10 [s0] 13/61 OK 109s docs= pdfs= :: Little Caesars
+2026-07-08 23:50:16 [s0] 2/25 OK 89s docs= pdfs= :: Five Guys Burgers and Fries
+2026-07-08 23:51:34 [s0] 14/61 OK 84s docs= pdfs= :: Mattress Warehouse
+2026-07-08 23:51:38 [s0] 3/25 OK 82s docs= pdfs= :: Jersey Mike's Subs
+2026-07-08 23:52:44 [s0] 15/61 OK 70s docs= pdfs= :: Michaels #6725
+2026-07-08 23:53:21 [s0] 4/25 OK 103s docs= pdfs= :: Little Caesars
+2026-07-08 23:54:16 [s0] 16/61 OK 92s docs= pdfs= :: Moe's Southwest Grill
+2026-07-08 23:54:50 [s0] 5/25 OK 88s docs= pdfs= :: New Japanese Express
+2026-07-08 23:55:41 [s0] 17/61 OK 86s docs= pdfs= :: New Japanese Express
+2026-07-08 23:56:02 [s0] 6/25 OK 72s docs= pdfs= :: Ross Dress for Less
+2026-07-08 23:56:48 [s0] 18/61 OK 67s docs= pdfs= :: PETSMART LLC#3279
+2026-07-08 23:57:32 [s0] 7/25 OK 90s docs= pdfs= :: Subway #37092
+2026-07-08 23:58:01 [s0] 19/61 OK 72s docs= pdfs= :: Rack Room Shoes #474
+2026-07-08 23:58:47 [s0] 8/25 OK 75s docs= pdfs= :: Wade Jurney Home
+2026-07-08 23:59:55 [s0] 9/25 OK 68s docs= pdfs= :: Best Buy
+2026-07-09 00:00:08 [s0] 20/61 OK 128s docs= pdfs= :: Rainbow
+2026-07-09 00:01:24 [s0] 21/61 OK 75s docs= pdfs= :: Ross Dress for Less
+2026-07-09 00:01:28 [s0] 10/25 OK 92s docs= pdfs= :: Grow Pediatric Dentistry
+2026-07-09 00:02:32 [s0] 11/25 OK 65s docs= pdfs= :: TJ Maxx
+2026-07-09 00:02:37 [s0] 22/61 OK 73s docs= pdfs= :: Salt Grass
+2026-07-09 00:03:37 [s0] 12/25 OK 64s docs= pdfs= :: Bad Daddy's Burger Bar
+2026-07-09 00:03:58 [s0] 23/61 OK 81s docs= pdfs= :: Slice of NY Pizza
+2026-07-09 00:04:41 [s0] 13/25 OK 64s docs= pdfs= :: Cheddar's Casual Café #0202058
+2026-07-09 00:05:26 [s0] 24/61 OK 89s docs= pdfs= :: Sport Clips
+2026-07-09 00:06:35 [s0] 14/25 OK 115s docs= pdfs= :: Elase
+2026-07-09 00:06:52 [s0] 25/61 OK 85s docs= pdfs= :: Subway #37092
+2026-07-09 00:07:39 [s0] 15/25 OK 63s docs= pdfs= :: Golf Galaxy
+2026-07-09 00:08:02 [s0] 26/61 OK 70s docs= pdfs= :: T-Mobile
+2026-07-09 00:08:16 [s0] 16/25 OK 37s docs= pdfs= :: KPOT
+2026-07-09 00:09:21 [s0] 27/61 OK 79s docs= pdfs= :: Vida Dulce of Knightdale, Inc
+2026-07-09 00:09:36 [s0] 17/25 OK 79s docs= pdfs= :: Nordstrom Rack
+2026-07-09 00:10:21 [s0] 28/61 OK 60s docs= pdfs= :: Visionworks
+2026-07-09 00:10:29 [s0] 18/25 OK 53s docs= pdfs= :: The Good Feet Store
+2026-07-09 00:12:09 [s0] 19/25 OK 100s docs= pdfs= :: Woof Gang Bakery and Grooming
+2026-07-09 00:12:51 [s0] 29/61 FAIL http=504 151s :: Wade Jurney Home :: 
+2026-07-09 00:13:35 [s0] 20/25 OK 85s docs= pdfs= :: Burlington Coat Factory
+2026-07-09 00:14:05 [s0] 30/61 OK 63s docs= pdfs= :: Wells Fargo
+2026-07-09 00:15:08 [s0] 21/25 OK 93s docs= pdfs= :: HOMEGOODS  LLC 507
+2026-07-09 00:15:09 [s0] 31/61 OK 65s docs= pdfs= :: Academy, Ltd.
+2026-07-09 00:16:10 [s0] 22/25 OK 62s docs= pdfs= :: Old Navy #4885
+2026-07-09 00:16:23 [s0] 32/61 OK 73s docs= pdfs= :: Avance Primary Care
+2026-07-09 00:17:21 [s0] 23/25 OK 71s docs= pdfs= :: Target
+2026-07-09 00:17:32 [s0] 33/61 OK 70s docs= pdfs= :: Best Buy
+2026-07-09 00:18:34 [s0] 24/25 OK 73s docs= pdfs= :: V NAIL BAR AND LASH INC
+2026-07-09 00:20:00 [s0] 34/61 OK 147s docs= pdfs= :: Burlington Coat Factory
+2026-07-09 00:20:44 [s0] 25/25 OK 130s docs= pdfs= :: Warby Parker
+2026-07-09 00:20:44 [s0] regen batch complete
+2026-07-09 00:21:04 [s0] 35/61 OK 65s docs= pdfs= :: Embassy Nails
+2026-07-09 00:21:26 [s0] 36/61 OK 22s docs= pdfs= :: European Wax Center
+2026-07-09 00:23:08 [s0] 37/61 OK 102s docs= pdfs= :: Grow Pediatric Dentistry
+2026-07-09 00:23:09 [s0] 38/61 FAIL http=500 1s :: Qdoba :: 
+2026-07-09 00:23:20 [s0] 39/61 FAIL http=500 1s :: Results Physiotherapy :: 
+2026-07-09 00:23:31 [s0] 40/61 FAIL http=500 1s :: Starbuck's :: 
+2026-07-09 00:23:43 [s0] 41/61 FAIL http=500 1s :: TJ Maxx :: 
+2026-07-09 00:23:54 [s0] 42/61 FAIL http=500 2s :: Tropical Smoothie Cafe' :: 
+2026-07-09 00:24:06 [s0] 43/61 FAIL http=500 1s :: 100 Chiro Fehrman, LLC :: 
+2026-07-09 00:24:17 [s0] 44/61 FAIL http=500 1s :: Another Broken Egg Café :: 
+2026-07-09 00:24:29 [s0] 45/61 FAIL http=500 2s :: Bad Daddy's Burger Bar :: 
+2026-07-09 00:24:40 [s0] 46/61 FAIL http=500 1s :: Bass Pro Shop :: 
+2026-07-09 00:24:51 [s0] 47/61 FAIL http=500 1s :: Blue Cross Blue Shield :: 
+2026-07-09 00:25:02 [s0] 48/61 FAIL http=500 1s :: Bober Tea Greenville LLC :: 
+2026-07-09 00:25:15 [s0] 49/61 FAIL http=500 2s :: Cheddar's Casual Café #0202058 :: 
+2026-07-09 00:25:26 [s0] 50/61 FAIL http=500 1s :: CONDADO TACOS 44, LLC :: 
+2026-07-09 00:25:37 [s0] 51/61 FAIL http=500 1s :: Dave and Busters :: 
+2026-07-09 00:25:48 [s0] 52/61 FAIL http=500 1s :: Destination XL :: 
+2026-07-09 00:25:59 [s0] 53/61 FAIL http=500 1s :: Elase :: 
+2026-07-09 00:26:11 [s0] 54/61 FAIL http=500 1s :: Elements Therapeutic Mas :: 
+2026-07-09 00:26:22 [s0] 55/61 FAIL http=500 1s :: Elmer Swim School :: 
+2026-07-09 00:26:33 [s0] 56/61 FAIL http=500 1s :: Firebird's Wood Fired Grill :: 
+2026-07-09 00:26:45 [s0] 57/61 FAIL http=500 1s :: Golf Galaxy :: 
+2026-07-09 00:26:56 [s0] 58/61 FAIL http=500 1s :: Jared Galleria of Jewelry #2544 :: 
+2026-07-09 00:27:07 [s0] 59/61 FAIL http=500 1s :: JINYA Ramen Bar :: 
+2026-07-09 00:27:19 [s0] 60/61 FAIL http=500 2s :: Kirkland's :: 
+2026-07-09 00:27:31 [s0] 61/61 FAIL http=500 2s :: Music and Arts :: 
+2026-07-09 00:27:41 [s0] regen batch complete

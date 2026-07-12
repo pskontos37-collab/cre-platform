@@ -1,7 +1,10 @@
-import { Widget, WidgetSkeleton } from '../ui/Widget'
+import { useState } from 'react'
+import { Widget, WidgetSkeleton, WidgetPropertyChip, usePropertyChip, ExpandToggle } from '../ui/Widget'
 import { Badge } from '../ui/Badge'
 import { EmptyState } from '../ui/EmptyState'
 import { usePercentageRent } from '../../hooks/useDashboard'
+
+const COLLAPSED = 3
 
 const fmtDollar = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -13,14 +16,28 @@ interface PercentageRentWidgetProps {
 }
 
 export function PercentageRentWidget({ propertyIds, propertyNames }: PercentageRentWidgetProps) {
-  const { data, loading, error } = usePercentageRent(propertyIds, propertyNames)
-  const rows = data ?? []
+  const [expanded, setExpanded] = useState(false)
+  const { sel, setSel, effectiveIds } = usePropertyChip(propertyIds)
+  const { data, loading, error } = usePercentageRent(effectiveIds, propertyNames)
+  // Surface the leases closest to (or over) their breakpoint first, so the
+  // collapsed view shows what matters.
+  const rows = [...(data ?? [])].sort((a, b) =>
+    Number(b.willTrigger) - Number(a.willTrigger) || b.pctToBreakpoint - a.pctToBreakpoint)
   const triggeredCount = rows.filter(r => r.willTrigger).length
+  const countLabel = triggeredCount > 0 ? `${triggeredCount} triggered` : `${rows.length} leases`
+  const visible = expanded ? rows : rows.slice(0, COLLAPSED)
 
   return (
     <Widget
       title="Percentage Rent Breakpoints"
-      chip={triggeredCount > 0 ? `${triggeredCount} triggered` : `${rows.length} leases`}
+      chip={propertyIds.length > 1
+        ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{countLabel}</span>
+            <WidgetPropertyChip scopeIds={propertyIds} propertyNames={propertyNames} value={sel} onChange={setSel} />
+          </span>
+        )
+        : countLabel}
     >
       {loading && <WidgetSkeleton rows={3} />}
       {error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{error}</div>}
@@ -29,7 +46,7 @@ export function PercentageRentWidget({ propertyIds, propertyNames }: PercentageR
       )}
       {!loading && !error && rows.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {rows.map(row => (
+          {visible.map(row => (
             <div
               key={row.leaseId}
               style={{
@@ -88,6 +105,12 @@ export function PercentageRentWidget({ propertyIds, propertyNames }: PercentageR
               )}
             </div>
           ))}
+          <ExpandToggle
+            expanded={expanded}
+            onToggle={() => setExpanded(e => !e)}
+            collapsedCount={COLLAPSED}
+            totalCount={rows.length}
+          />
         </div>
       )}
     </Widget>

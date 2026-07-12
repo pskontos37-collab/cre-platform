@@ -1,0 +1,172 @@
+﻿2026-07-08 22:54:54 [s0] Verifying 22 of 86 unverified (shard 0/4)
+2026-07-08 22:55:56 [s0] 1/22  62s :: Moe's Southwest Grill
+2026-07-08 22:57:15 [s0] 2/22  80s :: HomeGoods, Inc.
+2026-07-08 22:58:27 [s0] 3/22  71s :: Grow Pediatric Dentistry
+2026-07-08 22:59:54 [s0] 4/22  87s :: Burlington Coat Factory
+2026-07-08 23:01:00 [s0] 5/22  66s :: Restore Hyper Wellness of Port Chester
+2026-07-08 23:02:29 [s0] 6/22  89s :: Bass Pro Shop
+2026-07-08 23:04:22 [s0] 7/22  113s :: Elase
+2026-07-08 23:06:09 [s0] 8/22  106s :: Golf Galaxy
+2026-07-08 23:08:13 [s0] 9/22  124s :: Another Broken Egg Café
+2026-07-08 23:09:56 [s0] 10/22  103s :: Kay Jewelers
+2026-07-08 23:11:31 [s0] 11/22  95s :: MyEyeDr.
+2026-07-08 23:12:40 [s0] 12/22  69s :: US ALLIANCE FEDERAL CREDIT
+2026-07-08 23:14:17 [s0] 13/22  97s :: Blue Cross Blue Shield
+2026-07-08 23:15:57 [s0] 14/22  100s :: Veterinary Emergency Group, LLC
+2026-07-08 23:17:06 [s0] 15/22  68s :: Avance Primary Care
+2026-07-08 23:18:37 [s0] 16/22  92s :: Salt Grass
+2026-07-08 23:19:57 [s0] 17/22  80s :: Visionworks
+2026-07-08 23:20:58 [s0] 18/22  61s :: Club Pilates
+2026-07-08 23:22:31 [s0] 19/22  93s :: Starbuck's
+2026-07-08 23:23:58 [s0] 20/22  87s :: KOHLS 397
+2026-07-08 23:25:45 [s0] 21/22  108s :: Regal Cinemas
+2026-07-08 23:27:06 [s0] 22/22  81s :: ULTA 594
+2026-07-08 23:27:06 [s0] batch complete - verified=0 issues=0 review=0 fail=0 of 22
+2026-07-09 00:21:32 [s0] Verifying 25 of 98 unverified (shard 0/4)
+2026-07-09 00:23:06 [s0] 1/25  94s :: Athlete's Foot
+2026-07-09 00:23:07 [s0] 2/25 FAIL http=500 1s :: Sport Clips :: 
+2026-07-09 00:23:16 [s0] 3/25 FAIL http=500 1s :: CKE Fitness Corp :: 
+2026-07-09 00:23:26 [s0] 4/25 FAIL http=500 1s :: JEMBRO/DAVES DOLLAR :: 
+2026-07-09 00:23:35 [s0] 5/25 FAIL http=500 1s :: HOMEGOODS  LLC 507 :: 
+2026-07-09 00:23:44 [s0] 6/25 FAIL http=500 1s :: Destination XL :: 
+2026-07-09 00:23:53 [s0] 7/25 FAIL http=500 1s :: Firebird's Wood Fired Grill :: 
+2026-07-09 00:24:02 [s0] 8/25 FAIL http=500 1s :: JINYA Ramen Bar :: 
+2026-07-09 00:24:12 [s0] 9/25 FAIL http=500 1s :: Woof Gang Bakery and Grooming :: 
+2026-07-09 00:24:21 [s0] 10/25 FAIL http=500 1s :: Kay Jewelers :: 
+2026-07-09 00:24:30 [s0] 11/25 FAIL http=500 1s :: MyEyeDr. :: 
+2026-07-09 00:24:39 [s0] 12/25 FAIL http=500 2s :: Jersey Mike's Subs :: 
+2026-07-09 00:24:49 [s0] 13/25 FAIL http=500 1s :: Ross Dress for Less :: 
+2026-07-09 00:24:58 [s0] 14/25 FAIL http=500 1s :: Veterinary Emergency Group, LLC :: 
+2026-07-09 00:25:07 [s0] 15/25 FAIL http=500 2s :: Subway #37092 :: 
+2026-07-09 00:25:17 [s0] 16/25 FAIL http=500 1s :: Wells Fargo :: 
+2026-07-09 00:25:26 [s0] 17/25 FAIL http=500 2s :: Burlington Coat Factory :: 
+2026-07-09 00:25:35 [s0] 18/25 FAIL http=500 1s :: TJ Maxx :: 
+2026-07-09 00:25:45 [s0] 19/25 FAIL http=500 1s :: BEV MAX LIQUORS :: 
+2026-07-09 00:25:54 [s0] 20/25 FAIL http=500 1s :: VITAMIN SHOPPE 39 :: 
+2026-07-09 00:26:03 [s0] 21/25 FAIL http=500 1s :: Rainbow :: 
+2026-07-09 00:26:12 [s0] 22/25 FAIL http=500 1s :: Regal Cinemas :: 
+2026-07-09 00:26:22 [s0] 23/25 FAIL http=500 2s :: Results Physiotherapy :: 
+2026-07-09 00:26:31 [s0] 24/25 FAIL http=500 1s :: Elmer Swim School :: 
+2026-07-09 00:26:40 [s0] 25/25 FAIL http=500 1s :: Krispy Kreme :: 
+2026-07-09 00:26:48 [s0] batch complete - verified=0 issues=0 review=0 fail=24 of 25
+2026-07-09 00:27:41 [s0] Verifying 94 of 94 unverified (shard 0/1)
+2026-07-09 00:27:43 [s0] 1/94 FAIL http=500 2s :: Sport Clips :: 
+2026-07-09 00:27:52 [s0] 2/94 FAIL http=500 1s :: HomeGoods, Inc. :: 
+2026-07-09 00:28:01 [s0] 3/94 FAIL http=500 1s :: Slice of NY Pizza :: 
+2026-07-09 00:28:11 [s0] 4/94 FAIL http=500 1s :: Vida Dulce of Knightdale, Inc :: 
+2026-07-09 00:28:20 [s0] 5/94 FAIL http=500 1s :: CKE Fitness Corp :: 
+2026-07-09 00:28:30 [s0] 6/94 FAIL http=500 2s :: AT AND T :: 
+2026-07-09 00:28:41 [s0] 7/94 FAIL http=500 3s :: 100 Chiro Fehrman, LLC :: 
+2026-07-09 00:28:50 [s0] 8/94 FAIL http=500 1s :: JEMBRO/DAVES DOLLAR :: 
+2026-07-09 00:28:59 [s0] 9/94 FAIL http=500 1s :: Burlington Coat Factory :: 
+2026-07-09 00:29:08 [s0] 10/94 FAIL http=500 1s :: European Wax Center :: 
+2026-07-09 00:29:18 [s0] 11/94 FAIL http=500 1s :: Grow Pediatric Dentistry :: 
+2026-07-09 00:29:27 [s0] 12/94 FAIL http=500 1s :: J. Crew :: 
+2026-07-09 00:29:36 [s0] 13/94 FAIL http=500 1s :: HOMEGOODS  LLC 507 :: 
+2026-07-09 00:29:45 [s0] 14/94 FAIL http=500 1s :: Restore Hyper Wellness of Port Chester :: 
+2026-07-09 00:29:54 [s0] 15/94 FAIL http=500 1s :: VISION WORLD :: 
+2026-07-09 00:30:03 [s0] 16/94 FAIL http=500 1s :: V NAIL BAR AND LASH INC :: 
+2026-07-09 00:30:13 [s0] 17/94 FAIL http=500 1s :: Destination XL :: 
+2026-07-09 00:30:22 [s0] 18/94 FAIL http=500 1s :: Bass Pro Shop :: 
+2026-07-09 00:30:31 [s0] 19/94 FAIL http=500 1s :: Dave and Busters :: 
+2026-07-09 00:30:40 [s0] 20/94 FAIL http=500 1s :: Bober Tea Greenville LLC :: 
+2026-07-09 00:30:49 [s0] 21/94 FAIL http=500 1s :: Firebird's Wood Fired Grill :: 
+2026-07-09 00:30:59 [s0] 22/94 FAIL http=500 2s :: Elase :: 
+2026-07-09 00:31:08 [s0] 23/94 FAIL http=500 2s :: WHOLE FOODS 10483 :: 
+2026-07-09 00:31:17 [s0] 24/94 FAIL http=500 1s :: Warby Parker :: 
+2026-07-09 00:31:27 [s0] 25/94 FAIL http=500 1s :: JINYA Ramen Bar :: 
+2026-07-09 00:31:36 [s0] 26/94 FAIL http=500 1s :: Golf Galaxy :: 
+2026-07-09 00:31:45 [s0] 27/94 FAIL http=500 1s :: Wild Wings Cafe :: 
+2026-07-09 00:31:54 [s0] 28/94 FAIL http=500 1s :: SSI Greenville LLC :: 
+2026-07-09 00:32:03 [s0] 29/94 FAIL http=500 1s :: Woof Gang Bakery and Grooming :: 
+2026-07-09 00:32:13 [s0] 30/94 FAIL http=500 1s :: Cheddar's Casual Café #0202058 :: 
+2026-07-09 00:32:22 [s0] 31/94 FAIL http=500 1s :: Arby's :: 
+2026-07-09 00:32:31 [s0] 32/94 FAIL http=500 1s :: Batteries Plus Bulbs :: 
+2026-07-09 00:32:41 [s0] 33/94 FAIL http=500 2s :: Kay Jewelers :: 
+2026-07-09 00:32:51 [s0] 34/94 FAIL http=500 2s :: Another Broken Egg Café :: 
+2026-07-09 00:33:01 [s0] 35/94 FAIL http=500 2s :: Elements Therapeutic Mas :: 
+2026-07-09 00:33:10 [s0] 36/94 FAIL http=500 2s :: PETSMART LLC#3279 :: 
+2026-07-09 00:33:20 [s0] 37/94 FAIL http=500 1s :: MyEyeDr. :: 
+2026-07-09 00:33:29 [s0] 38/94 FAIL http=500 1s :: Academy, Ltd. :: 
+2026-07-09 00:33:39 [s0] 39/94 FAIL http=500 2s :: DSW 29193 :: 
+2026-07-09 00:33:48 [s0] 40/94 FAIL http=500 1s :: US ALLIANCE FEDERAL CREDIT :: 
+2026-07-09 00:33:57 [s0] 41/94 FAIL http=500 1s :: Jersey Mike's Subs :: 
+2026-07-09 00:34:07 [s0] 42/94 FAIL http=500 1s :: Mattress Warehouse :: 
+2026-07-09 00:34:16 [s0] 43/94 FAIL http=500 1s :: Nordstrom Rack :: 
+2026-07-09 00:34:25 [s0] 44/94 FAIL http=500 1s :: BANK OF AMERICA PNY53240000 :: 
+2026-07-09 00:34:34 [s0] 45/94 FAIL http=500 1s :: Ross Dress for Less :: 
+2026-07-09 00:34:44 [s0] 46/94 FAIL http=500 1s :: Blue Cross Blue Shield :: 
+2026-07-09 00:34:53 [s0] 47/94 FAIL http=500 1s :: Jared Galleria of Jewelry #2544 :: 
+2026-07-09 00:35:02 [s0] 48/94 FAIL http=500 1s :: KPOT :: 
+2026-07-09 00:35:12 [s0] 49/94 FAIL http=500 2s :: Veterinary Emergency Group, LLC :: 
+2026-07-09 00:35:22 [s0] 50/94 FAIL http=500 2s :: VERIZON 168503 :: 
+2026-07-09 00:35:32 [s0] 51/94 FAIL http=500 2s :: Kirklands #523 :: 
+2026-07-09 00:35:41 [s0] 52/94 FAIL http=500 1s :: Little Caesars :: 
+2026-07-09 00:35:50 [s0] 53/94 FAIL http=500 1s :: Subway #37092 :: 
+2026-07-09 00:35:59 [s0] 54/94 FAIL http=500 1s :: Salt Grass :: 
+2026-07-09 00:36:09 [s0] 55/94 FAIL http=500 1s :: T-Mobile :: 
+2026-07-09 00:36:18 [s0] 56/94 FAIL http=500 1s :: Visionworks :: 
+2026-07-09 00:36:27 [s0] 57/94 FAIL http=500 1s :: Wells Fargo :: 
+2026-07-09 00:36:36 [s0] 58/94 FAIL http=500 1s :: Wade Jurney Home :: 
+2026-07-09 00:36:46 [s0] 59/94 FAIL http=500 2s :: Avance Primary Care :: 
+2026-07-09 00:36:56 [s0] 60/94 FAIL http=500 2s :: Best Buy :: 
+2026-07-09 00:37:05 [s0] 61/94 FAIL http=500 1s :: Burlington Coat Factory :: 
+2026-07-09 00:37:15 [s0] 62/94 FAIL http=500 1s :: Embassy Nails :: 
+2026-07-09 00:37:24 [s0] 63/94 FAIL http=500 1s :: Starbuck's :: 
+2026-07-09 00:37:33 [s0] 64/94 FAIL http=500 1s :: Tropical Smoothie Cafe' :: 
+2026-07-09 00:37:42 [s0] 65/94 FAIL http=500 1s :: TJ Maxx :: 
+2026-07-09 00:37:51 [s0] 66/94 FAIL http=500 1s :: Kirkland's :: 
+2026-07-09 00:39:43 [s0] 67/94  103s :: Mimosa Nail Spa
+2026-07-09 00:40:17 [s0] Verifying 23 of 92 unverified (shard 0/4)
+2026-07-09 00:41:04 [s0] 68/94  82s :: Club Pilates
+2026-07-09 00:41:49 [s0] 1/23  92s :: HomeGoods, Inc.
+2026-07-09 00:42:35 [s0] 69/94  90s :: BEV MAX LIQUORS
+2026-07-09 00:42:53 [s0] 2/23  63s :: AT AND T
+2026-07-09 00:43:26 [s0] 3/23  34s :: European Wax Center
+2026-07-09 00:43:48 [s0] 70/94  73s :: Shake Shack New York LLC
+2026-07-09 00:44:39 [s0] 4/23  73s :: Restore Hyper Wellness of Port Chester
+2026-07-09 00:44:58 [s0] 71/94  70s :: Target
+2026-07-09 00:45:54 [s0] 72/94  56s :: Staples #4
+2026-07-09 00:46:07 [s0] 5/23  88s :: Bass Pro Shop
+2026-07-09 00:47:34 [s0] 73/94  101s :: VITAMIN SHOPPE 39
+2026-07-09 00:47:54 [s0] 6/23  107s :: Elase
+2026-07-09 00:48:58 [s0] 74/94  83s :: GNC
+2026-07-09 00:49:44 [s0] 7/23  110s :: Golf Galaxy
+2026-07-09 00:50:17 [s0] 75/94  80s :: KOHLS 397
+2026-07-09 00:51:10 [s0] 8/23  85s :: Cheddar's Casual Café #0202058
+2026-07-09 00:52:14 [s0] 76/94  116s :: Music and Arts
+2026-07-09 00:52:55 [s0] 9/23  105s :: Another Broken Egg Café
+2026-07-09 00:53:41 [s0] 77/94  87s :: Rainbow
+2026-07-09 00:54:19 [s0] 10/23  84s :: Academy, Ltd.
+2026-07-09 00:54:52 [s0] 78/94  71s :: Island Nails Spa
+2026-07-09 00:55:41 [s0] 11/23  82s :: Mattress Warehouse
+2026-07-09 00:56:17 [s0] 79/94  85s :: Qdoba
+2026-07-09 00:56:36 [s0] 12/23  55s :: Blue Cross Blue Shield
+2026-07-09 00:57:35 [s0] 13/23  59s :: VERIZON 168503
+2026-07-09 00:58:06 [s0] 80/94  109s :: Select Comfort #10264
+2026-07-09 00:58:49 [s0] 14/23  74s :: Salt Grass
+2026-07-09 00:59:56 [s0] 81/94  110s :: Regal Cinemas
+2026-07-09 01:00:18 [s0] 15/23  88s :: Wade Jurney Home
+2026-07-09 01:00:48 [s0] 82/94  52s :: The Good Feet Store
+2026-07-09 01:01:23 [s0] 16/23  66s :: Embassy Nails
+2026-07-09 01:01:49 [s0] 83/94  61s :: Rack Room Shoes #474
+2026-07-09 01:02:55 [s0] 17/23  91s :: Kirkland's
+2026-07-09 01:03:01 [s0] 84/94  72s :: Michaels #6725
+2026-07-09 01:04:05 [s0] 85/94  64s :: Results Physiotherapy
+2026-07-09 01:04:07 [s0] 18/23  72s :: Target
+2026-07-09 01:05:31 [s0] 19/23  85s :: KOHLS 397
+2026-07-09 01:05:37 [s0] 86/94  91s :: Yard House
+2026-07-09 01:06:53 [s0] 87/94  76s :: Woodhouse Day Spa
+2026-07-09 01:06:57 [s0] 20/23  86s :: Qdoba
+2026-07-09 01:08:04 [s0] 21/23  67s :: Rack Room Shoes #474
+2026-07-09 01:08:40 [s0] 88/94  107s :: CONDADO TACOS 44, LLC
+2026-07-09 01:09:18 [s0] 89/94 FAIL http=500 38s :: Elmer Swim School :: 
+2026-07-09 01:09:26 [s0] 22/23  82s :: Woodhouse Day Spa
+2026-07-09 01:10:36 [s0] 90/94  70s :: ULTA 594
+2026-07-09 01:11:04 [s0] 23/23  98s :: Old Navy #4885
+2026-07-09 01:11:04 [s0] batch complete - verified=0 issues=0 review=0 fail=0 of 23
+2026-07-09 01:12:09 [s0] 91/94  93s :: Old Navy #4885
+2026-07-09 01:13:21 [s0] 92/94  72s :: TRIPODIS APPLIANCES
+2026-07-09 01:13:34 [s0] 93/94 FAIL http=500 14s :: Krispy Kreme :: 
+2026-07-09 01:15:20 [s0] 94/94  97s :: Bad Daddy's Burger Bar
+2026-07-09 01:15:20 [s0] batch complete - verified=0 issues=0 review=0 fail=68 of 94

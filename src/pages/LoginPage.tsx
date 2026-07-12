@@ -1,7 +1,8 @@
 import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { isSupabaseConfigured } from '../lib/supabase'
+import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { BrandMark, BrandWordmark } from '../components/ui/BrandMark'
 
 export default function LoginPage() {
   const { signIn } = useAuth()
@@ -10,6 +11,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [resetMsg, setResetMsg] = useState<string | null>(null)
+  const [resetting, setResetting] = useState(false)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -22,6 +25,24 @@ export default function LoginPage() {
     } else {
       navigate('/', { replace: true })
     }
+  }
+
+  // Sends the Supabase password-reset email. The link lands on /reset-password,
+  // where the user picks a new password. We always show the same confirmation
+  // regardless of whether the email exists (avoids leaking valid accounts).
+  async function handleForgotPassword() {
+    setError(null)
+    setResetMsg(null)
+    if (!email) {
+      setError('Enter your email above first, then click "Forgot password?".')
+      return
+    }
+    setResetting(true)
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    setResetting(false)
+    setResetMsg(`If an account exists for ${email}, a password-reset link is on its way. Check your inbox.`)
   }
 
   return (
@@ -41,18 +62,30 @@ export default function LoginPage() {
           maxWidth:     400,
           background:   'var(--surface)',
           border:       '1px solid var(--border)',
-          borderRadius: 12,
-          padding:      32,
+          borderRadius: 16,
+          padding:      36,
+          boxShadow:    'var(--shadow, none)',
         }}
       >
-        {/* Logo */}
-        <div style={{ marginBottom: 28, textAlign: 'center' }}>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>🏗️</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: 0, lineHeight: 1.2 }}>
-            CRE Platform
+        {/* Brand */}
+        <div style={{ marginBottom: 30, textAlign: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+            <BrandMark size={56} />
+          </div>
+          <h1 style={{ margin: 0, lineHeight: 1.2 }}>
+            <BrandWordmark size={21} />
           </h1>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '6px 0 0' }}>
-            Internal Asset Management
+          <p
+            style={{
+              fontSize:      10,
+              fontWeight:    600,
+              letterSpacing: '0.28em',
+              textTransform: 'uppercase',
+              color:         'var(--text-faint)',
+              margin:        '9px 0 0',
+            }}
+          >
+            Asset Management Platform
           </p>
         </div>
 
@@ -88,6 +121,23 @@ export default function LoginPage() {
             }}
           >
             {error}
+          </div>
+        )}
+
+        {/* Password-reset confirmation */}
+        {resetMsg && (
+          <div
+            style={{
+              padding:      '10px 14px',
+              background:   'var(--green-bg, var(--surface-2))',
+              border:       '1px solid var(--green-border, var(--border-2))',
+              borderRadius: 7,
+              marginBottom: 16,
+              fontSize:     12,
+              color:        'var(--green, var(--text))',
+            }}
+          >
+            {resetMsg}
           </div>
         )}
 
@@ -147,17 +197,35 @@ export default function LoginPage() {
             disabled={loading || !isSupabaseConfigured}
             style={{
               background:   loading || !isSupabaseConfigured ? 'var(--surface-2)' : 'var(--accent)',
-              color:        loading || !isSupabaseConfigured ? 'var(--text-faint)' : '#fff',
+              color:        loading || !isSupabaseConfigured ? 'var(--text-faint)' : 'var(--bg)',
               border:       'none',
-              borderRadius: 7,
+              borderRadius: 9,
               fontSize:     14,
-              fontWeight:   600,
+              fontWeight:   700,
               padding:      '11px',
               cursor:       loading || !isSupabaseConfigured ? 'not-allowed' : 'pointer',
               marginTop:    4,
             }}
           >
             {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={resetting || !isSupabaseConfigured}
+            style={{
+              background:  'none',
+              border:      'none',
+              color:       'var(--text-muted)',
+              fontSize:    12,
+              cursor:      resetting || !isSupabaseConfigured ? 'not-allowed' : 'pointer',
+              textAlign:   'center',
+              padding:     0,
+              marginTop:   2,
+            }}
+          >
+            {resetting ? 'Sending reset link…' : 'Forgot password?'}
           </button>
         </form>
       </div>

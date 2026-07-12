@@ -1,11 +1,12 @@
 import { createContext, useContext, useState, ReactNode } from 'react'
 
-export type FilterScope = 'all' | 'portfolio' | 'property'
+export type FilterScope = 'all' | 'portfolio' | 'property' | 'custom'
 
 export interface GlobalFilter {
   scope: FilterScope
   id: string | null
   label: string
+  ids?: string[]          // scope 'custom': an arbitrary combination of properties
 }
 
 interface FilterContextType {

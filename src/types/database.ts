@@ -61,6 +61,7 @@ export interface Portfolio {
   id: string
   name: string
   description: string | null
+  parent_id: string | null
   created_at: string
 }
 
@@ -255,7 +256,9 @@ export interface Loan {
   io_period_months: number | null
   annual_debt_service: number | null
   dscr_covenant: number | null
+  debt_yield_covenant: number | null
   ltv_covenant: number | null
+  collateral_property_ids: string[] | null
   notes: string | null
   document_id: string | null
   created_at: string
@@ -332,6 +335,8 @@ export interface WaterfallTier {
   tier_type: WaterfallTierType
   description: string | null
   hurdle_irr: number | null
+  /** Equity-multiple cap: tier is satisfied at the LESSER of hurdle_irr and hurdle_em (e.g. 1.75 = 1.75x contributed capital). */
+  hurdle_em?: number | null
   pref_rate: number | null
   lp_split_pct: number | null
   gp_split_pct: number | null
@@ -437,6 +442,33 @@ export interface User {
   role: UserRole
   is_active: boolean
   dashboard_prefs: Record<string, unknown>
+  // Nav keys (see src/lib/pages.ts) this user may see. null = all pages allowed
+  // for their role. Materialized when an access template is applied.
+  allowed_pages: string[] | null
+  template_id: string | null
+  // Dashboard widget keys (see src/lib/dashboardWidgets.ts) forming this user's
+  // default dashboard. null = role preset. Materialized from a template's
+  // dashboard_widgets on apply (migration 20240071).
+  dashboard_widgets: string[] | null
+  created_at: string
+  updated_at: string
+}
+
+// A reusable "profile" an admin applies to a user (migration 20240039).
+export interface AccessTemplate {
+  id: string
+  name: string
+  description: string | null
+  role: UserRole
+  pages: string[] | null
+  grant_scope: EntitlementScope
+  resource_ids: string[]
+  can_write: boolean
+  can_upload: boolean
+  // Dashboard widget keys this profile's dashboard opens with. null = the
+  // role's built-in preset (migration 20240071).
+  dashboard_widgets: string[] | null
+  created_by: string | null
   created_at: string
   updated_at: string
 }
