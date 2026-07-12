@@ -29,8 +29,11 @@ async function loadPdfjs(): Promise<any> {
 export interface LoadedPdf {
   numPages: number
   // Render one page into `canvas`, scaled so its width ≈ targetWidth (CSS px).
-  // Returns the pixel size the canvas was set to.
-  renderPage: (pageNum: number, canvas: HTMLCanvasElement, targetWidth: number) => Promise<{ width: number; height: number }>
+  // Returns the pixel size the canvas was set to. When timeoutMs > 0 the render
+  // is bounded and the underlying pdf.js RenderTask is CANCELLED on timeout (so
+  // it stops consuming the renderer) before rejecting — essential when rendering
+  // many heavy sheets in a row, or one runaway sheet starves all the rest.
+  renderPage: (pageNum: number, canvas: HTMLCanvasElement, targetWidth: number, timeoutMs?: number) => Promise<{ width: number; height: number }>
   destroy: () => void
 }
 
@@ -39,7 +42,7 @@ export async function openPdf(url: string): Promise<LoadedPdf> {
   const doc = await pdfjs.getDocument({ url }).promise
   return {
     numPages: doc.numPages,
-    async renderPage(pageNum: number, canvas: HTMLCanvasElement, targetWidth: number) {
+    async renderPage(pageNum: number, canvas: HTMLCanvasElement, targetWidth: number, timeoutMs = 0) {
       const page = await doc.getPage(Math.min(Math.max(1, pageNum), doc.numPages))
       const base = page.getViewport({ scale: 1 })
       // Cap the render scale so a huge architectural sheet doesn't blow up memory.
@@ -49,7 +52,16 @@ export async function openPdf(url: string): Promise<LoadedPdf> {
       if (!ctx) throw new Error('2D canvas context unavailable')
       canvas.width = Math.round(viewport.width)
       canvas.height = Math.round(viewport.height)
-      await page.render({ canvasContext: ctx, viewport }).promise
+      const task = page.render({ canvasContext: ctx, viewport })
+      if (timeoutMs > 0) {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const guard = new Promise<never>((_, rej) => {
+          timer = setTimeout(() => { try { task.cancel() } catch { /* ignore */ } rej(new Error('render timeout')) }, timeoutMs)
+        })
+        try { await Promise.race([task.promise, guard]) } finally { clearTimeout(timer) }
+      } else {
+        await task.promise
+      }
       return { width: canvas.width, height: canvas.height }
     },
     destroy() { try { doc.destroy() } catch { /* ignore */ } },

@@ -868,14 +868,16 @@ function MeetingDeckButton({ deals, preparedBy }: { deals: Deal[]; preparedBy: s
         // finishes — a missing plan just omits that deal's companion image.
         const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
           Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])
-        const budgetMs = 90_000, startTs = Date.now()
+        const budgetMs = 180_000, startTs = Date.now()
         for (const sp of extrasData.sitePlans) {
           if (Date.now() - startTs > budgetMs) { console.warn('[meeting-deck] site-plan render budget reached; remaining plans skipped'); break }
           let pdfDoc: any = null
           try {
-            pdfDoc = await withTimeout(openPdf(sp.url), 8_000)
+            pdfDoc = await withTimeout(openPdf(sp.url), 12_000)
             const canvas = document.createElement('canvas')
-            const { width, height } = await withTimeout(pdfDoc.renderPage(1, canvas, 1100), 8_000)
+            // 900px is plenty for a slide; the render self-cancels at 15s so one
+            // heavy sheet can't starve the rest.
+            const { width, height } = await pdfDoc.renderPage(1, canvas, 900, 15_000)
             sitePlanImgs[sp.dealId] = { data: canvas.toDataURL('image/jpeg', 0.7), w: width, h: height }
           } catch (e) {
             console.warn('[meeting-deck] site-plan skipped (slow/failed):', sp.title ?? sp.dealId, e)
