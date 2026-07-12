@@ -137,7 +137,7 @@ async function propertyName(sb: SupabaseClient, id: string): Promise<string | nu
 // the same tenant, and multiple portal logins for one tenant org).
 function tenantOrdersQuery(sb: SupabaseClient, pu: PortalUser) {
   return sb.from('work_orders')
-    .select('id, wo_number, category, priority, title, description, status, unit_label, contact_phone, permission_to_enter, resolution_notes, acknowledged_at, completed_at, created_at')
+    .select('id, wo_number, category, priority, title, description, status, unit_label, location_type, location_detail, assigned_vendor, contact_phone, permission_to_enter, resolution_notes, acknowledged_at, completed_at, created_at')
     .eq('property_id', pu.property_id)
     .ilike('tenant_name', pu.tenant_name)
 }
@@ -257,12 +257,16 @@ serve(async (req) => {
       if (!CATEGORIES.includes(category)) return json({ error: 'Invalid category' }, 400)
       if (!PRIORITIES.includes(priority)) return json({ error: 'Invalid priority' }, 400)
       if (!title) return json({ error: 'Please give the request a short title' }, 400)
+      const locationType = body.location_type === 'common_area' ? 'common_area' : 'unit'
+      const locationDetail = String(body.location_detail ?? '').trim().slice(0, 300)
 
       const { data: order, error } = await sb.from('work_orders').insert({
         property_id: pu.property_id,
         portal_user_id: pu.id,
         tenant_name: pu.tenant_name,
         unit_label: String(body.unit_label ?? pu.unit_label ?? '').trim() || null,
+        location_type: locationType,
+        location_detail: locationDetail || null,
         category, priority, title,
         description: description || null,
         contact_phone: String(body.contact_phone ?? pu.phone ?? '').trim() || null,

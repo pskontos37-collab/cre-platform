@@ -24,6 +24,9 @@ export interface WorkOrder {
   contactPhone: string | null
   permissionToEnter: boolean
   assignedTo: string | null
+  assignedVendor: string | null
+  locationType: 'unit' | 'common_area'
+  locationDetail: string | null
   resolutionNotes: string | null
   acknowledgedAt: string | null
   completedAt: string | null
@@ -63,7 +66,7 @@ export interface PortalUserRow {
   createdAt: string
 }
 
-const WO_SELECT = 'id, wo_number, property_id, portal_user_id, tenant_name, unit_label, category, priority, title, description, status, source, contact_phone, permission_to_enter, assigned_to, resolution_notes, acknowledged_at, completed_at, created_at, updated_at'
+const WO_SELECT = 'id, wo_number, property_id, portal_user_id, tenant_name, unit_label, category, priority, title, description, status, source, contact_phone, permission_to_enter, assigned_to, assigned_vendor, location_type, location_detail, resolution_notes, acknowledged_at, completed_at, created_at, updated_at'
 
 function mapOrder(r: any, names: Record<string, string>): WorkOrder {
   return {
@@ -83,6 +86,9 @@ function mapOrder(r: any, names: Record<string, string>): WorkOrder {
     contactPhone: r.contact_phone,
     permissionToEnter: r.permission_to_enter,
     assignedTo: r.assigned_to,
+    assignedVendor: r.assigned_vendor,
+    locationType: r.location_type ?? 'unit',
+    locationDetail: r.location_detail,
     resolutionNotes: r.resolution_notes,
     acknowledgedAt: r.acknowledged_at,
     completedAt: r.completed_at,
@@ -171,6 +177,7 @@ export async function addStaffComment(
 export async function createStaffWorkOrder(input: {
   propertyId: string; tenantName: string; unitLabel?: string; category: string; priority: string
   title: string; description?: string; contactPhone?: string; createdBy: string
+  locationType?: 'unit' | 'common_area'; locationDetail?: string
 }): Promise<void> {
   const { error } = await supabase.from('work_orders').insert({
     property_id: input.propertyId,
@@ -181,10 +188,139 @@ export async function createStaffWorkOrder(input: {
     title: input.title,
     description: input.description || null,
     contact_phone: input.contactPhone || null,
+    location_type: input.locationType ?? 'unit',
+    location_detail: input.locationDetail || null,
     source: 'staff',
     created_by: input.createdBy,
   })
   if (error) throw new Error(error.message)
+}
+
+// ── Contractor routing + recommendations ─────────────────────────────────────
+// Orders route to a CONTRACTOR (vendor), not a staff member. The picker
+// recommends vendors by (1) LEARNED history — who this property has routed
+// this category to before (each routing you make is itself the training
+// data), and (2) the service_agreements vendor book as the seed — the vendor
+// holding the matching service contract at this property.
+
+export async function routeToVendor(orderId: string, vendor: string | null): Promise<void> {
+  await updateWorkOrder(orderId, {
+    assigned_vendor: vendor,
+    routed_at: vendor ? new Date().toISOString() : null,
+  })
+}
+
+export interface VendorBookRow {
+  vendor: string
+  propertyId: string
+  serviceCategory: string
+  status: string
+  endDate: string | null
+}
+
+/** Slim read of the service-agreements vendor book (staff RLS applies). */
+export function useVendorBook(propertyIds: string[]) {
+  return useQuery<VendorBookRow[]>(async () => {
+    if (!propertyIds.length) return []
+    const { data, error } = await supabase
+      .from('service_agreements')
+      .select('vendor, property_id, service_category, status, end_date')
+      .in('property_id', propertyIds)
+    if (error) throw new Error(error.message)
+    return ((data ?? []) as any[]).map(r => ({
+      vendor: r.vendor,
+      propertyId: r.property_id,
+      serviceCategory: (r.service_category ?? '') as string,
+      status: r.status,
+      endDate: r.end_date,
+    }))
+  }, [propertyIds.join(',')])
+}
+
+// Work-order category → service_agreements.service_category keywords
+// (actual category values in the book as of 2026-07: landscaping,
+// sweeping/portering, paving/parking lot, fire/life safety, roofing,
+// lighting/electrical, plumbing, snow removal, hvac, janitorial, signage,
+// pest control, general maintenance, security, elevator, trash/waste …).
+const CATEGORY_BOOK_KEYWORDS: Record<string, string[]> = {
+  hvac:         ['hvac'],
+  plumbing:     ['plumbing'],
+  electrical:   ['electrical', 'lighting'],
+  lighting:     ['lighting', 'electrical'],
+  roof_leak:    ['roofing', 'canopy'],
+  doors_locks:  ['general maintenance', 'security'],
+  janitorial:   ['janitorial', 'sweeping', 'portering'],
+  pest_control: ['pest'],
+  landscaping:  ['landscaping', 'pond'],
+  parking_lot:  ['paving', 'parking', 'sweeping', 'snow'],
+  signage:      ['signage'],
+  safety:       ['fire', 'life safety', 'security'],
+  other:        ['general maintenance'],
+}
+
+export interface VendorSuggestion {
+  vendor: string
+  reason: string      // human-readable "why this one"
+  score: number
+}
+
+export function recommendVendors(
+  orders: WorkOrder[],
+  book: VendorBookRow[],
+  propertyId: string,
+  category: string,
+): VendorSuggestion[] {
+  const byVendor = new Map<string, VendorSuggestion>()
+  const bump = (vendor: string, score: number, reason: string) => {
+    const key = vendor.trim()
+    if (!key) return
+    const cur = byVendor.get(key.toLowerCase())
+    if (cur) {
+      cur.score += score
+      if (!cur.reason.includes(reason)) cur.reason += ` · ${reason}`
+    } else {
+      byVendor.set(key.toLowerCase(), { vendor: key, reason, score })
+    }
+  }
+
+  // 1) Learned: past routings of this category (same property weighs 3×).
+  const routed = orders.filter(o => o.assignedVendor && o.category === category)
+  const counts = new Map<string, { vendor: string; here: number; elsewhere: number }>()
+  for (const o of routed) {
+    const k = o.assignedVendor!.toLowerCase()
+    const c = counts.get(k) ?? { vendor: o.assignedVendor!, here: 0, elsewhere: 0 }
+    if (o.propertyId === propertyId) c.here++; else c.elsewhere++
+    counts.set(k, c)
+  }
+  for (const c of counts.values()) {
+    if (c.here) bump(c.vendor, 30 * c.here, `you routed ${c.here} ${categoryWord(category)} order${c.here > 1 ? 's' : ''} here to them`)
+    else if (c.elsewhere) bump(c.vendor, 8 * c.elsewhere, `handles ${categoryWord(category)} at your other properties`)
+  }
+
+  // 2) Seed: the vendor book. Active matching contract at this property is a
+  //    strong signal; expired ones still count (incumbent knowledge).
+  const kws = CATEGORY_BOOK_KEYWORDS[category] ?? []
+  const today = new Date().toISOString().slice(0, 10)
+  for (const row of book) {
+    if (row.propertyId !== propertyId) continue
+    const cat = row.serviceCategory.toLowerCase()
+    if (!kws.some(k => cat.includes(k))) continue
+    const current = row.status === 'active' || (row.endDate != null && row.endDate >= today)
+    if (current) bump(row.vendor, 20, `current ${row.serviceCategory} contract at this property`)
+    else bump(row.vendor, 4, `prior ${row.serviceCategory} contract here`)
+  }
+
+  return [...byVendor.values()].sort((a, b) => b.score - a.score).slice(0, 4)
+}
+
+const categoryWord = (c: string) => c.replace(/_/g, ' ')
+
+/** Every vendor name we know (book + past routings) for the type-ahead list. */
+export function vendorUniverse(orders: WorkOrder[], book: VendorBookRow[]): string[] {
+  const seen = new Map<string, string>()
+  for (const b of book) if (b.vendor.trim()) seen.set(b.vendor.trim().toLowerCase(), b.vendor.trim())
+  for (const o of orders) if (o.assignedVendor?.trim()) seen.set(o.assignedVendor.trim().toLowerCase(), o.assignedVendor.trim())
+  return [...seen.values()].sort((a, b) => a.localeCompare(b))
 }
 
 // ── Portal user administration ───────────────────────────────────────────────
@@ -268,12 +404,3 @@ export function tempPassword(): string {
   return `${pick()}-${num}-${pick()}`
 }
 
-export interface AssignableUser { id: string; full_name: string | null; email: string; role: string }
-
-export function useAssignableUsers() {
-  return useQuery<AssignableUser[]>(async () => {
-    const { data, error } = await supabase.rpc('assignable_users')
-    if (error) throw new Error(error.message)
-    return (data ?? []) as AssignableUser[]
-  }, [])
-}

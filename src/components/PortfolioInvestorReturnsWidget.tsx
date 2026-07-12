@@ -104,6 +104,7 @@ export function PortfolioInvestorReturnsWidget({
               { value: 'both', label: 'LP + GP' },
               { value: 'lp', label: 'LP only' },
               { value: 'gp', label: 'GP only' },
+              { value: 'mjw', label: 'MJW only' },
             ]}
           />
         </span>
@@ -116,7 +117,7 @@ export function PortfolioInvestorReturnsWidget({
           return (
             <div key={lv}>
               <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 2 }}>
-                {lv === 'lp' ? 'LP' : 'GP'} · Total IRR
+                {LEVEL_LABEL[lv]} · Total IRR
               </div>
               <div style={{ fontSize: 20, fontWeight: 700, color: irrColor(t.totalValueIrr) }}>
                 {pct(t.totalValueIrr)}
@@ -129,36 +130,39 @@ export function PortfolioInvestorReturnsWidget({
         })}
       </div>
 
-      {/* One card per property — sold-today LP/GP returns */}
+      {/* One card per property — sold-today LP/GP/MJW returns */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
         {properties.map(p => (
-          <PropertyCard key={p.propertyId} p={p} showLp={showLp} showGp={showGp} level={level} />
+          <PropertyCard key={p.propertyId} p={p} showLp={showLp} showGp={showGp} showMjw={showMjw} level={level} />
         ))}
       </div>
 
       <div style={{ fontSize: 9.5, color: 'var(--text-faint)', marginTop: 10, lineHeight: 1.5 }}>
         Sold-today basis: current equity credited as a terminal inflow alongside distributions to date.
-        <b> LP</b> = the Layer-1 institutional partner. <b>GP</b> = the M&J entity (the JV's GP member) —
-        its ~10% co-invest capital blended with the promote, on its actual dated contributions. See /waterfall
-        for the class-by-class cascade.
+        <b> LP</b> = the Layer-1 institutional partner. <b>GP</b> = the syndication entity holding the 5–10%
+        GP position, blended across its classes on actual dated contributions. <b>MJW</b> = M&J Wilkow's own
+        slice of that entity: its roster units plus 100% of the Class B promote. See /waterfall for the
+        class-by-class cascade.
       </div>
     </Widget>
   )
 }
 
-function PropertyCard({ p, showLp, showGp, level }: {
+function PropertyCard({ p, showLp, showGp, showMjw, level }: {
   p: PropertyReturn
   showLp: boolean
   showGp: boolean
+  showMjw: boolean
   level: LevelFilter
 }) {
   // Badge the primary level's IRR (fall back to its multiple when IRR has no basis).
-  const primary = level === 'gp' ? p.gp : p.lp
+  const primary = level === 'gp' ? p.gp : level === 'mjw' ? p.mjw : p.lp
   const badge = primary?.totalValueIrr != null
     ? pct(primary.totalValueIrr)
     : primary?.totalValueMultiple != null ? mult(primary.totalValueMultiple) : '—'
   const badgeVariant = primary?.totalValueIrr == null ? 'gray'
     : primary.totalValueIrr < 0 ? 'red' : 'blue'
+  const badgeLabel = level === 'gp' ? 'GP' : level === 'mjw' ? 'MJW' : 'LP'
 
   return (
     <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 8, padding: '10px 12px' }}>
@@ -173,10 +177,10 @@ function PropertyCard({ p, showLp, showGp, level }: {
             </span>
           )}
         </div>
-        <Badge variant={badgeVariant}>{badge} {level === 'gp' ? 'GP' : 'LP'}</Badge>
+        <Badge variant={badgeVariant}>{badge} {badgeLabel}</Badge>
       </div>
 
-      {/* Column headers + LP/GP rows */}
+      {/* Column headers + LP/GP/MJW rows */}
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: 6, alignItems: 'center' }}>
         <span />
         <ColHead>IRR</ColHead>
@@ -184,18 +188,25 @@ function PropertyCard({ p, showLp, showGp, level }: {
         <ColHead>Equity</ColHead>
         {showLp && <RoleRow r={p.lp} />}
         {showGp && <RoleRow r={p.gp} />}
+        {showMjw && <RoleRow r={p.mjw} />}
       </div>
+
+      {/* MJW view: entity roster not loaded yet → the slice can't be computed */}
+      {showMjw && !p.mjw && (
+        <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 4 }}>
+          MJW slice pending — this entity's member ledger isn't loaded yet.
+        </div>
+      )}
     </div>
   )
 }
 
 function RoleRow({ r }: { r: RoleReturn | null }) {
   if (!r) return null
+  const label = r.role === 'lp' ? 'LP' : r.role === 'gp' ? 'GP' : 'MJW'
   return (
     <>
-      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>
-        {r.role === 'lp' ? 'LP' : 'GP'}
-      </span>
+      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>{label}</span>
       <Num style={{ fontWeight: 700, color: irrColor(r.totalValueIrr) }}>{pct(r.totalValueIrr)}</Num>
       <Num style={{ fontWeight: 600 }}>{mult(r.totalValueMultiple)}</Num>
       <Num>{usdC(r.currentEquity)}</Num>

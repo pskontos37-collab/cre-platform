@@ -2,10 +2,11 @@ import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } fro
 import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
 import {
-  WorkOrder, WoComment, WoPhoto, PortalUserRow, AssignableUser,
-  useWorkOrders, usePortalUsers, useAssignableUsers,
-  fetchOrderThread, signPhotoUrl, setWorkOrderStatus, updateWorkOrder,
+  WorkOrder, WoComment, WoPhoto, PortalUserRow, VendorBookRow,
+  useWorkOrders, usePortalUsers, useVendorBook,
+  fetchOrderThread, signPhotoUrl, setWorkOrderStatus,
   addStaffComment, createStaffWorkOrder,
+  routeToVendor, recommendVendors, vendorUniverse,
   createPortalUser, resetPortalPassword, setPortalUserActive, tempPassword,
 } from '../hooks/useWorkOrders'
 import {
@@ -47,7 +48,7 @@ export function WorkOrdersPage() {
   const [refreshKey, setRefreshKey] = useState(0)
   const refresh = () => setRefreshKey(k => k + 1)
   const { data: orders, loading, error } = useWorkOrders(propertyIds, propertyNames, refreshKey)
-  const { data: staff } = useAssignableUsers()
+  const { data: vendorBook } = useVendorBook(propertyIds)
 
   const [tab, setTab] = useState<'queue' | 'portal'>('queue')
   const [statusFilter, setStatusFilter] = useState<'open' | 'all' | string>('open')
@@ -71,7 +72,7 @@ export function WorkOrdersPage() {
 
   const openOrders = all.filter(o => OPEN_STATUSES.includes(o.status))
   const emergencies = openOrders.filter(o => o.priority === 'emergency')
-  const unassigned = openOrders.filter(o => !o.assignedTo)
+  const unrouted = openOrders.filter(o => !o.assignedVendor)
   const avgAge = openOrders.length
     ? Math.round(openOrders.reduce((s, o) => s + daysOpen(o), 0) / openOrders.length) : 0
 
@@ -101,7 +102,7 @@ export function WorkOrdersPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 16 }}>
             <Kpi label="Open" value={openOrders.length} />
             <Kpi label="Emergency" value={emergencies.length} color={emergencies.length ? 'var(--red)' : undefined} />
-            <Kpi label="Unassigned" value={unassigned.length} color={unassigned.length ? 'var(--amber)' : undefined} />
+            <Kpi label="Not routed" value={unrouted.length} color={unrouted.length ? 'var(--amber)' : undefined} />
             <Kpi label="Avg days open" value={avgAge} />
           </div>
 
@@ -138,7 +139,8 @@ export function WorkOrdersPage() {
           </div>
 
           {selected && appUser && (
-            <DetailPanel key={selected.id} order={selected} staff={staff ?? []}
+            <DetailPanel key={selected.id} order={selected}
+              allOrders={all} vendorBook={vendorBook ?? []}
               me={{ id: appUser.id, name: appUser.full_name ?? appUser.email }}
               onClose={() => setSelectedId(null)} onChanged={refresh} />
           )}
@@ -176,9 +178,20 @@ function OrderRow({ order: o, selected, onClick }: { order: WorkOrder; selected:
       <span style={{ fontSize: 18 }}>{categoryIcon(o.category)}</span>
       <span style={{ width: 86, fontSize: 11.5, color: 'var(--text-faint)', flexShrink: 0 }}>{woNumber(o.woNumber)}</span>
       <span style={{ flex: 2, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.title}</span>
-        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)' }}>
+        <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {o.locationType === 'common_area' && (
+            <span style={{
+              fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--accent)',
+              border: '1px solid var(--accent)', borderRadius: 4, padding: '1px 5px', marginRight: 7, verticalAlign: 'middle',
+            }}>
+              COMMON AREA
+            </span>
+          )}
+          {o.title}
+        </span>
+        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {o.tenantName}{o.unitLabel ? ` · ${o.unitLabel}` : ''} · {o.propertyName}
+          {o.assignedVendor ? <span style={{ color: 'var(--text-muted)' }}> · → {o.assignedVendor}</span> : ''}
         </span>
       </span>
       <span style={{ width: 84, fontSize: 11.5, fontWeight: 700, color: priorityColor(o.priority), textTransform: 'capitalize', flexShrink: 0 }}>
@@ -197,9 +210,10 @@ function OrderRow({ order: o, selected, onClick }: { order: WorkOrder; selected:
 
 // ── Detail panel ─────────────────────────────────────────────────────────────
 
-function DetailPanel({ order, staff, me, onClose, onChanged }: {
+function DetailPanel({ order, allOrders, vendorBook, me, onClose, onChanged }: {
   order: WorkOrder
-  staff: AssignableUser[]
+  allOrders: WorkOrder[]
+  vendorBook: VendorBookRow[]
   me: { id: string; name: string }
   onClose: () => void
   onChanged: () => void
@@ -272,6 +286,11 @@ function DetailPanel({ order, staff, me, onClose, onChanged }: {
             {' '}· opened {fmtDate(order.createdAt)} ({daysOpen(order)}d)
             {' '}· {order.permissionToEnter ? 'entry OK' : '⚠ NO entry without tenant present'}
           </div>
+          {order.locationType === 'common_area' && (
+            <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 700, marginTop: 4 }}>
+              📍 Common area{order.locationDetail ? ` — ${order.locationDetail}` : ''}
+            </div>
+          )}
         </div>
         <button onClick={onClose} style={{ ...btn, padding: '4px 10px' }}>✕</button>
       </div>
@@ -312,14 +331,7 @@ function DetailPanel({ order, staff, me, onClose, onChanged }: {
         )}
       </div>
 
-      <div style={{ marginTop: 14 }}>
-        <label style={labelStyle}>Assigned to</label>
-        <select style={{ ...inputStyle, width: '100%' }} value={order.assignedTo ?? ''} disabled={busy}
-          onChange={e => run(() => updateWorkOrder(order.id, { assigned_to: e.target.value || null }))}>
-          <option value="">Unassigned</option>
-          {staff.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
-        </select>
-      </div>
+      <RoutingBlock order={order} allOrders={allOrders} vendorBook={vendorBook} busy={busy} run={run} />
 
       {/* thread */}
       <div style={{ marginTop: 18 }}>
@@ -362,6 +374,87 @@ function DetailPanel({ order, staff, me, onClose, onChanged }: {
   )
 }
 
+// ── Contractor routing ───────────────────────────────────────────────────────
+// No prefilled staff names: orders route to a contractor. Recommendations are
+// ranked from (1) learned history — who this property's orders in this
+// category were routed to before — and (2) the service-agreements vendor book
+// (current contract-holder first). Every routing made here becomes training
+// data for the next recommendation.
+
+function RoutingBlock({ order, allOrders, vendorBook, busy, run }: {
+  order: WorkOrder
+  allOrders: WorkOrder[]
+  vendorBook: VendorBookRow[]
+  busy: boolean
+  run: (fn: () => Promise<void>) => void
+}) {
+  const [custom, setCustom] = useState('')
+  const suggestions = useMemo(
+    () => recommendVendors(allOrders, vendorBook, order.propertyId, order.category)
+      .filter(s => s.vendor.toLowerCase() !== (order.assignedVendor ?? '').toLowerCase()),
+    [allOrders, vendorBook, order.propertyId, order.category, order.assignedVendor])
+  const universe = useMemo(() => vendorUniverse(allOrders, vendorBook), [allOrders, vendorBook])
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <label style={labelStyle}>Route to contractor</label>
+
+      {order.assignedVendor ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '9px 12px', borderRadius: 8, border: '1px solid var(--accent)', marginBottom: 8,
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>→ {order.assignedVendor}</span>
+          <button disabled={busy} style={{ ...btn, padding: '3px 9px', fontSize: 11 }}
+            onClick={() => run(() => routeToVendor(order.id, null))}>
+            Unroute
+          </button>
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 8 }}>Not routed yet.</div>
+      )}
+
+      {suggestions.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {suggestions.map((s, i) => (
+            <button key={s.vendor} disabled={busy}
+              onClick={() => run(() => routeToVendor(order.id, s.vendor))}
+              style={{
+                textAlign: 'left', cursor: 'pointer', padding: '8px 11px', borderRadius: 8,
+                border: `1px solid ${i === 0 ? 'var(--green)' : 'var(--border)'}`, background: 'var(--bg)',
+              }}>
+              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>
+                {i === 0 ? '★ ' : ''}{s.vendor}
+              </span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-faint)', marginTop: 1 }}>
+                {s.reason}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {suggestions.length === 0 && !order.assignedVendor && (
+        <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 8 }}>
+          No history or matching service contract for {categoryLabel(order.category).toLowerCase()} at this
+          property yet — route below and the system remembers for next time.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input list="wo-vendor-universe" style={{ ...inputStyle, flex: 1 }}
+          placeholder="Other contractor…" value={custom} onChange={e => setCustom(e.target.value)} />
+        <datalist id="wo-vendor-universe">
+          {universe.map(v => <option key={v} value={v} />)}
+        </datalist>
+        <button disabled={busy || !custom.trim()} style={{ ...btn, opacity: busy || !custom.trim() ? 0.5 : 1 }}
+          onClick={() => { const v = custom.trim(); setCustom(''); run(() => routeToVendor(order.id, v)) }}>
+          Route
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Staff-entered order (phone call / walk-in) ───────────────────────────────
 
 function NewStaffOrderModal({ properties, createdBy, onClose, onCreated }: {
@@ -372,8 +465,9 @@ function NewStaffOrderModal({ properties, createdBy, onClose, onCreated }: {
 }) {
   const [form, setForm] = useState({
     propertyId: '', tenantName: '', unitLabel: '', category: 'other',
-    priority: 'normal', title: '', description: '', contactPhone: '',
+    priority: 'normal', title: '', description: '', contactPhone: '', locationDetail: '',
   })
+  const [commonArea, setCommonArea] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
@@ -382,7 +476,11 @@ function NewStaffOrderModal({ properties, createdBy, onClose, onCreated }: {
     e.preventDefault()
     setBusy(true); setErr(null)
     try {
-      await createStaffWorkOrder({ ...form, createdBy })
+      await createStaffWorkOrder({
+        ...form, createdBy,
+        locationType: commonArea ? 'common_area' : 'unit',
+        locationDetail: commonArea ? form.locationDetail : '',
+      })
       onCreated()
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : String(e2))
@@ -432,6 +530,18 @@ function NewStaffOrderModal({ properties, createdBy, onClose, onCreated }: {
             </select>
           </div>
         </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, cursor: 'pointer' }}>
+          <input type="checkbox" checked={commonArea} onChange={e => setCommonArea(e.target.checked)} />
+          Common-area issue (not inside the tenant's space)
+        </label>
+        {commonArea && (
+          <div>
+            <label style={labelStyle}>Where in the common area?</label>
+            <input style={{ ...inputStyle, width: '100%' }} value={form.locationDetail}
+              onChange={e => set('locationDetail', e.target.value)}
+              placeholder="e.g. parking lot light pole near main entrance" />
+          </div>
+        )}
         <div>
           <label style={labelStyle}>Title</label>
           <input style={{ ...inputStyle, width: '100%' }} value={form.title} required maxLength={140}

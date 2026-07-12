@@ -314,7 +314,8 @@ function Section({ title, orders, onOpen, faded }: {
                 {o.title}
               </span>
               <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)', marginTop: 2 }}>
-                {woNumber(o.wo_number)} · {categoryLabel(o.category)} · {new Date(o.created_at).toLocaleDateString()}
+                {woNumber(o.wo_number)} · {categoryLabel(o.category)}
+                {o.location_type === 'common_area' ? ' · Common area' : ''} · {new Date(o.created_at).toLocaleDateString()}
               </span>
             </span>
             <StatusChip status={o.status} />
@@ -374,8 +375,16 @@ function OrderDetail({ id, guard, onBack }: {
                 <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{order.title}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>
                   {categoryIcon(order.category)} {categoryLabel(order.category)}
-                  {order.unit_label ? ` · ${order.unit_label}` : ''} · submitted {new Date(order.created_at).toLocaleDateString()}
+                  {order.location_type === 'common_area'
+                    ? ` · Common area${order.location_detail ? ` (${order.location_detail})` : ''}`
+                    : order.unit_label ? ` · ${order.unit_label}` : ''}
+                  {' '}· submitted {new Date(order.created_at).toLocaleDateString()}
                 </div>
+                {order.assigned_vendor && !['completed', 'cancelled'].includes(order.status) && (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+                    🔧 Contractor assigned: <b>{order.assigned_vendor}</b>
+                  </div>
+                )}
               </div>
               <StatusChip status={order.status} />
             </div>
@@ -457,6 +466,8 @@ function NewRequestForm({ profile, guard, onCancel, onCreated }: {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [unit, setUnit] = useState(profile.unit_label ?? '')
+  const [locationType, setLocationType] = useState<'unit' | 'common_area'>('unit')
+  const [locationDetail, setLocationDetail] = useState('')
   const [phone, setPhone] = useState(profile.phone ?? '')
   const [permission, setPermission] = useState(true)
   const [files, setFiles] = useState<File[]>([])
@@ -485,6 +496,8 @@ function NewRequestForm({ profile, guard, onCancel, onCreated }: {
         title: title.trim(),
         description: description.trim(),
         unit_label: unit.trim() || undefined,
+        location_type: locationType,
+        location_detail: locationType === 'common_area' ? locationDetail.trim() || undefined : undefined,
         contact_phone: phone.trim() || undefined,
         permission_to_enter: permission,
         photos,
@@ -504,6 +517,32 @@ function NewRequestForm({ profile, guard, onCancel, onCreated }: {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <label style={labelStyle}>Where is the issue?</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {([
+              { value: 'unit' as const, label: 'My space', hint: profile.unit_label ?? 'Inside your suite' },
+              { value: 'common_area' as const, label: 'Common area', hint: 'Parking lot, corridors, restrooms, exterior…' },
+            ]).map(opt => (
+              <button key={opt.value} type="button" onClick={() => setLocationType(opt.value)} style={{
+                padding: '11px 12px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
+                border: `1px solid ${locationType === opt.value ? 'var(--accent)' : 'var(--border)'}`,
+                background: locationType === opt.value ? 'var(--surface)' : 'transparent',
+              }}>
+                <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: locationType === opt.value ? 'var(--text)' : 'var(--text-muted)' }}>
+                  {opt.label}
+                </span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>{opt.hint}</span>
+              </button>
+            ))}
+          </div>
+          {locationType === 'common_area' && (
+            <input style={{ ...inputStyle, marginTop: 8 }} value={locationDetail}
+              onChange={e => setLocationDetail(e.target.value)} maxLength={300}
+              placeholder="Where exactly? e.g. light pole out near the main entrance" />
+          )}
+        </div>
+
         <div>
           <label style={labelStyle}>What kind of issue is it?</label>
           <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr 1fr' : 'repeat(3, 1fr)', gap: 8 }}>
@@ -557,20 +596,24 @@ function NewRequestForm({ profile, guard, onCancel, onCreated }: {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '1fr 1fr', gap: 12 }}>
-          <div>
-            <label style={labelStyle}>Suite / unit</label>
-            <input style={inputStyle} value={unit} onChange={e => setUnit(e.target.value)} placeholder="e.g. Suite 210" />
-          </div>
+          {locationType === 'unit' && (
+            <div>
+              <label style={labelStyle}>Suite / unit</label>
+              <input style={inputStyle} value={unit} onChange={e => setUnit(e.target.value)} placeholder="e.g. Suite 210" />
+            </div>
+          )}
           <div>
             <label style={labelStyle}>Contact phone</label>
             <input style={inputStyle} type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="(555) 555-5555" />
           </div>
         </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5, cursor: 'pointer' }}>
-          <input type="checkbox" checked={permission} onChange={e => setPermission(e.target.checked)} />
-          Maintenance may enter the space if no one is present
-        </label>
+        {locationType === 'unit' && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5, cursor: 'pointer' }}>
+            <input type="checkbox" checked={permission} onChange={e => setPermission(e.target.checked)} />
+            Maintenance may enter the space if no one is present
+          </label>
+        )}
 
         <div>
           <label style={labelStyle}>Photos (optional, up to 5)</label>

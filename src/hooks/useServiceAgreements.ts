@@ -107,45 +107,32 @@ export function useServiceAgreements(propertyIds: string[], propertyNames: Recor
  *  /services default view, the renewals widget and the email digest. Cancelled
  *  and ignored require a reason note (also DB-enforced); who/when is recorded
  *  for all three, and every resolve/restore transition lands in audit_log via
- *  the audit_service_agreement_resolution trigger (migration 20240078). */
+ *  the audit_service_agreement_resolution trigger (migration 20240078).
+ *  Goes through the resolve_service_agreement RPC (migration 20240079) so
+ *  property managers can act on their entitled properties too — the table's
+ *  write RLS stays admin/AM-only, the RPC touches only the resolution fields. */
 export async function resolveServiceAgreement(id: string, resolution: Resolution, reason?: string): Promise<void> {
   const trimmed = (reason ?? '').trim()
   if (resolution !== 'completed' && !trimmed) {
     throw new Error(`An audit note is required to mark an agreement ${resolution}`)
   }
-  const { data: auth } = await supabase.auth.getUser()
-  const u = auth?.user
-  const { data, error } = await supabase
-    .from('service_agreements')
-    .update({
-      resolution,
-      resolved_at: new Date().toISOString(),
-      resolved_by: u?.id ?? null,
-      resolved_by_name: (u?.user_metadata?.full_name as string | undefined) ?? u?.email ?? null,
-      resolution_reason: trimmed || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select('id')
+  const { data, error } = await supabase.rpc('resolve_service_agreement', {
+    p_id: id,
+    p_resolution: resolution,
+    p_reason: trimmed || null,
+  })
   if (error) throw new Error(error.message)
-  if (!data?.length) throw new Error('Not permitted — only admins and asset managers can resolve agreements')
+  if (!data) throw new Error('Not permitted — admins, asset managers, or property managers assigned to this property only')
 }
 
 /** Bring a resolved agreement back into tracking. The original note stays in
  *  audit_log (the trigger records old + new on this transition too). */
 export async function restoreServiceAgreement(id: string): Promise<void> {
-  const { data, error } = await supabase
-    .from('service_agreements')
-    .update({
-      resolution: null,
-      resolved_at: null,
-      resolved_by: null,
-      resolved_by_name: null,
-      resolution_reason: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select('id')
+  const { data, error } = await supabase.rpc('resolve_service_agreement', {
+    p_id: id,
+    p_resolution: null,
+    p_reason: null,
+  })
   if (error) throw new Error(error.message)
-  if (!data?.length) throw new Error('Not permitted — only admins and asset managers can restore agreements')
+  if (!data) throw new Error('Not permitted — admins, asset managers, or property managers assigned to this property only')
 }

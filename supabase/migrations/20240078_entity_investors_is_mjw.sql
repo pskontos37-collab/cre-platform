@@ -6,7 +6,7 @@
 alter table entity_investors add column if not exists is_mjw boolean not null default false;
 
 comment on column entity_investors.is_mjw is
-  'True when the investor is MJW-affiliated (M&J firm entities or Wilkow family/trusts), per user classification 2026-07-12. Class B promote units are 100% MJW by decree and are handled in code, not roster rows.';
+  'True when the investor is MJW-affiliated (M&J firm entities or Wilkow family/trusts), per user classification 2026-07-12. Class B (promote) units are not roster rows: M&J Wilkow, Ltd. is entitled to 100% of Class B, handled in code.';
 
 -- Classification confirmed by user 2026-07-12: Wilkow family names/trusts
 -- and M & J Equities are MJW; everyone else (Driehaus, Profimex, BDL Barry,

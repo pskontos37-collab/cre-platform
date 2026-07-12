@@ -7,7 +7,7 @@ import type { DealRow } from './useDeals'
 const ROLE_NAMES: Record<string, string> = {
   'lp': 'LP Partner',
   'gp': 'GP (MJW Wilkow)',
-  'mjw': 'MJW only (firm + Wilkows)',
+  'mjw': 'MJW only (firm + affiliates)',
   'class_a': 'Class A',
   'class_ac': 'Class A/C',
   'class_b': 'Class B (Promote)',
@@ -172,11 +172,12 @@ export function usePortfolioReturnsByProperty(
       const gpTake = st ? (st.l2 ? st.l2.pool : st.l1GpTotal) : null
       const gp = compute('gp', gpFlows, gpTake, deemed)
 
-      // MJW-only: MJW's own slice of the GP entity. Share of each unit class =
-      // is_mjw roster units ÷ class units (entity_investors); Class B (promote)
-      // is 100% MJW by decree. Scale each class's dated flows and sold-today
-      // value by its share. Null when the senior-class roster isn't loaded
-      // (Gateway — member ledger pending) or a value-bearing class is uncovered.
+      // MJW-only: MJW's own slice of the GP syndication entity. Share of each
+      // unit class = is_mjw roster units ÷ class units (entity_investors);
+      // Class B (promote) is 100% M&J Wilkow, Ltd. per the operating agreements.
+      // Scale each class's dated flows and sold-today value by its share. Null
+      // when the senior-class roster isn't loaded (Gateway — member ledger
+      // pending) or a value-bearing class is uncovered.
       let mjw: RoleReturn | null = null
       if (l2Deal && st?.l2) {
         const roster = l2Deal.entity_investors ?? []
@@ -188,7 +189,7 @@ export function usePortfolioReturnsByProperty(
           return total > 0 ? mine / total : null
         }
         const shareA = shareOf('A') ?? shareOf('AC')       // senior co-invest classes
-        const shareB = 1                                    // promote: 100% MJW (user-confirmed)
+        const shareB = 1                                    // promote: 100% M&J Wilkow, Ltd.
         const dFlows = flowsByRoles(l2Deal, ['class_d'])
         const shareD = dFlows.length > 0 ? shareOf('D') : null
         if (shareA != null && (dFlows.length === 0 || shareD != null)) {

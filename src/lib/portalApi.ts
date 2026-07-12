@@ -31,6 +31,9 @@ export interface PortalOrder {
   description: string | null
   status: string
   unit_label: string | null
+  location_type: 'unit' | 'common_area'
+  location_detail: string | null
+  assigned_vendor: string | null
   contact_phone: string | null
   permission_to_enter: boolean
   resolution_notes: string | null
@@ -110,6 +113,8 @@ export interface NewOrderInput {
   title: string
   description: string
   unit_label?: string
+  location_type: 'unit' | 'common_area'
+  location_detail?: string
   contact_phone?: string
   permission_to_enter: boolean
   photos: { data_b64: string; content_type: string }[]
