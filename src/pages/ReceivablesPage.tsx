@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds, usePropertyNameMap } from '../hooks/useFilteredPropertyIds'
@@ -349,24 +349,61 @@ function Amt({ v, bold, color }: { v: number; bold?: boolean; color?: string }) 
 // mail client (so the reply lands with them and nothing sends until they hit
 // Send). Canned reminder + the aging snippet for this tenant, pre-addressed to
 // the directory's billing contact when one exists.
-function buildFollowUpMailto(row: ArAgingRow, contacts: ArFollowUpContact[]) {
-  const to = contacts.slice(0, 3).map(c => c.email).join(',')
+const followUpTo = (contacts: ArFollowUpContact[]) => contacts.slice(0, 3).map(c => c.email).join(',')
+const followUpSubject = (row: ArAgingRow) => `Past-Due Balance Reminder - ${row.tenantName} - ${row.propertyName}`
+
+function buildFollowUpText(row: ArAgingRow, contacts: ArFollowUpContact[], detail: ArDetailLine[]) {
   const greetName = contacts[0]?.name
   const suite = row.suite ? `, Suite ${row.suite}` : ''
-  const buckets: Array<[string, number]> = [
-    ['Current', row.current],
-    ['30 days', row.b30],
-    ['60 days', row.b60],
-    ['90 days', row.b90],
-    ['120+ days', row.b120],
-  ]
+  const bucketLabel = (k: string) => BUCKETS.find(b => b.key === k)?.label ?? k
+
+  // Charge-line detail, laid out like the MRI Aged Delinquencies report the
+  // team is used to (date, code + description, amount, age), then category
+  // subtotals and the total. Capped so the mailto URL stays within what mail
+  // clients reliably accept (~2K chars); overflow is summarized, not dropped
+  // silently. Falls back to the bucket summary when a row has no charge lines.
+  const MAX_DETAIL = 14
+  const shown = detail.slice(0, MAX_DETAIL)
+  const body = shown.length > 0
+    ? [
+        `Detail of open charges:`,
+        '',
+        ...shown.map(l => {
+          const cat = [l.category, l.categoryDesc].filter(Boolean).join(' - ') || 'Charge'
+          return `  ${l.invoiceDate ? `${l.invoiceDate}  ` : ''}${cat}: ${fmtCents(l.amount)} (${bucketLabel(l.bucket)})`
+        }),
+        ...(detail.length > shown.length
+          ? [`  ...plus ${detail.length - shown.length} additional charge lines - full statement available on request`]
+          : []),
+        '',
+        ...(row.categories.length > 1
+          ? [
+              'Balance by category:',
+              ...row.categories.slice(0, 8).map(c => `  ${c.code} ${c.desc}: ${fmtCents(c.total)}`),
+              '',
+            ]
+          : []),
+        `  Total balance: ${fmtCents(row.total)}  (past due 30d+: ${fmtCents(row.pastDue)})`,
+      ]
+    : [
+        'Account summary:',
+        '',
+        ...([
+          ['Current', row.current],
+          ['30 days', row.b30],
+          ['60 days', row.b60],
+          ['90 days', row.b90],
+          ['120+ days', row.b120],
+        ] as Array<[string, number]>).filter(([, v]) => Math.abs(v) > 0.005).map(([label, v]) => `  ${label}: ${fmt(v)}`),
+        `  Total balance: ${fmt(row.total)}`,
+      ]
+
   const lines = [
     `Dear ${greetName ?? 'Accounts Payable Team'},`,
     '',
-    `Our records show a past-due balance of ${fmt(row.pastDue)} for ${row.tenantName} at ${row.propertyName}${suite} as of ${row.asOf}. Account summary:`,
+    `Our records show a past-due balance of ${fmt(row.pastDue)} for ${row.tenantName} at ${row.propertyName}${suite} as of ${row.asOf}.`,
     '',
-    ...buckets.filter(([, v]) => Math.abs(v) > 0.005).map(([label, v]) => `  ${label}: ${fmt(v)}`),
-    `  Total balance: ${fmt(row.total)}`,
+    ...body,
     '',
     ...(row.lastPaymentDate
       ? [`Our last payment received was on ${row.lastPaymentDate}${row.lastPaymentAmount != null ? ` (${fmt(row.lastPaymentAmount)})` : ''}.`, '']
@@ -376,8 +413,154 @@ function buildFollowUpMailto(row: ArAgingRow, contacts: ArFollowUpContact[]) {
     'Thank you,',
     '',
   ]
-  const subject = `Past-Due Balance Reminder - ${row.tenantName} - ${row.propertyName}`
-  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\r\n'))}`
+  return lines.join('\r\n')
+}
+
+function buildFollowUpMailto(row: ArAgingRow, contacts: ArFollowUpContact[], detail: ArDetailLine[]) {
+  return `mailto:${encodeURIComponent(followUpTo(contacts))}?subject=${encodeURIComponent(followUpSubject(row))}&body=${encodeURIComponent(buildFollowUpText(row, contacts, detail))}`
+}
+
+// The rich version of the follow-up: a real HTML table shaped like the MRI
+// Aged Delinquencies report — one row per open charge, aging buckets across
+// the top, then a by-category recap and a bucket-totaled grand total row.
+// mailto can't carry HTML, so this goes on the clipboard (see FollowUpBar) and
+// the manager pastes it into the empty draft. All charge lines are included —
+// the clipboard has no URL-length ceiling.
+function buildFollowUpHtml(row: ArAgingRow, contacts: ArFollowUpContact[], detail: ArDetailLine[]) {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const money = (v: number) => (Math.abs(v) < 0.005 ? '' : esc(fmtCents(v)))
+  const suite = row.suite ? `, Suite ${row.suite}` : ''
+  const p = "font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:14px;color:#1a1a1a"
+  const thL = 'border:1px solid #3a5260;padding:4px 10px;background:#466371;color:#ffffff;font-weight:600;text-align:left;white-space:nowrap'
+  const thR = 'border:1px solid #3a5260;padding:4px 10px;background:#466371;color:#ffffff;font-weight:600;text-align:right;white-space:nowrap'
+  const tdL = 'border:1px solid #c9ced3;padding:3px 10px;text-align:left'
+  const tdR = 'border:1px solid #c9ced3;padding:3px 10px;text-align:right;white-space:nowrap'
+
+  const lineRows = detail.map(l => `
+    <tr>
+      <td style="${tdL}">${esc(l.invoiceDate ?? '')}</td>
+      <td style="${tdL}">${esc([l.category, l.categoryDesc].filter(Boolean).join(' - ') || 'Charge')}</td>
+      ${BUCKETS.map(b => `<td style="${tdR}">${money(l.bucket === b.key ? l.amount : 0)}</td>`).join('')}
+      <td style="${tdR}">${money(l.amount)}</td>
+    </tr>`).join('')
+
+  // Recap by category: bucket sums from the charge lines when we have them,
+  // otherwise just the category totals the aging row carries.
+  type CatSum = { desc: string; total: number; buckets: Record<BucketKey, number> }
+  const cats = new Map<string, CatSum>()
+  if (detail.length > 0) {
+    for (const l of detail) {
+      const code = l.category ?? '—'
+      const e = cats.get(code) ?? { desc: l.categoryDesc ?? code, total: 0, buckets: { current: 0, b30: 0, b60: 0, b90: 0, b120: 0 } }
+      e.total += l.amount
+      e.buckets[l.bucket] += l.amount
+      cats.set(code, e)
+    }
+  } else {
+    for (const c of row.categories) cats.set(c.code, { desc: c.desc, total: c.total, buckets: { current: 0, b30: 0, b60: 0, b90: 0, b120: 0 } })
+  }
+  const recapRows = Array.from(cats.entries())
+    .sort((a, b) => Math.abs(b[1].total) - Math.abs(a[1].total))
+    .map(([code, c]) => `
+    <tr>
+      <td style="${tdL};background:#f4f6f7"></td>
+      <td style="${tdL};background:#f4f6f7">${esc(`${code} ${c.desc}`)}</td>
+      ${BUCKETS.map(b => `<td style="${tdR};background:#f4f6f7">${detail.length > 0 ? money(c.buckets[b.key]) : ''}</td>`).join('')}
+      <td style="${tdR};background:#f4f6f7;font-weight:600">${money(c.total)}</td>
+    </tr>`).join('')
+
+  const totalRow = `
+    <tr>
+      <td style="${tdL};font-weight:700;background:#e8ecee">Total</td>
+      <td style="${tdL};background:#e8ecee"></td>
+      ${BUCKETS.map(b => `<td style="${tdR};font-weight:700;background:#e8ecee">${money(row[b.key])}</td>`).join('')}
+      <td style="${tdR};font-weight:700;background:#e8ecee">${money(row.total)}</td>
+    </tr>`
+
+  return [
+    `<p style="${p}">Dear ${esc(contacts[0]?.name ?? 'Accounts Payable Team')},</p>`,
+    `<p style="${p}">Our records show a past-due balance of <b>${esc(fmt(row.pastDue))}</b> for ${esc(row.tenantName)} at ${esc(row.propertyName)}${esc(suite)} as of ${esc(row.asOf)}. Detail of open charges:</p>`,
+    `<table style="border-collapse:collapse;font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:13px;color:#1a1a1a">`,
+    `<tr><th style="${thL}">Invoice Date</th><th style="${thL}">Charge</th>${BUCKETS.map(b => `<th style="${thR}">${esc(b.label)}</th>`).join('')}<th style="${thR}">Total</th></tr>`,
+    lineRows,
+    recapRows,
+    totalRow,
+    `</table>`,
+    ...(row.lastPaymentDate
+      ? [`<p style="${p}">Our last payment received was on ${esc(row.lastPaymentDate)}${row.lastPaymentAmount != null ? ` (${esc(fmt(row.lastPaymentAmount))})` : ''}.</p>`]
+      : []),
+    `<p style="${p}">Please arrange remittance of the past-due amount, or reply with a remittance update and your expected payment date. If you believe any of these charges are in error, let us know and we will research them promptly.</p>`,
+    `<p style="${p}">Thank you,</p>`,
+  ].join('\n')
+}
+
+// One click: the formatted HTML table (charges × aging buckets + recap) goes
+// on the clipboard AND an addressed, subject-lined draft opens in the manager's
+// own mail client — they press Ctrl+V in the body and the whole formatted
+// message drops in. If the clipboard is unavailable, the draft opens with the
+// plain-text version in the body instead, so the flow never dead-ends.
+function FollowUpBar({ row, contacts, lines }: {
+  row: ArAgingRow
+  contacts: ArFollowUpContact[]
+  lines: ArDetailLine[]
+}) {
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle')
+
+  const openDraft = async (e: ReactMouseEvent) => {
+    e.preventDefault()
+    let ok = false
+    try {
+      const CI: any = (window as any).ClipboardItem
+      if (navigator.clipboard && 'write' in navigator.clipboard && CI) {
+        await navigator.clipboard.write([new CI({
+          'text/html':  new Blob([buildFollowUpHtml(row, contacts, lines)], { type: 'text/html' }),
+          'text/plain': new Blob([buildFollowUpText(row, contacts, lines)], { type: 'text/plain' }),
+        })])
+        ok = true
+      }
+    } catch { /* clipboard blocked — fall through to the plain-text draft */ }
+    setCopyState(ok ? 'ok' : 'fail')
+    window.location.href = ok
+      ? `mailto:${encodeURIComponent(followUpTo(contacts))}?subject=${encodeURIComponent(followUpSubject(row))}`
+      : buildFollowUpMailto(row, contacts, lines)
+  }
+
+  return (
+    <div
+      onClick={e => e.stopPropagation()}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}
+    >
+      <a
+        href={buildFollowUpMailto(row, contacts, lines)}
+        onClick={openDraft}
+        title="Copies a formatted charge table and opens a pre-addressed reminder draft in your email client — paste the table into the body, review, and send from your own mailbox"
+        style={{
+          fontSize: 11.5, fontWeight: 600, padding: '5px 13px', borderRadius: 7,
+          background: WILKOW, color: '#f2f3f5', textDecoration: 'none', whiteSpace: 'nowrap',
+        }}
+      >
+        ✉ Email payment follow-up
+      </a>
+      {copyState === 'ok' ? (
+        <span style={{ fontSize: 10.5, color: 'var(--green)', fontWeight: 600 }}>
+          Charge table copied — press Ctrl+V in the draft body to insert the formatted message.
+        </span>
+      ) : copyState === 'fail' ? (
+        <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+          Clipboard unavailable — the draft opened with a plain-text summary instead.
+        </span>
+      ) : contacts.length > 0 ? (
+        <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+          To: {contacts.slice(0, 3).map(c => c.name ? `${c.name} <${c.email}>` : c.email).join(' · ')}
+          <span style={{ color: 'var(--text-faint)' }}> · {contacts[0].type === 'billing' ? 'billing contact' : `${contacts[0].type.replace('_', ' ')} contact`} on file</span>
+        </span>
+      ) : (
+        <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
+          No email on file for this tenant — the draft opens unaddressed. <Link to="/contacts" style={{ color: 'var(--accent)' }}>Add one in Contacts →</Link>
+        </span>
+      )}
+    </div>
+  )
 }
 
 function TenantRow({ row, open, note, isRea, contacts, onToggle }: {
@@ -456,33 +639,7 @@ function TenantRow({ row, open, note, isRea, contacts, onToggle }: {
                 📝 {note}{isRea && <> · <Link to="/rea" style={{ color: 'var(--accent)' }}>open REAs panel →</Link></>}
               </div>
             )}
-            {row.pastDue > 0.005 && (
-              <div
-                onClick={e => e.stopPropagation()}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}
-              >
-                <a
-                  href={buildFollowUpMailto(row, contacts)}
-                  title="Opens a pre-filled payment reminder in your email client — review and send from your own mailbox"
-                  style={{
-                    fontSize: 11.5, fontWeight: 600, padding: '5px 13px', borderRadius: 7,
-                    background: WILKOW, color: '#f2f3f5', textDecoration: 'none', whiteSpace: 'nowrap',
-                  }}
-                >
-                  ✉ Email payment follow-up
-                </a>
-                {contacts.length > 0 ? (
-                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
-                    To: {contacts.slice(0, 3).map(c => c.name ? `${c.name} <${c.email}>` : c.email).join(' · ')}
-                    <span style={{ color: 'var(--text-faint)' }}> · {contacts[0].type === 'billing' ? 'billing contact' : `${contacts[0].type.replace('_', ' ')} contact`} on file</span>
-                  </span>
-                ) : (
-                  <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
-                    No email on file for this tenant — the draft opens unaddressed. <Link to="/contacts" style={{ color: 'var(--accent)' }}>Add one in Contacts →</Link>
-                  </span>
-                )}
-              </div>
-            )}
+            {row.pastDue > 0.005 && <FollowUpBar row={row} contacts={contacts} lines={detailLines ?? []} />}
             <CategoryAgedBars row={row} lines={detailLines ?? []} onBucket={b => onToggle(b)} />
             <div style={{ marginTop: 14 }}>
               <DetailLines lines={detailLines ?? []} loading={detailLoading} error={detailError} bucket={open} onBucket={b => onToggle(b)} />
