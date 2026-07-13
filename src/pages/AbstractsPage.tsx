@@ -676,13 +676,16 @@ function SourceLink({ quote, sourceDocIds }: { quote: string; sourceDocIds: stri
 
 function QaPanel({ qa, status, at, sourceDocIds }: { qa: any; status: string | null; at: string | null; sourceDocIds: string[] }) {
   const [showConfirmed, setShowConfirmed] = useState(false)
+  // Collapsed by default so the abstract reads clean; auto-open only when the
+  // verdict is "issues" (a real problem a human must see). The summary + any
+  // stale-amendment warning stay visible even when collapsed.
+  const [open, setOpen] = useState(status === 'issues')
   const meta = status ? QA_META[status] : null
   const checks: any[] = Array.isArray(qa?.field_checks) ? qa.field_checks : []
   const flagged = checks.filter(c => c?.verdict && c.verdict !== 'confirmed')
   const confirmed = checks.filter(c => c?.verdict === 'confirmed')
   const arith: any[] = Array.isArray(qa?.arithmetic) ? qa.arithmetic : []
   const arithFails = arith.filter(a => a?.ok === false)
-  const fabrication: string[] = Array.isArray(qa?.fabrication_risk) ? qa.fabrication_risk : []
   const fixes: string[] = Array.isArray(qa?.recommended_fixes) ? qa.recommended_fixes : []
   const stale = qa?.amendment_currency?.current === false
   // MRI reconciliation is a data-conflict signal, NOT an abstract defect. New
@@ -726,6 +729,12 @@ function QaPanel({ qa, status, at, sourceDocIds }: { qa: any; status: string | n
         {qa?.confidence && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{qa.confidence} confidence</span>}
         {hasMri && <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 10, color: 'var(--accent)', background: 'var(--accent-dim)' }}>MRI conflict</span>}
         {at && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>· checked {new Date(at).toLocaleString()}</span>}
+        {(flaggedDoc.length + arithFails.length + fixes.length + (mriRecon.length || flaggedMri.length)) > 0 && (
+          <button onClick={() => setOpen(o => !o)}
+            style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+            {open ? 'Hide details ▾' : `Show details ▸ (${flaggedDoc.length + arithFails.length + fixes.length + (mriRecon.length || flaggedMri.length)})`}
+          </button>
+        )}
       </div>
       {qa?.summary && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 8 }}>{qa.summary}</div>}
 
@@ -734,6 +743,8 @@ function QaPanel({ qa, status, at, sourceDocIds }: { qa: any; status: string | n
           ⚠ Latest-amendment terms may NOT be reflected{qa?.amendment_currency?.note ? ` — ${qa.amendment_currency.note}` : ''}
         </div>
       )}
+
+      {open && (<>
 
       {flaggedDoc.length > 0 && (
         <div style={{ marginBottom: 6 }}>
@@ -769,15 +780,6 @@ function QaPanel({ qa, status, at, sourceDocIds }: { qa: any; status: string | n
         </div>
       )}
 
-      {fabrication.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--red, #ef4444)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Not grounded in any source</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {fabrication.map((x, i) => <li key={i} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>{x}</li>)}
-          </ul>
-        </div>
-      )}
-
       {fixes.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Recommended fixes</div>
@@ -796,6 +798,8 @@ function QaPanel({ qa, status, at, sourceDocIds }: { qa: any; status: string | n
           {showConfirmed && confirmed.map((c, i) => <Check key={i} c={c} />)}
         </div>
       )}
+
+      </>)}
     </Widget>
   )
 }

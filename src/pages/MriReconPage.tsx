@@ -45,6 +45,8 @@ export function MriReconPage() {
   const [governs, setGoverns] = useState('abstract')
   const [statusFilter, setStatusFilter] = useState('open')
   const [propFilter, setPropFilter] = useState('')
+  const [tenantFilter, setTenantFilter] = useState<string[]>([])
+  const [tenantOpen, setTenantOpen] = useState(false)
 
   const recon = useQuery<ReconRow[]>(async () => {
     const { data, error } = await supabase.from('v_mri_reconciliation').select('*').limit(2000)
@@ -66,15 +68,22 @@ export function MriReconPage() {
 
   const props = useMemo(() => [...new Set((recon.data ?? []).map(r => r.property_name))].sort(), [recon.data])
 
+  // Tenant options are scoped to the selected property — the multi-select is
+  // only meaningful once you're inside one property's conflicts.
+  const tenants = useMemo(() => propFilter
+    ? [...new Set((recon.data ?? []).filter(r => r.property_name === propFilter).map(r => r.tenant_name))].sort()
+    : [], [recon.data, propFilter])
+
   const rows = useMemo(() => (recon.data ?? [])
     .filter(r => (!governs || r.governs === governs))
     .filter(r => (!propFilter || r.property_name === propFilter))
+    .filter(r => (tenantFilter.length === 0 || tenantFilter.includes(r.tenant_name)))
     .filter(r => {
       const st = stMap.get(stKey(r))?.status ?? 'open'
       return !statusFilter || st === statusFilter
     })
     .sort((a, b) => a.property_name.localeCompare(b.property_name) || a.tenant_name.localeCompare(b.tenant_name)),
-  [recon.data, governs, propFilter, statusFilter, stMap])
+  [recon.data, governs, propFilter, tenantFilter, statusFilter, stMap])
 
   if (appUser?.role !== 'admin' && appUser?.role !== 'asset_manager') {
     return <div style={{ padding: '40px 32px', color: 'var(--text-muted)', fontSize: 14 }}>You need admin or asset manager access to view MRI reconciliation.</div>
@@ -130,11 +139,43 @@ export function MriReconPage() {
           <option value="">Any status</option>
           {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
         </select>
-        <select value={propFilter} onChange={e => setPropFilter(e.target.value)}
+        <select value={propFilter} onChange={e => { setPropFilter(e.target.value); setTenantFilter([]); setTenantOpen(false) }}
           style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '6px 9px' }}>
           <option value="">All properties</option>
           {props.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
+        <div style={{ position: 'relative' }}>
+          <button onClick={() => propFilter && setTenantOpen(o => !o)} disabled={!propFilter}
+            title={propFilter ? 'Filter by tenant' : 'Select a property first'}
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '6px 10px',
+              cursor: propFilter ? 'pointer' : 'not-allowed', opacity: propFilter ? 1 : 0.45, fontWeight: tenantFilter.length ? 700 : 400 }}>
+            {tenantFilter.length === 0 ? 'All tenants' : `${tenantFilter.length} tenant${tenantFilter.length > 1 ? 's' : ''}`} ▾
+          </button>
+          {tenantOpen && propFilter && (
+            <>
+              <div onClick={() => setTenantOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+              <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 50, background: 'var(--surface-2)', border: '1px solid var(--border-2)',
+                borderRadius: 8, padding: 8, minWidth: 240, maxHeight: 340, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.28)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                  <button onClick={() => setTenantFilter(tenants)}
+                    style={{ background: 'none', border: 'none', color: 'var(--brand, #2563eb)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: 0 }}>Select all ({tenants.length})</button>
+                  <button onClick={() => setTenantFilter([])}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: 0 }}>Clear</button>
+                </div>
+                {tenants.map(t => {
+                  const on = tenantFilter.includes(t)
+                  return (
+                    <label key={t} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 6px', borderRadius: 5, cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
+                      <input type="checkbox" checked={on}
+                        onChange={() => setTenantFilter(on ? tenantFilter.filter(x => x !== t) : [...tenantFilter, t])} />
+                      {t}
+                    </label>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        </div>
         <button onClick={exportCsv}
           style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)', cursor: 'pointer' }}>
           Export CSV ({rows.length})
