@@ -34,7 +34,8 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
   const health     = useHealthRatio(propertyIds, propertyNames)
 
   // Returns are computed from ALL deals then scoped by property in-memo.
-  const { data: allDeals } = useDeals()
+  const dealsQ = useDeals()
+  const allDeals = dealsQ.data
   const scopedDeals = useMemo(() => {
     if (!allDeals) return null
     const inScope = new Set(propertyIds)
@@ -42,10 +43,16 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
   }, [allDeals, propertyIds])
   const returns = usePortfolioReturnsByProperty(scopedDeals)
 
-  // Gate on the essentials; optional sections (returns, work orders) render as
-  // "no data" placeholders rather than blocking the button.
-  const coreLoading = pnl.loading || occ.loading || roll.loading || dscr.loading || tenants.loading
-  const ready = propertyIds.length > 0 && !coreLoading
+  // Wait for EVERY section's data before enabling the button — an exec report
+  // must be complete, so we favor a slightly longer load over a snapshot that
+  // captures half-loaded sections as empty. A hook that errors still resolves
+  // loading=false (useQuery), so one failed query degrades that one section
+  // rather than stalling the whole button.
+  const anyLoading =
+    pnl.loading || bva.loading || occ.loading || roll.loading || tenants.loading ||
+    dscr.loading || critical.loading || coTen.loading || delinq.loading ||
+    workOrders.loading || health.loading || dealsQ.loading
+  const ready = propertyIds.length > 0 && !anyLoading
 
   const input: PortfolioSnapshotInput | null = useMemo(() => {
     if (!ready) return null
@@ -56,6 +63,45 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
 
     const pastDue = (delinq.data ?? []).reduce((s, d) => s + d.pastDue, 0)
     const openWos = (workOrders.data ?? []).filter(o => OPEN_STATUSES.includes(o.status))
+
+    // ── Per-property comparison rows ──
+    // Occupancy's byProperty covers every property in scope (built from
+    // propertyIds), so use it as the canonical list and join the rest by id/name.
+    const pickDscr = (name: string): { text: string; status: 'ok' | 'near' | 'breach' | null } => {
+      const rows = (dscr.data ?? []).filter(d => d.propertyName === name)
+      if (!rows.length) return { text: '—', status: null }
+      const chosen = rows.find(d => d.isBreach) ?? rows.find(d => d.isNear) ?? rows[0]
+      const status = chosen.isBreach ? 'breach' : chosen.isNear ? 'near' : 'ok'
+      const dyText = chosen.debtYield != null ? `${(chosen.debtYield * 100).toFixed(1)}%` : '—'
+      const text = chosen.covenantType === 'debt_yield'
+        ? dyText
+        : chosen.dscr != null ? `${chosen.dscr.toFixed(2)}x` : dyText
+      return { text, status }
+    }
+    const byPropertyRows = (occ.data?.byProperty ?? [])
+      .map(o => {
+        const pr = (pnl.data?.byProperty ?? []).find(bp => bp.propertyId === o.propertyId)
+        const t12Noi = pr ? pr.t12.noi : null
+        const noiMargin = pr && pr.t12.revenue > 0 ? pr.t12.noi / pr.t12.revenue : null
+        const propPastDue = (delinq.data ?? []).filter(d => d.propertyName === o.propertyName).reduce((s, d) => s + d.pastDue, 0)
+        const openForProp = (workOrders.data ?? []).filter(w => w.propertyId === o.propertyId && OPEN_STATUSES.includes(w.status)).length
+        const d = pickDscr(o.propertyName)
+        return {
+          propertyName: o.propertyName,
+          t12Noi,
+          noiMargin,
+          occupancyPct: o.totalSf > 0 ? o.physicalPct : null,
+          occupiedSf: o.occupiedSf,
+          totalSf: o.totalSf,
+          pastDue: propPastDue,
+          dscrText: d.text,
+          dscrStatus: d.status,
+          openWos: openForProp,
+        }
+      })
+      // Drop empty shells (no NOI, no SF, no A/R, no WOs) so unloaded entities don't clutter the grid.
+      .filter(r => r.t12Noi != null || r.totalSf > 0 || r.pastDue > 0.005 || r.openWos > 0)
+      .sort((a, b) => (b.t12Noi ?? -Infinity) - (a.t12Noi ?? -Infinity))
 
     const roleOf = (r: { contributed: number; distributed: number; currentEquity: number | null; totalValueMultiple: number | null; totalValueIrr: number | null } | null) => ({
       contributed: r?.contributed ?? 0,
@@ -78,7 +124,9 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
         t12Opex: pnl.data?.t12.opex ?? 0,
         walt: roll.data?.walt ?? 0,
         totalPastDueAr: pastDue,
-        arAsOf: (delinq.data ?? [])[0]?.asOf ?? null,
+        // Latest snapshot date across the delinquency rows (they can differ per
+        // property); empty string sentinel keeps the reduce simple, null if none.
+        arAsOf: (delinq.data ?? []).reduce((m, d) => (d.asOf > m ? d.asOf : m), '') || null,
       },
       noiTrend: (pnl.data?.trend ?? []).map(m => ({ year: m.year, month: m.month, noi: m.noi })),
       budget: bva.data
@@ -144,6 +192,7 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
             })),
           }
         : null,
+      byProperty: byPropertyRows,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, propertyIds.join(','), totalAccessible, pnl.data, bva.data, occ.data, roll.data, tenants.data, dscr.data, critical.data, coTen.data, delinq.data, workOrders.data, health.data, returns])

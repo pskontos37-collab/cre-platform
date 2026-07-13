@@ -121,6 +121,19 @@ export interface SnapshotHealth {
   rows: SnapshotHealthRow[]       // worst (highest ratio) first
 }
 
+export interface SnapshotPropertyRow {
+  propertyName: string
+  t12Noi: number | null
+  noiMargin: number | null        // 0..1
+  occupancyPct: number | null     // 0..1
+  occupiedSf: number
+  totalSf: number
+  pastDue: number
+  dscrText: string                // e.g. "1.42x" or "9.8%" (debt yield) or "—"
+  dscrStatus: 'ok' | 'near' | 'breach' | null
+  openWos: number
+}
+
 export interface PortfolioSnapshotInput {
   scopeLabel: string             // "Entire portfolio" or "N of M properties"
   generatedAt: string
@@ -137,6 +150,7 @@ export interface PortfolioSnapshotInput {
   workOrders: SnapshotWorkOrders | null
   returns: SnapshotReturns | null
   health: SnapshotHealth | null
+  byProperty: SnapshotPropertyRow[]
 }
 
 export async function buildPortfolioSnapshotPdf(input: PortfolioSnapshotInput): Promise<Blob> {
@@ -160,6 +174,14 @@ const irr = (n: number | null) => (n == null || !isFinite(n) ? '—' : `${(n * 1
 
 const BAND_COLOR: Record<'healthy' | 'watch' | 'high', string> = { healthy: GREEN, watch: '#cf8544', high: '#8e3d3d' }
 const healthBand = (r: number): 'healthy' | 'watch' | 'high' => (r <= 0.10 ? 'healthy' : r <= 0.15 ? 'watch' : 'high')
+
+const byPropTotal = (rows: SnapshotPropertyRow[], key: 't12Noi' | 'pastDue') =>
+  rows.reduce((s, r) => s + (key === 't12Noi' ? (r.t12Noi ?? 0) : r.pastDue), 0)
+const blendedOcc = (rows: SnapshotPropertyRow[]) => {
+  const occ = rows.reduce((s, r) => s + r.occupiedSf, 0)
+  const tot = rows.reduce((s, r) => s + r.totalSf, 0)
+  return tot > 0 ? occ / tot : 0
+}
 
 // ── Report ───────────────────────────────────────────────────────────────────
 export function PortfolioSnapshotReport(p: PortfolioSnapshotInput) {
@@ -412,6 +434,54 @@ export function PortfolioSnapshotReport(p: PortfolioSnapshotInput) {
               <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 3 }}>Healthy &lt;=10% · Watch 10-15% · High &gt;15% (general-retail screen). * rent-only — recoveries not yet loaded, so cost is a floor.</Text>
             </View>
           </View>
+        </View>
+      )}
+
+      {/* ── By-property comparison table ── */}
+      {p.byProperty.length > 1 && (
+        <View break={p.byProperty.length > 8} style={{ marginTop: 16 }}>
+          <SectionLabel>{`By Property — ${p.byProperty.length} Assets`}</SectionLabel>
+          <View wrap={false} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: WILKOW, paddingVertical: 3, paddingHorizontal: 2 }}>
+            <Text style={{ ...hcell, flex: 1 }}>PROPERTY</Text>
+            <Text style={{ ...hcell, width: 62, textAlign: 'right' }}>T12 NOI</Text>
+            <Text style={{ ...hcell, width: 44, textAlign: 'right' }}>MARGIN</Text>
+            <Text style={{ ...hcell, width: 58, textAlign: 'right' }}>OCCUPANCY</Text>
+            <Text style={{ ...hcell, width: 62, textAlign: 'right' }}>PAST-DUE A/R</Text>
+            <Text style={{ ...hcell, width: 54, textAlign: 'right' }}>DSCR</Text>
+            <Text style={{ ...hcell, width: 40, textAlign: 'right' }}>OPEN WOS</Text>
+          </View>
+          {p.byProperty.map((r, i) => (
+            <View key={i} wrap={false} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 3, paddingHorizontal: 2, borderBottomWidth: 0.5, borderBottomColor: RULE, backgroundColor: i % 2 ? '#f7f8f9' : undefined }}>
+              <Text style={{ flex: 1, fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: TEXT, paddingRight: 6 }}>{pdfSafe(r.propertyName)}</Text>
+              <Text style={{ width: 62, textAlign: 'right', fontSize: 7.5, color: r.t12Noi != null && r.t12Noi < 0 ? '#c25b52' : TEXT }}>{r.t12Noi != null ? fmtC(r.t12Noi) : '—'}</Text>
+              <Text style={{ width: 44, textAlign: 'right', fontSize: 7.5, color: TEXT_MUTED }}>{r.noiMargin != null ? `${Math.round(r.noiMargin * 100)}%` : '—'}</Text>
+              <View style={{ width: 58, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' }}>
+                <View style={{ width: 26, height: 5, backgroundColor: '#eef1f3', borderRadius: 2.5, marginRight: 4 }}>
+                  <View style={{ width: `${Math.min(100, (r.occupancyPct ?? 0) * 100)}%`, height: 5, backgroundColor: (r.occupancyPct ?? 0) >= 0.9 ? GREEN : (r.occupancyPct ?? 0) >= 0.75 ? WILKOW : '#c25b52', borderRadius: 2.5 }} />
+                </View>
+                <Text style={{ fontSize: 7.5, color: TEXT }}>{r.occupancyPct != null ? pct1(r.occupancyPct) : '—'}</Text>
+              </View>
+              <Text style={{ width: 62, textAlign: 'right', fontSize: 7.5, color: r.pastDue > 0.005 ? '#8e3d3d' : TEXT_FAINT }}>{r.pastDue > 0.005 ? fmt(r.pastDue) : '—'}</Text>
+              <View style={{ width: 54, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'baseline' }}>
+                <Text style={{ fontSize: 7.5, color: TEXT }}>{r.dscrText}</Text>
+                {r.dscrStatus && r.dscrStatus !== 'ok' && (
+                  <Text style={{ fontSize: 6, fontFamily: 'Helvetica-Bold', marginLeft: 3, color: r.dscrStatus === 'breach' ? '#8e3d3d' : '#cf8544' }}>{r.dscrStatus === 'breach' ? 'BR' : 'NR'}</Text>
+                )}
+              </View>
+              <Text style={{ width: 40, textAlign: 'right', fontSize: 7.5, color: r.openWos > 0 ? TEXT : TEXT_FAINT }}>{r.openWos > 0 ? r.openWos : '—'}</Text>
+            </View>
+          ))}
+          {/* totals */}
+          <View wrap={false} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2, borderBottomWidth: 1, borderBottomColor: WILKOW, backgroundColor: '#eef2f4' }}>
+            <Text style={{ flex: 1, fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: TEXT_MUTED }}>Portfolio total</Text>
+            <Text style={{ width: 62, textAlign: 'right', fontSize: 7.5, fontFamily: 'Helvetica-Bold' }}>{fmtC(byPropTotal(p.byProperty, 't12Noi'))}</Text>
+            <Text style={{ width: 44 }} />
+            <Text style={{ width: 58, textAlign: 'right', fontSize: 7.5, fontFamily: 'Helvetica-Bold' }}>{pct1(blendedOcc(p.byProperty))}</Text>
+            <Text style={{ width: 62, textAlign: 'right', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#8e3d3d' }}>{fmt(byPropTotal(p.byProperty, 'pastDue'))}</Text>
+            <Text style={{ width: 54 }} />
+            <Text style={{ width: 40, textAlign: 'right', fontSize: 7.5, fontFamily: 'Helvetica-Bold' }}>{p.byProperty.reduce((s, r) => s + r.openWos, 0)}</Text>
+          </View>
+          <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 4 }}>DSCR shows each asset's governing coverage (DSCR x or debt-yield %); BR = covenant breach, NR = near covenant. Sorted by T12 NOI.</Text>
         </View>
       )}
 
