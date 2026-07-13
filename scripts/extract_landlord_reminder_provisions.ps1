@@ -47,7 +47,10 @@ if (-not $Load) {
   # tenant and property so we can resolve docs and label output.
   $sel = 'id,option_type,is_exercised,notice_days_required,requires_landlord_reminder,lease:leases!inner(id,property_id,status,expiration_date,tenant_id,tenant:tenants(name,trade_name))'
   $q = [uri]::EscapeDataString($sel)
-  $opts = Invoke-RestMethod -Uri "$BASE/rest/v1/lease_options?select=$q&option_type=in.(renewal,extension)&is_exercised=eq.false&lease.status=eq.active&limit=1000" -Headers $H -UserAgent $UA -TimeoutSec 120
+  # option_type enum = {renewal,expansion,contraction,termination,rofo,rofr};
+  # "extension" options are modeled as renewal. Reminder-notice provisions are a
+  # renewal-option concept, so we scan renewals.
+  $opts = Invoke-RestMethod -Uri "$BASE/rest/v1/lease_options?select=$q&option_type=eq.renewal&is_exercised=eq.false&lease.status=eq.active&limit=1000" -Headers $H -UserAgent $UA -TimeoutSec 120
   # one entry per LEASE (a lease can carry several options - the provision is lease-level)
   $byLease = @{}
   foreach ($o in $opts) { if ($o.lease -and -not $byLease.ContainsKey($o.lease.id)) { $byLease[$o.lease.id] = $o } }
@@ -169,7 +172,7 @@ foreach ($f in $fix) {
   Write-Output ("  {0} @ {1}: {2}" -f $f.tenant, $f.property, $win)
   # flag every un-exercised renewal/extension option on the lease
   $b = @{ requires_landlord_reminder = $true; landlord_reminder_note = $note } | ConvertTo-Json -Compress
-  Invoke-RestMethod -Uri "$BASE/rest/v1/lease_options?lease_id=eq.$($f.lease_id)&option_type=in.(renewal,extension)&is_exercised=eq.false" -Method Patch -Headers $HW -UserAgent $UA -Body $b -TimeoutSec 60 | Out-Null
+  Invoke-RestMethod -Uri "$BASE/rest/v1/lease_options?lease_id=eq.$($f.lease_id)&option_type=eq.renewal&is_exercised=eq.false" -Method Patch -Headers $HW -UserAgent $UA -Body $b -TimeoutSec 60 | Out-Null
   $f.applied = $true
 }
 
