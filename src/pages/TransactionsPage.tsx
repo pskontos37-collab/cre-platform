@@ -61,7 +61,7 @@ export function TransactionsPage() {
     (!verifiedOnly || t.verificationStatus === 'verified'),
   )
 
-  // Active closing documents (key & not superseded) for the selected property —
+  // All ACTIVE (not superseded) closing documents for the selected property —
   // the input to the on-demand narrative-abstract pack. Requires a single
   // property so the AI run stays scoped.
   const selectedPropName = properties.find(p => p.id === propFilter)?.name ?? ''
@@ -72,7 +72,7 @@ export function TransactionsPage() {
     for (const t of txns) {
       if (!t.properties.some(p => p.id === propFilter)) continue
       for (const d of t.docs) {
-        if (!d.isKey || d.superseded || !d.documentId || seen.has(d.documentId)) continue
+        if (d.superseded || !d.documentId || seen.has(d.documentId)) continue
         seen.add(d.documentId)
         out.push({
           documentId: d.documentId,
@@ -159,8 +159,8 @@ export function TransactionsPage() {
                 kind="transaction"
                 docs={abstractDocs}
                 reportTitle={selectedPropName || 'Transactions'}
-                reportSubtitle="Narrative abstracts of active closing documents"
-                scopeLabel={selectedPropName ? `${selectedPropName} · ${abstractDocs.length} key document${abstractDocs.length === 1 ? '' : 's'}` : ''}
+                reportSubtitle="Narrative abstracts of all active closing documents"
+                scopeLabel={selectedPropName ? `${selectedPropName} · ${abstractDocs.length} active document${abstractDocs.length === 1 ? '' : 's'}` : ''}
                 fileName={`Wilkow-Transaction-Abstracts-${(selectedPropName || 'property').replace(/[^\w.-]+/g, '-')}.pdf`}
                 disabled={!propFilter}
                 disabledReason="Choose a single property above to abstract its active closing documents"
