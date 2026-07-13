@@ -157,6 +157,7 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
             .map(d => ({ tenantName: d.tenantName, propertyName: d.propertyName, pastDue: d.pastDue })),
           health: (health.data?.rows ?? []).filter(h => h.propertyName === r.propertyName).map(h => ({
             tenantName: h.tenantName, propertyName: h.propertyName, ratio: h.ratio,
+            baseRent: h.baseRent, recoveries: h.recoveries,
             occupancyCost: h.occupancyCost, ttmSales: h.ttmSales, band: h.band, hasRecoveries: h.hasRecoveries,
           })),
           returns: r._ret ? { lp: roleOf(r._ret.lp), gp: roleOf(r._ret.gp), promoteEquity: r._ret.promote?.currentEquity ?? null } : null,
@@ -237,6 +238,8 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
               tenantName: h.tenantName,
               propertyName: h.propertyName,
               ratio: h.ratio,
+              baseRent: h.baseRent,
+              recoveries: h.recoveries,
               occupancyCost: h.occupancyCost,
               ttmSales: h.ttmSales,
               band: h.band,

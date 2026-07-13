@@ -108,7 +108,9 @@ export interface SnapshotHealthRow {
   tenantName: string
   propertyName: string
   ratio: number                  // occupancy cost / TTM sales, 0..1
-  occupancyCost: number
+  baseRent: number
+  recoveries: number
+  occupancyCost: number          // baseRent + recoveries
   ttmSales: number
   band: 'healthy' | 'watch' | 'high'
   hasRecoveries: boolean         // false = rent-only floor (understates cost)
@@ -210,6 +212,44 @@ const blendedOcc = (rows: SnapshotPropertyRow[]) => {
   const occ = rows.reduce((s, r) => s + r.occupiedSf, 0)
   const tot = rows.reduce((s, r) => s + r.totalSf, 0)
   return tot > 0 ? occ / tot : 0
+}
+
+// Plain-English "what this date is for". Prefer the DB description (the specific
+// context, e.g. "Option 2 of 4 — 180-day notice"); fall back to a purpose keyed
+// off the date type so an entry never reads as a bare label.
+const DATE_PURPOSE: Record<string, string> = {
+  lease_expiration:   'Lease term expires — renewal, holdover or vacate decision',
+  option_deadline:    'Deadline to exercise or decline a renewal/extension option',
+  renewal_deadline:   'Renewal notice deadline under the lease',
+  termination_option: 'Early-termination / kick-out right window',
+  loan_maturity:      'Loan matures — refinance or payoff required',
+  rate_reset:         'Interest rate resets on the loan',
+  insurance_renewal:  'Insurance policy renews — confirm coverage & COIs',
+  tax_appeal:         'Property-tax appeal filing deadline',
+  cam_reconciliation: 'CAM / expense reconciliation due to tenants',
+  estoppel_deadline:  'Estoppel certificate response deadline',
+}
+const datePurpose = (dateType: string, description: string | null) => {
+  const d = (description ?? '').trim()
+  return d.length ? d : (DATE_PURPOSE[dateType] ?? 'Upcoming lease/loan milestone — review required')
+}
+
+interface HealthGroup { propertyName: string; ratio: number; rows: SnapshotHealthRow[] }
+function groupHealth(rows: SnapshotHealthRow[]): HealthGroup[] {
+  const m = new Map<string, SnapshotHealthRow[]>()
+  for (const r of rows) { const a = m.get(r.propertyName) ?? []; a.push(r); m.set(r.propertyName, a) }
+  return [...m.entries()]
+    .map(([propertyName, rs]) => {
+      const cost = rs.reduce((s, r) => s + r.occupancyCost, 0)
+      const sales = rs.reduce((s, r) => s + r.ttmSales, 0)
+      return { propertyName, ratio: sales > 0 ? cost / sales : 0, rows: [...rs].sort((a, b) => b.ratio - a.ratio) }
+    })
+    .sort((a, b) => b.ratio - a.ratio)
+}
+function healthDist(rows: SnapshotHealthRow[]): { healthy: number; watch: number; high: number } {
+  const d = { healthy: 0, watch: 0, high: 0 }
+  for (const r of rows) d[r.band]++
+  return d
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────
@@ -348,10 +388,11 @@ export function PortfolioSnapshotReport(p: PortfolioSnapshotInput) {
           <SectionLabel>Critical Dates — Next 90 Days</SectionLabel>
           {p.criticalDates.length > 0 ? (
             p.criticalDates.slice(0, 10).map((c, i) => (
-              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 2.5, borderBottomWidth: 0.5, borderBottomColor: RULE }}>
+              <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 2.5, borderBottomWidth: 0.5, borderBottomColor: RULE }}>
                 <Text style={{ width: 52, fontSize: 7, color: c.daysUntil <= 30 ? '#c25b52' : TEXT_MUTED, fontFamily: c.daysUntil <= 30 ? 'Helvetica-Bold' : 'Helvetica' }}>{c.dueDate}</Text>
                 <View style={{ flex: 1, paddingRight: 6 }}>
                   <Text style={{ fontSize: 7.5, color: TEXT }}>{pdfSafe(labelDate(c.dateType))}{c.tenantName ? ` · ${pdfSafe(c.tenantName)}` : ''}</Text>
+                  <Text style={{ fontSize: 6.5, color: TEXT_MUTED }}>{pdfSafe(datePurpose(c.dateType, c.description))}</Text>
                   <Text style={{ fontSize: 6, color: TEXT_FAINT }}>{pdfSafe(c.propertyName)}</Text>
                 </View>
                 <Text style={{ width: 36, textAlign: 'right', fontSize: 7, color: TEXT_MUTED }}>{c.daysUntil}d</Text>
@@ -432,39 +473,70 @@ export function PortfolioSnapshotReport(p: PortfolioSnapshotInput) {
         </View>
       </View>
 
-      {/* ── Tenant health (occupancy-cost ratio) ── */}
-      {p.health && p.health.rows.length > 0 && (
-        <View wrap={false} style={{ marginTop: 16 }}>
-          <SectionLabel>{`Tenant Health — Occupancy-Cost Ratio (${p.health.reporterCount} sales reporters · TTM ${p.health.ttmLabel})`}</SectionLabel>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <View style={{ width: 130 }}>
-              <Text style={{ fontSize: 6.5, color: TEXT_FAINT, marginBottom: 2 }}>PORTFOLIO OCC. COST</Text>
-              <Text style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 18, color: BAND_COLOR[healthBand(p.health.portfolioRatio)] }}>{pct1(p.health.portfolioRatio)}</Text>
-              <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 2 }}>occupancy cost ÷ sales, blended across reporters</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: WILKOW, paddingVertical: 2 }}>
-                <Text style={{ ...hcell, flex: 1 }}>TENANT (HIGHEST BURDEN)</Text>
-                <Text style={{ ...hcell, width: 54, textAlign: 'right' }}>OCC. COST</Text>
-                <Text style={{ ...hcell, width: 54, textAlign: 'right' }}>TTM SALES</Text>
-                <Text style={{ ...hcell, width: 40, textAlign: 'right' }}>RATIO</Text>
+      {/* ── Tenant health (occupancy-cost ratio) — expanded ── */}
+      {p.health && p.health.rows.length > 0 && (() => {
+        const dist = healthDist(p.health.rows)
+        const groups = groupHealth(p.health.rows)
+        return (
+          <View style={{ marginTop: 16 }}>
+            <SectionLabel>{`Tenant Health — Occupancy-Cost Ratio (${p.health.reporterCount} reporters · TTM ${p.health.ttmLabel})`}</SectionLabel>
+
+            {/* summary: portfolio ratio + band distribution */}
+            <View wrap={false} style={{ flexDirection: 'row', alignItems: 'center', gap: 18, marginBottom: 12 }}>
+              <View style={{ width: 118 }}>
+                <Text style={{ fontSize: 6.5, color: TEXT_FAINT, marginBottom: 2 }}>PORTFOLIO OCC. COST</Text>
+                <Text style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 18, color: BAND_COLOR[healthBand(p.health.portfolioRatio)] }}>{pct1(p.health.portfolioRatio)}</Text>
+                <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 2 }}>cost ÷ sales, blended</Text>
               </View>
-              {p.health.rows.slice(0, 6).map((h, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 2, borderBottomWidth: 0.5, borderBottomColor: RULE }}>
-                  <View style={{ flex: 1, paddingRight: 6 }}>
-                    <Text style={{ fontSize: 7.5, color: TEXT }}>{pdfSafe(h.tenantName)}{h.hasRecoveries ? '' : ' *'}</Text>
-                    <Text style={{ fontSize: 6, color: TEXT_FAINT }}>{pdfSafe(h.propertyName)}</Text>
-                  </View>
-                  <Text style={{ width: 54, textAlign: 'right', fontSize: 7.5, color: TEXT }}>{fmtC(h.occupancyCost)}</Text>
-                  <Text style={{ width: 54, textAlign: 'right', fontSize: 7.5, color: TEXT_MUTED }}>{fmtC(h.ttmSales)}</Text>
-                  <Text style={{ width: 40, textAlign: 'right', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: BAND_COLOR[h.band] }}>{pct1(h.ratio)}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...hcell, marginBottom: 4 }}>DISTRIBUTION OF REPORTERS</Text>
+                <View style={{ flexDirection: 'row', height: 11, borderRadius: 3, overflow: 'hidden', backgroundColor: '#eef1f3' }}>
+                  {dist.healthy > 0 && <View style={{ flex: dist.healthy, backgroundColor: GREEN }} />}
+                  {dist.watch > 0 && <View style={{ flex: dist.watch, backgroundColor: '#cf8544' }} />}
+                  {dist.high > 0 && <View style={{ flex: dist.high, backgroundColor: '#8e3d3d' }} />}
                 </View>
-              ))}
-              <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 3 }}>Healthy &lt;=10% · Watch 10-15% · High &gt;15% (general-retail screen). * rent-only — recoveries not yet loaded, so cost is a floor.</Text>
+                <View style={{ flexDirection: 'row', gap: 16, marginTop: 5 }}>
+                  <LegendDot color={GREEN} label={`Healthy (<=10%): ${dist.healthy}`} />
+                  <LegendDot color="#cf8544" label={`Watch (10-15%): ${dist.watch}`} />
+                  <LegendDot color="#8e3d3d" label={`High (>15%): ${dist.high}`} />
+                </View>
+              </View>
             </View>
+
+            {/* by-property groups, worst-blended-ratio first */}
+            {groups.map((g, gi) => (
+              <View key={gi} wrap={false} style={{ marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', borderBottomWidth: 1, borderBottomColor: WILKOW, paddingBottom: 2, marginBottom: 2 }}>
+                  <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: TEXT }}>{pdfSafe(g.propertyName)}</Text>
+                  <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: BAND_COLOR[healthBand(g.ratio)] }}>{pct1(g.ratio)} blended · {g.rows.length} {g.rows.length === 1 ? 'reporter' : 'reporters'}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', paddingBottom: 1 }}>
+                  <Text style={{ ...hcell, flex: 1 }}>TENANT</Text>
+                  <Text style={{ ...hcell, width: 58, textAlign: 'right' }}>BASE RENT</Text>
+                  <Text style={{ ...hcell, width: 58, textAlign: 'right' }}>RECOVERIES</Text>
+                  <Text style={{ ...hcell, width: 58, textAlign: 'right' }}>OCC. COST</Text>
+                  <Text style={{ ...hcell, width: 58, textAlign: 'right' }}>TTM SALES</Text>
+                  <Text style={{ ...hcell, width: 38, textAlign: 'right' }}>RATIO</Text>
+                  <Text style={{ ...hcell, width: 42, textAlign: 'right' }}>BAND</Text>
+                </View>
+                {g.rows.slice(0, 8).map((h, i) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 1.5, borderBottomWidth: 0.5, borderBottomColor: RULE }}>
+                    <Text style={{ flex: 1, fontSize: 7.5, color: TEXT, paddingRight: 6 }}>{pdfSafe(h.tenantName)}{h.hasRecoveries ? '' : ' *'}</Text>
+                    <Text style={{ width: 58, textAlign: 'right', fontSize: 7.5, color: TEXT_MUTED }}>{fmtC(h.baseRent)}</Text>
+                    <Text style={{ width: 58, textAlign: 'right', fontSize: 7.5, color: TEXT_MUTED }}>{h.recoveries > 0 ? fmtC(h.recoveries) : '—'}</Text>
+                    <Text style={{ width: 58, textAlign: 'right', fontSize: 7.5, color: TEXT }}>{fmtC(h.occupancyCost)}</Text>
+                    <Text style={{ width: 58, textAlign: 'right', fontSize: 7.5, color: TEXT_MUTED }}>{fmtC(h.ttmSales)}</Text>
+                    <Text style={{ width: 38, textAlign: 'right', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: BAND_COLOR[h.band] }}>{pct1(h.ratio)}</Text>
+                    <Text style={{ width: 42, textAlign: 'right', fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: BAND_COLOR[h.band] }}>{h.band === 'healthy' ? 'HEALTHY' : h.band === 'watch' ? 'WATCH' : 'HIGH'}</Text>
+                  </View>
+                ))}
+                {g.rows.length > 8 && <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 1 }}>+{g.rows.length - 8} more {g.rows.length - 8 === 1 ? 'reporter' : 'reporters'} at this property</Text>}
+              </View>
+            ))}
+            <Text style={{ fontSize: 6, color: TEXT_FAINT, marginTop: 3 }}>Healthy &lt;=10% · Watch 10-15% · High &gt;15% (general-retail screen). Occupancy cost = base rent + recoveries; ratio = cost ÷ TTM sales. * rent-only — recoveries not yet loaded, so cost is a floor.</Text>
           </View>
-        </View>
-      )}
+        )
+      })()}
 
       {/* ── By-property comparison table ── */}
       {p.byProperty.length > 1 && (
@@ -617,9 +689,12 @@ function PropertyDetailPage({ d }: { d: SnapshotPropertyDetail }) {
         <View style={{ flex: 1 }}>
           <SectionLabel>Critical Dates (90d) & Flags</SectionLabel>
           {d.criticalDates.length > 0 ? d.criticalDates.slice(0, 6).map((c, i) => (
-            <View key={i} style={{ flexDirection: 'row', paddingVertical: 1.5 }}>
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 1.5, borderBottomWidth: 0.5, borderBottomColor: RULE }}>
               <Text style={{ width: 52, fontSize: 7, color: c.daysUntil <= 30 ? '#c25b52' : TEXT_MUTED }}>{c.dueDate}</Text>
-              <Text style={{ flex: 1, fontSize: 7, color: TEXT }}>{pdfSafe(labelDate(c.dateType))}{c.tenantName ? ` · ${pdfSafe(c.tenantName)}` : ''}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 7, color: TEXT }}>{pdfSafe(labelDate(c.dateType))}{c.tenantName ? ` · ${pdfSafe(c.tenantName)}` : ''}</Text>
+                <Text style={{ fontSize: 6, color: TEXT_MUTED }}>{pdfSafe(datePurpose(c.dateType, c.description))}</Text>
+              </View>
             </View>
           )) : <Text style={{ fontSize: 7.5, color: TEXT_FAINT }}>None in 90 days.</Text>}
           {d.coTenancy.length > 0 && (
@@ -668,6 +743,15 @@ function MiniStat({ label, value, color }: { label: string; value: string; color
     <View>
       <Text style={{ fontSize: 6.5, color: TEXT_FAINT, marginBottom: 2 }}>{label}</Text>
       <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', color: color ?? TEXT }}>{value}</Text>
+    </View>
+  )
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color, marginRight: 4 }} />
+      <Text style={{ fontSize: 7, color: TEXT_MUTED }}>{label}</Text>
     </View>
   )
 }
