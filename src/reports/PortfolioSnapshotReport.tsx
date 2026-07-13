@@ -192,7 +192,7 @@ export function PortfolioSnapshotReport(p: PortfolioSnapshotInput) {
       {/* ── NOI trend + budget ── */}
       {p.noiTrend.length > 1 && (
         <View wrap={false} style={{ marginBottom: 16 }}>
-          <SectionLabel>Monthly NOI — Trailing {p.noiTrend.length} Months (GL)</SectionLabel>
+          <SectionLabel>{`Monthly NOI — Trailing ${p.noiTrend.length} Months (GL)`}</SectionLabel>
           <NoiBars trend={p.noiTrend} />
           {p.budget && (
             <View style={{ flexDirection: 'row', marginTop: 8, alignItems: 'center', gap: 14 }}>
@@ -384,7 +384,7 @@ export function PortfolioSnapshotReport(p: PortfolioSnapshotInput) {
       {/* ── Tenant health (occupancy-cost ratio) ── */}
       {p.health && p.health.rows.length > 0 && (
         <View wrap={false} style={{ marginTop: 16 }}>
-          <SectionLabel>Tenant Health — Occupancy-Cost Ratio ({p.health.reporterCount} sales reporters · TTM {p.health.ttmLabel})</SectionLabel>
+          <SectionLabel>{`Tenant Health — Occupancy-Cost Ratio (${p.health.reporterCount} sales reporters · TTM ${p.health.ttmLabel})`}</SectionLabel>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
             <View style={{ width: 130 }}>
               <Text style={{ fontSize: 6.5, color: TEXT_FAINT, marginBottom: 2 }}>PORTFOLIO OCC. COST</Text>
