@@ -1,11 +1,12 @@
 import { useMemo, useState, type CSSProperties } from 'react'
 import {
   useTransactions, type Transaction, type TxnType,
-  TXN_TYPE_LABEL,
+  TXN_TYPE_LABEL, roleLabel,
 } from '../hooks/useTransactions'
 import { TransactionCard } from '../components/transactions/TransactionPieces'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
+import { DocAbstractsButton, type AbstractDocRef } from '../components/DocAbstractsButton'
 
 // /transactions — the portfolio-wide record of closed deals (acquisitions,
 // refinancings, recaps, dispositions). Institutional memory: every row anchors
@@ -59,6 +60,32 @@ export function TransactionsPage() {
     (!propFilter || t.properties.some(p => p.id === propFilter)) &&
     (!verifiedOnly || t.verificationStatus === 'verified'),
   )
+
+  // Active closing documents (key & not superseded) for the selected property —
+  // the input to the on-demand narrative-abstract pack. Requires a single
+  // property so the AI run stays scoped.
+  const selectedPropName = properties.find(p => p.id === propFilter)?.name ?? ''
+  const abstractDocs = useMemo<AbstractDocRef[]>(() => {
+    if (!propFilter) return []
+    const seen = new Set<string>()
+    const out: AbstractDocRef[] = []
+    for (const t of txns) {
+      if (!t.properties.some(p => p.id === propFilter)) continue
+      for (const d of t.docs) {
+        if (!d.isKey || d.superseded || !d.documentId || seen.has(d.documentId)) continue
+        seen.add(d.documentId)
+        out.push({
+          documentId: d.documentId,
+          propertyId: propFilter,
+          title: d.title ?? d.fileName ?? 'Document',
+          docType: d.role ?? null,
+          roleLabel: roleLabel(d.role),
+          context: { transaction_type: t.type, counterparty: t.counterparty, close_date: t.closeDate, role: d.role },
+        })
+      }
+    }
+    return out
+  }, [txns, propFilter])
 
   // Totals by type over the filtered set (each transaction counts once).
   const totals = useMemo(() => {
@@ -127,8 +154,20 @@ export function TransactionsPage() {
               <input type="checkbox" checked={verifiedOnly} onChange={e => setVerifiedOnly(e.target.checked)} />
               Verified only
             </label>
-            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-faint)' }}>
-              {filtered.length} of {txns.length}
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <DocAbstractsButton
+                kind="transaction"
+                docs={abstractDocs}
+                reportTitle={selectedPropName || 'Transactions'}
+                reportSubtitle="Narrative abstracts of active closing documents"
+                scopeLabel={selectedPropName ? `${selectedPropName} · ${abstractDocs.length} key document${abstractDocs.length === 1 ? '' : 's'}` : ''}
+                fileName={`Wilkow-Transaction-Abstracts-${(selectedPropName || 'property').replace(/[^\w.-]+/g, '-')}.pdf`}
+                disabled={!propFilter}
+                disabledReason="Choose a single property above to abstract its active closing documents"
+              />
+              <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+                {filtered.length} of {txns.length}
+              </span>
             </span>
           </div>
 

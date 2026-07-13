@@ -5,6 +5,7 @@ import { useManagementAgreements, type MgmtAgreement, type MgmtDeadline } from '
 import { supabase } from '../lib/supabase'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
+import { DocAbstractsButton, type AbstractDocRef } from '../components/DocAbstractsButton'
 
 // Discrete, queryable columns (each is a prompt).
 const NUM_FIELDS: { key: keyof MgmtAgreement; label: string; suffix?: string; pct?: boolean }[] = [
@@ -66,6 +67,23 @@ export function ManagementPage() {
     return { fields, terms }
   }, [agreements])
 
+  // Active PMA documents (the current governing stack) for the on-demand
+  // narrative-abstract pack — falls back to all linked docs if none flagged current.
+  const propName = (properties ?? []).find(p => p.id === propertyId)?.name ?? ''
+  const abstractDocs = useMemo<AbstractDocRef[]>(() => {
+    const linked = (agreements ?? []).filter(a => a.document_id)
+    const current = linked.filter(a => a.is_current)
+    const use = current.length ? current : linked
+    return use.map(a => ({
+      documentId: a.document_id as string,
+      propertyId: a.property_id,
+      title: `${a.role === 'amendment' ? 'Amendment' : 'Management agreement'} — ${a.manager_name ?? 'Manager'}${a.effective_date ? ` (${a.effective_date})` : ''}`,
+      docType: 'management_agreement',
+      roleLabel: a.role,
+      context: { role: a.role, manager: a.manager_name, owner: a.owner_name, effective_date: a.effective_date, term_start: a.term_start, term_end: a.term_end },
+    }))
+  }, [agreements])
+
   if (appUser?.role !== 'admin' && appUser?.role !== 'asset_manager') {
     return <div style={{ padding: '40px 32px', color: 'var(--text-muted)', fontSize: 14 }}>You need admin or asset manager access to view management agreements.</div>
   }
@@ -93,6 +111,18 @@ export function ManagementPage() {
             </select>
           </label>
         )}
+        <span style={{ marginLeft: 'auto' }}>
+          <DocAbstractsButton
+            kind="management"
+            docs={abstractDocs}
+            reportTitle={propName || 'Management Agreement'}
+            reportSubtitle="Narrative abstract of the active management agreement(s)"
+            scopeLabel={propName ? `${propName} · ${abstractDocs.length} document${abstractDocs.length === 1 ? '' : 's'}` : ''}
+            fileName={`Wilkow-Management-Abstract-${(propName || 'property').replace(/[^\w.-]+/g, '-')}.pdf`}
+            disabled={abstractDocs.length === 0}
+            disabledReason="No management-agreement document is linked for this property yet"
+          />
+        </span>
       </div>
 
       {loading && <WidgetSkeleton rows={8} />}
