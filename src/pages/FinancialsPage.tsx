@@ -6,6 +6,7 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { viewHref } from '../lib/viewer'
 import { Badge } from '../components/ui/Badge'
 import { CAMReconWidget } from '../components/dashboard/CAMReconWidget'
+import { PdfDownloadButton, sanitizeFilename } from '../reports/PdfDownloadButton'
 import {
   useVendorSpend, useGlAccounts, useDuplicateFlags,
   useDupDismissals, dismissDupFlag, restoreDupFlag, dupFlagKey,
@@ -78,16 +79,35 @@ export function FinancialsPage() {
             Vendor spend and recent documents filter by date window (30 / 60 / 90 days, YTD, TTM, since acquisition).
           </p>
         </div>
-        <select
-          value={propertyId ?? ''}
-          onChange={e => setPropertyId(e.target.value || null)}
-          style={{
-            background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6,
-            color: 'var(--text)', fontSize: 13, padding: '7px 10px', cursor: 'pointer', outline: 'none',
-          }}
-        >
-          {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+          <PdfDownloadButton
+            label="⬇ PDF Report"
+            filename={`Wilkow-Financials-${sanitizeFilename((propertyId && propertyNames[propertyId]) || 'property')}-${stmt.data?.latest ? `${stmt.data.latest.year}-${String(stmt.data.latest.month).padStart(2, '0')}` : new Date().toISOString().slice(0, 7)}.pdf`}
+            disabled={!stmt.data && !bs.data}
+            title={!stmt.data && !bs.data ? 'No GL data loaded for this property' : 'Download a branded PDF of the income statement, balance sheet, and top vendors'}
+            build={async () => {
+              const { buildFinancialsPdf } = await import('../reports/FinancialsReport')
+              return buildFinancialsPdf({
+                propertyName: (propertyId && propertyNames[propertyId]) || 'Property',
+                stmt: stmt.data ?? null,
+                bs: bs.data ?? null,
+                vendors: vendors.data ?? null,
+                vendorWindowLabel: SPEND_WINDOW_LABEL[vendorWindow],
+                generatedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }),
+              })
+            }}
+          />
+          <select
+            value={propertyId ?? ''}
+            onChange={e => setPropertyId(e.target.value || null)}
+            style={{
+              background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6,
+              color: 'var(--text)', fontSize: 13, padding: '7px 10px', cursor: 'pointer', outline: 'none',
+            }}
+          >
+            {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Summary cards */}

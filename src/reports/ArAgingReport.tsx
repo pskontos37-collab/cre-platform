@@ -1,5 +1,5 @@
 import { Text, View, pdf } from '@react-pdf/renderer'
-import type { ArAgingRow } from '../hooks/useArAging'
+import { normalizeTenantName, type ArAgingRow, type ArFollowUp } from '../hooks/useArAging'
 import { ReportShell, SectionLabel } from './ReportShell'
 import {
   BUCKETS, GREEN, RULE, SERIF, TEXT, TEXT_FAINT, TEXT_MUTED, WILKOW,
@@ -9,9 +9,19 @@ import {
 export interface ArAgingReportInput {
   rows: ArAgingRow[]
   notes: Record<string, string>   // keyed "propertyId|mriLeaseId" (see useArNotes)
+  followUps?: Record<string, ArFollowUp[]>  // keyed "propertyId|mri:<lease>" & "propertyId|nm:<name>" (see useArFollowUps)
   reaMris: string[]               // MRI lease ids that are REA parties, not leased tenants
   asOf: string | null
   generatedAt: string
+}
+
+// Resolve the follow-up log for a row with or without an MRI lease id — same
+// key fallback the /receivables page uses (useArFollowUps).
+function followUpsForRow(followUps: Record<string, ArFollowUp[]> | undefined, r: ArAgingRow): ArFollowUp[] {
+  if (!followUps) return []
+  return (r.mriLeaseId ? followUps[`${r.propertyId}|mri:${r.mriLeaseId}`] : undefined)
+    ?? followUps[`${r.propertyId}|nm:${normalizeTenantName(r.tenantName)}`]
+    ?? []
 }
 
 // Renders and serializes in the browser; called via dynamic import so
@@ -25,7 +35,7 @@ const COL = { status: 46, pmt: 82, current: 56, b30: 52, b60: 52, b90: 52, b120:
 
 const eps = (v: number) => Math.abs(v) > 0.005
 
-export function ArAgingReport({ rows, notes, reaMris, asOf, generatedAt }: ArAgingReportInput) {
+export function ArAgingReport({ rows, notes, followUps, reaMris, asOf, generatedAt }: ArAgingReportInput) {
   const rea = new Set(reaMris)
 
   const kpi = rows.reduce(
@@ -116,7 +126,7 @@ export function ArAgingReport({ rows, notes, reaMris, asOf, generatedAt }: ArAgi
           </View>
           <HeaderRow />
           {p.rows.map(r => (
-            <TenantRow key={r.id} r={r} note={notes[`${r.propertyId}|${r.mriLeaseId}`] ?? null} isRea={r.mriLeaseId != null && rea.has(r.mriLeaseId)} />
+            <TenantRow key={r.id} r={r} note={notes[`${r.propertyId}|${r.mriLeaseId}`] ?? null} followUps={followUpsForRow(followUps, r)} isRea={r.mriLeaseId != null && rea.has(r.mriLeaseId)} />
           ))}
           <TotalsRow p={p} />
         </View>
@@ -125,6 +135,7 @@ export function ArAgingReport({ rows, notes, reaMris, asOf, generatedAt }: ArAgi
       <Text style={{ fontSize: 7, color: TEXT_FAINT, marginTop: 4, lineHeight: 1.5 }}>
         Amounts in parentheses are credits / prepaid balances. Tenants marked REA are parties to a Reciprocal Easement
         Agreement, not leased tenants. Bucket ages reflect MRI invoice dates as of the snapshot date shown above.
+        A green marker records the most recent collection follow-up logged for that tenant (date and manager).
       </Text>
     </ReportShell>
   )
@@ -174,7 +185,11 @@ function Amt({ v, w, color, bold }: { v: number; w: number; color?: string; bold
   )
 }
 
-function TenantRow({ r, note, isRea }: { r: ArAgingRow; note: string | null; isRea: boolean }) {
+function TenantRow({ r, note, followUps, isRea }: { r: ArAgingRow; note: string | null; followUps: ArFollowUp[]; isRea: boolean }) {
+  const latest = followUps[0]
+  const followUpLine = latest
+    ? `Last follow-up ${new Date(latest.createdAt).toLocaleDateString('en-US')}${latest.sentByName ? ` by ${latest.sentByName}` : ''}${followUps.length > 1 ? ` · ${followUps.length} logged` : ''}`
+    : null
   const worst = eps(r.b120) ? BUCKETS[4] : eps(r.b90) ? BUCKETS[3] : eps(r.b60) ? BUCKETS[2] : eps(r.b30) ? BUCKETS[1] : null
   const bucketColor = (k: BucketKey) => (eps(r[k]) && r[k] > 0 ? BUCKETS.find(b => b.key === k)?.color : undefined)
   return (
@@ -190,6 +205,12 @@ function TenantRow({ r, note, isRea }: { r: ArAgingRow; note: string | null; isR
           {[r.suite ? `Suite ${r.suite}` : null, r.mriLeaseId ? `MRI ${r.mriLeaseId}` : null].filter(Boolean).join(' · ') || ' '}
         </Text>
         {note ? <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Oblique', color: '#8a6d3b', marginTop: 1.5 }}>{pdfSafe(note)}</Text> : null}
+        {followUpLine ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1.5 }}>
+            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: GREEN, marginRight: 3 }} />
+            <Text style={{ fontSize: 6.5, color: TEXT_MUTED }}>{pdfSafe(followUpLine)}</Text>
+          </View>
+        ) : null}
       </View>
       <Text style={{ width: COL.status, fontSize: 7, color: TEXT_MUTED }}>{r.status ?? '—'}</Text>
       <Text style={{ width: COL.pmt, fontSize: 7, color: TEXT_MUTED }}>

@@ -188,6 +188,23 @@ export async function createContact(d: ContactDraft): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+// Bulk insert from the Excel importer. Rows are tagged source:'import' so they
+// are distinguishable from manually-entered / AI-extracted contacts. Inserted in
+// chunks to stay under PostgREST payload limits.
+export async function importContacts(drafts: ContactDraft[]): Promise<number> {
+  if (drafts.length === 0) return 0
+  const rows = drafts.map(d => ({ ...draftToRow(d), source: 'import' as const }))
+  const CHUNK = 200
+  let inserted = 0
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK)
+    const { error } = await supabase.from('tenant_contacts').insert(slice)
+    if (error) throw new Error(error.message)
+    inserted += slice.length
+  }
+  return inserted
+}
+
 export async function updateContact(id: string, d: ContactDraft): Promise<void> {
   // Any edit marks an AI-extracted row as verified (a human has reviewed it).
   const { error } = await supabase

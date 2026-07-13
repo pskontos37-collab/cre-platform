@@ -3,7 +3,7 @@ import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds, usePropertyNameMap } from '../hooks/useFilteredPropertyIds'
 import {
   useTenantContacts, useTenantOptions,
-  createContact, updateContact, deleteContact, setContactVerified, formatAddress,
+  createContact, updateContact, deleteContact, setContactVerified, importContacts, formatAddress,
   CONTACT_TYPES, CONTACT_TYPE_LABEL,
   type TenantContact, type ContactType, type ContactDraft, type TenantOption,
 } from '../hooks/useTenantContacts'
@@ -11,6 +11,19 @@ import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { useAuth } from '../contexts/AuthContext'
 import { RelationshipsTab } from './RelationshipsTab'
+import { exportContactsXlsx, buildContactsImportTemplate, parseContactsXlsx, type ParseResult } from '../lib/contactsExcel'
+
+// Trigger a browser download for a generated blob.
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
 
 // ── M&J Wilkow corporate palette (wilkow.com) — matches the other ops pages ──
 const WILKOW      = '#466371'
@@ -77,6 +90,9 @@ function TenantContactsTab() {
   const [search, setSearch] = useState('')
   const [noticeView, setNoticeView] = useState(false)     // compact legal-notice layout
   const [editing, setEditing] = useState<TenantContact | 'new' | null>(null)
+  const [exportMenu, setExportMenu] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
 
   const counts = useMemo(() => {
     const c = {} as Record<ContactType, number>
@@ -122,6 +138,40 @@ function TenantContactsTab() {
     refetch()
   }
 
+  // Property-name -> id (case-insensitive), and tenant -> ids, for the importer.
+  const propertyIdByName = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const [id, name] of Object.entries(propertyNames)) m.set(name.trim().toLowerCase(), id)
+    return m
+  }, [propertyNames])
+  const tenantLookup = useMemo(() => {
+    const m = new Map<string, { tenantId: string | null; leaseId: string | null }>()
+    for (const t of tenantOptions ?? []) m.set(`${t.propertyId}::${t.tenantName.trim().toLowerCase()}`, { tenantId: t.tenantId, leaseId: t.leaseId })
+    return m
+  }, [tenantOptions])
+  const scopedPropertyNames = useMemo(
+    () => propertyIds.map(id => propertyNames[id]).filter(Boolean).sort() as string[],
+    [propertyIds, propertyNames])
+
+  async function runExport(which: 'view' | 'all') {
+    setExportMenu(false)
+    setExportBusy(true)
+    try {
+      const rows = which === 'view' ? visible : contacts
+      const filterBits = [
+        effectiveTypeFilter ? CONTACT_TYPE_LABEL[effectiveTypeFilter] : null,
+        search.trim() ? `search "${search.trim()}"` : null,
+      ].filter(Boolean)
+      const scopeLabel = which === 'view'
+        ? `Current view${filterBits.length ? ` (${filterBits.join(', ')})` : ''} — ${scopedPropertyNames.length} propert${scopedPropertyNames.length === 1 ? 'y' : 'ies'}`
+        : `All loaded contacts — ${scopedPropertyNames.length} propert${scopedPropertyNames.length === 1 ? 'y' : 'ies'}`
+      const blob = await exportContactsXlsx(rows, propertyNames, scopeLabel)
+      downloadBlob(blob, `Wilkow-Contacts-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   return (
     <>
       {/* intro + add */}
@@ -131,7 +181,30 @@ function TenantContactsTab() {
           Legal-notice rows carry the mailing address from the lease’s Notices clause — switch on
           <b> Notice addresses</b> for a copy-ready view when sending default notices or estoppels.
         </div>
-        <button onClick={() => setEditing('new')} style={primaryBtn}>+ Add contact</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setExportMenu(m => !m)}
+              disabled={exportBusy || contacts.length === 0}
+              style={{ ...ghostBtn, opacity: contacts.length === 0 ? 0.5 : 1 }}
+              title={contacts.length === 0 ? 'No contacts to export' : 'Export contacts to Excel'}
+            >
+              {exportBusy ? 'Exporting…' : '⬇ Export Excel ▾'}
+            </button>
+            {exportMenu && (
+              <div style={exportMenuStyle}>
+                <button onClick={() => runExport('view')} style={menuItem}>
+                  Current view <span style={{ color: 'var(--text-faint)' }}>· {visible.length}</span>
+                </button>
+                <button onClick={() => runExport('all')} style={menuItem}>
+                  All loaded <span style={{ color: 'var(--text-faint)' }}>· {contacts.length}</span>
+                </button>
+              </div>
+            )}
+          </div>
+          <button onClick={() => setImporting(true)} style={ghostBtn} title="Import contacts from an Excel file">⬆ Import</button>
+          <button onClick={() => setEditing('new')} style={primaryBtn}>+ Add contact</button>
+        </div>
       </div>
 
       {/* ── type chips + controls ── */}
@@ -216,7 +289,131 @@ function TenantContactsTab() {
           onSaved={() => { setEditing(null); refetch() }}
         />
       )}
+
+      {importing && (
+        <ContactImportModal
+          propertyIdByName={propertyIdByName}
+          tenantLookup={tenantLookup}
+          templatePropertyNames={scopedPropertyNames}
+          onClose={() => setImporting(false)}
+          onImported={() => { setImporting(false); refetch() }}
+        />
+      )}
     </>
+  )
+}
+
+// ── import modal ──────────────────────────────────────────────────────────────
+function ContactImportModal({ propertyIdByName, tenantLookup, templatePropertyNames, onClose, onImported }: {
+  propertyIdByName: Map<string, string>
+  tenantLookup: Map<string, { tenantId: string | null; leaseId: string | null }>
+  templatePropertyNames: string[]
+  onClose: () => void
+  onImported: () => void
+}) {
+  const [parsing, setParsing] = useState(false)
+  const [committing, setCommitting] = useState(false)
+  const [fileName, setFileName] = useState<string | null>(null)
+  const [result, setResult] = useState<ParseResult | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [done, setDone] = useState<number | null>(null)
+
+  async function downloadTemplate() {
+    try {
+      const blob = await buildContactsImportTemplate(templatePropertyNames)
+      downloadBlob(blob, 'Wilkow-Contacts-Import-Template.xlsx')
+    } catch (e: any) {
+      setErr(e?.message ?? 'Could not build template')
+    }
+  }
+
+  async function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setFileName(file.name)
+    setResult(null); setErr(null); setDone(null)
+    setParsing(true)
+    try {
+      setResult(await parseContactsXlsx(file, propertyIdByName, tenantLookup))
+    } catch (e: any) {
+      setErr(e?.message ?? 'Could not read the file')
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  async function commit() {
+    if (!result) return
+    const drafts = result.rows.filter(r => r.draft && r.errors.length === 0).map(r => r.draft!)
+    if (drafts.length === 0) return
+    setCommitting(true); setErr(null)
+    try {
+      const n = await importContacts(drafts)
+      setDone(n)
+      setTimeout(onImported, 900)
+    } catch (e: any) {
+      setErr(e?.message ?? 'Import failed')
+      setCommitting(false)
+    }
+  }
+
+  const badRows = result?.rows.filter(r => r.errors.length > 0) ?? []
+
+  return (
+    <div onClick={onClose} style={overlay}>
+      <div onClick={e => e.stopPropagation()} style={{ ...modal, maxWidth: 680 }}>
+        <div style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Import contacts</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+          Download the template, fill in the rows, then upload it here. Property names must match exactly
+          (the template’s <b>Reference</b> tab lists valid names and contact types). Imported rows are tagged
+          <b> source: import</b>. Existing contacts are never overwritten — every valid row is added.
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+          <button onClick={downloadTemplate} style={ghostBtn}>⬇ Download template</button>
+          <label style={{ ...primaryBtn, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {parsing ? 'Reading…' : (fileName ? '↻ Choose another file' : '📄 Choose Excel file')}
+            <input type="file" accept=".xlsx" onChange={onFile} style={{ display: 'none' }} />
+          </label>
+          {fileName && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fileName}</span>}
+        </div>
+
+        {err && <div style={{ fontSize: 12.5, color: 'var(--red)', marginBottom: 12 }}>{err}</div>}
+
+        {result && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 10 }}>
+              <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 650 }}>✓ {result.validCount} ready to import</span>
+              {result.errorCount > 0 && <span style={{ fontSize: 13, color: 'var(--red)', fontWeight: 650 }}>✕ {result.errorCount} with issues (skipped)</span>}
+            </div>
+            {badRows.length > 0 && (
+              <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border-2)', borderRadius: 8, padding: '6px 10px', background: 'var(--surface-2)' }}>
+                {badRows.map(r => (
+                  <div key={r.rowNumber} style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                    <b style={{ color: 'var(--text)' }}>Row {r.rowNumber}:</b> {r.errors.join('; ')}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {done != null && (
+          <div style={{ fontSize: 13, color: 'var(--green)', fontWeight: 650, marginBottom: 12 }}>✓ Imported {done} contact{done === 1 ? '' : 's'}.</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
+          <button onClick={onClose} style={ghostBtn} disabled={committing}>Close</button>
+          <button
+            onClick={commit}
+            style={{ ...primaryBtn, opacity: !result || result.validCount === 0 || committing ? 0.5 : 1 }}
+            disabled={!result || result.validCount === 0 || committing}
+          >
+            {committing ? 'Importing…' : `Import ${result?.validCount ?? 0} contact${(result?.validCount ?? 0) === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -479,5 +676,7 @@ const pillGrey: CSSProperties = { fontSize: 9.5, fontWeight: 700, letterSpacing:
 const input: CSSProperties = { fontSize: 12.5, padding: '7px 9px', borderRadius: 7, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)', width: '100%', boxSizing: 'border-box' }
 const readonlyVal: CSSProperties = { fontSize: 12.5, padding: '7px 9px', borderRadius: 7, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)' }
 const checkLbl: CSSProperties = { fontSize: 12, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }
+const exportMenuStyle: CSSProperties = { position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 50, background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', padding: 4, minWidth: 180, display: 'flex', flexDirection: 'column' }
+const menuItem: CSSProperties = { fontSize: 12.5, textAlign: 'left', padding: '7px 10px', borderRadius: 6, border: 'none', background: 'none', color: 'var(--text)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: 12 }
 const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '5vh 16px', zIndex: 1000, overflowY: 'auto' }
 const modal: CSSProperties = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '22px 24px', width: '100%', maxWidth: 620, boxShadow: '0 12px 40px rgba(0,0,0,0.3)' }

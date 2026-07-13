@@ -8,6 +8,8 @@ import {
   computeSellToday, xirr,
   type SellTodayInput, type SellTodayResult, type IrrPosition, type DatedFlow, type SeniorClassPosition,
 } from '../lib/waterfall'
+import { PdfDownloadButton } from '../reports/PdfDownloadButton'
+import type { WaterfallXlsxInput, WfClass } from '../reports/waterfallExcel'
 
 const usd = (n: number, dp = 0) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: dp })
@@ -215,6 +217,59 @@ export function WaterfallPage() {
   const lpName = sel?.l1.capital_flows.find(f => f.role === 'lp')?.party ?? 'Institutional partner'
   const l2Name = sel?.l2 ? (sel.l2.name.match(/M&J [A-Za-z ]*Investors/)?.[0] ?? 'M&J entity') : null
 
+  // Assemble the Excel payload from the live engine result (see reports/waterfallExcel.ts).
+  function buildWaterfallPayload(): WaterfallXlsxInput | null {
+    if (!sel || !inputs || !result) return null
+    const roc = result.l1.lineItems
+      .filter(li => li.tierType === 'return_of_capital' && li.investorType === 'lp')
+      .reduce((s, li) => s + li.amount, 0)
+    const classes: WfClass[] = []
+    if (sel.l2 && result.l2 && classMetrics) {
+      const seniorLabel = units['AC'] != null ? 'A/C' : 'A'
+      if (classMetrics.d) classes.push({ key: 'D', label: 'Class D (senior)', contrib: classMetrics.d.contrib, prior: classMetrics.d.prior, take: classMetrics.d.take, irr: classMetrics.d.irr, unitKey: 'D', flows: flowsByRoles(sel.l2, ['class_d']) })
+      classes.push({ key: 'A', label: `Class ${seniorLabel}`, contrib: classMetrics.a.contrib, prior: classMetrics.a.prior, take: classMetrics.a.take, irr: classMetrics.a.irr, unitKey: units['AC'] != null ? 'AC' : 'A', flows: flowsByRoles(sel.l2, ['class_a', 'class_ac', 'class_c']) })
+      classes.push({ key: 'B', label: 'Class B (promote)', contrib: classMetrics.b.contrib, prior: classMetrics.b.prior, take: classMetrics.b.take, irr: null, unitKey: 'B', flows: flowsByRoles(sel.l2, ['class_b']) })
+    }
+    return {
+      propertyName: sel.name,
+      asOf: inputs.asOf,
+      deemedDate: c1.freeze_date ?? inputs.asOf,
+      generatedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }),
+      lpName,
+      l2Name,
+      inputs: {
+        grossValue: inputs.grossValue, closingPct: inputs.closingPct, nca: inputs.nca,
+        payoff: inputs.payoff, payoffLabel: inputs.payoffLabel, entityCash: inputs.entityCash,
+      },
+      override: c1.override ? { threshold: c1.override.threshold, lp: c1.override.lp, gp: c1.override.gp } : null,
+      cashSplit: c1.cash_split ? { lp: c1.cash_split.lp, gp: c1.cash_split.gp } : null,
+      freezeDate: c1.freeze_date ?? null,
+      result: {
+        priceNetOfCosts: result.priceNetOfCosts,
+        overrideExcess: result.overrideExcess, overrideLp: result.overrideLp, overrideGp: result.overrideGp,
+        cashLp: result.cashLp, cashGp: result.cashGp, ladderPool: result.ladderPool,
+        ladderLpTake: result.l1.lpTake, ladderGpTake: result.l1.gpTake,
+        returnOfCapital: roc, residualCash: result.l1.residualCash,
+        l1LpContrib: result.l1LpContrib, l1LpPriorDist: result.l1LpPriorDist,
+        l1LpTotal: result.l1LpTotal, l1LpIrr: result.l1LpIrr, l1GpTotal: result.l1GpTotal,
+        tiers: result.l1.tierResults.map(t => ({
+          order: t.tierOrder, lpSplit: t.lpSplit, gpSplit: t.gpSplit,
+          hurdleIrr: t.hurdleIrr, hurdleEm: t.hurdleEm, lp: t.lp, gp: t.gp,
+          reachedHurdle: t.reachedHurdle, emGoverned: t.emGoverned,
+        })),
+      },
+      l1LpFlows: flowsByRoles(sel.l1, ['lp']),
+      l1GpFlows: flowsByRoles(sel.l1, ['gp']),
+      l2: sel.l2 && result.l2 ? { pool: result.l2.pool, units, classes } : null,
+      sensitivity: sensitivity.map(s => ({
+        m: s.m, gross: s.gross,
+        l1LpTotal: s.r?.l1LpTotal ?? 0, l1LpIrr: s.r?.l1LpIrr ?? null, l1GpTotal: s.r?.l1GpTotal ?? 0,
+        classBValue: s.r?.l2?.classBValue ?? null,
+        bPerUnit: units['B'] && s.r?.l2 ? (s.r.l2.classBValue) / units['B'] : null,
+      })),
+    }
+  }
+
   return (
     <div style={{ padding: '24px 32px', maxWidth: 1160 }}>
       <div style={{ marginBottom: 4, fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Waterfall — Sold Today</div>
@@ -232,7 +287,7 @@ export function WaterfallPage() {
       {sel && inputs && (
         <>
           {/* Property tabs */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
             {groups.map(g => (
               <button key={g.propertyId} onClick={() => setPropId(g.propertyId)} style={{
                 padding: '7px 14px', fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: 'pointer',
@@ -243,6 +298,20 @@ export function WaterfallPage() {
                 {g.name}
               </button>
             ))}
+            <span style={{ flex: 1 }} />
+            <PdfDownloadButton
+              label="⬇ Excel (formulas)"
+              busyLabel="Generating Excel…"
+              filename={`Wilkow-Waterfall-${sel.name.replace(/[^\w.-]+/g, '-')}-${inputs.asOf}.xlsx`}
+              disabled={!result}
+              title={!result ? 'Set a gross value to compute the waterfall first' : 'Download a live Excel workbook (Sources & Uses formulas, XIRR, methodology)'}
+              build={async () => {
+                const payload = buildWaterfallPayload()
+                if (!payload) throw new Error('Waterfall not computed yet')
+                const { buildWaterfallXlsx } = await import('../reports/waterfallExcel')
+                return buildWaterfallXlsx(payload)
+              }}
+            />
           </div>
 
           {/* Inputs */}

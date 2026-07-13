@@ -9,6 +9,8 @@ import {
 } from '../hooks/useServiceAgreements'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
+import { PdfDownloadButton } from '../reports/PdfDownloadButton'
+import type { SaReportGroup } from '../reports/ServiceAgreementsReport'
 
 // ── M&J Wilkow corporate palette (wilkow.com) — see ReceivablesPage ─────────
 const WILKOW      = '#466371'
@@ -192,6 +194,38 @@ export function ServiceAgreementsPage() {
     return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]))
   }, [visible])
 
+  // PDF export data: honours the category / contract-form / search filters, but
+  // deliberately ignores the lifecycle chip so the report always shows BOTH
+  // active and expired contracts. Resolved / superseded relationships are left out.
+  const reportGroups = useMemo<SaReportGroup[]>(() => {
+    const q = search.trim().toLowerCase()
+    return groups
+      .filter(g => !RESOLVED_LIFECYCLES.has(g.lifecycle) && g.lifecycle !== 'superseded')
+      .filter(g => !categoryFilter || g.category === categoryFilter)
+      .filter(g => !formOnly || g.isForm)
+      .filter(g => !q || g.vendor.toLowerCase().includes(q) || g.category.toLowerCase().includes(q))
+      .map(g => ({
+        propertyName: g.propertyName,
+        vendor: g.vendor,
+        category: g.category,
+        lifecycle: g.lifecycle,
+        description: g.current.description,
+        termSummary: g.current.termSummary,
+        startDate: g.current.startDate,
+        endDate: g.current.endDate,
+        agreementDate: g.current.agreementDate,
+        pricingSummary: g.current.pricingSummary,
+        annualValue: g.current.annualValue,
+        cancelNoticeDays: g.current.cancelNoticeDays,
+        isForm: g.isForm,
+      }))
+  }, [groups, categoryFilter, formOnly, search])
+
+  const scopeLabel = useMemo(() => {
+    const names = new Set(reportGroups.map(g => g.propertyName))
+    return names.size === 1 ? [...names][0] : `All properties (${names.size})`
+  }, [reportGroups])
+
   return (
     <div style={{ padding: '26px 32px 48px', maxWidth: 1080 }}>
       {/* ── corporate header ── */}
@@ -205,12 +239,28 @@ export function ServiceAgreementsPage() {
               Service Agreements
             </div>
           </div>
-          <Link to="/services/new" style={{
-            flexShrink: 0, textDecoration: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap',
-            padding: '8px 15px', borderRadius: 8, border: `1px solid ${WILKOW}`, background: WILKOW, color: '#f2f3f5',
-          }}>
-            + New Service Agreement
-          </Link>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
+            <PdfDownloadButton
+              label="⬇ PDF Report"
+              filename={`Wilkow-Service-Agreements-${new Date().toISOString().slice(0, 10)}.pdf`}
+              disabled={reportGroups.length === 0}
+              title={reportGroups.length === 0 ? 'No service agreements in view' : 'Download a branded PDF of active & expired service contracts'}
+              build={async () => {
+                const { buildServiceAgreementsPdf } = await import('../reports/ServiceAgreementsReport')
+                return buildServiceAgreementsPdf({
+                  groups: reportGroups,
+                  scopeLabel,
+                  generatedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }),
+                })
+              }}
+            />
+            <Link to="/services/new" style={{
+              textDecoration: 'none', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap',
+              padding: '8px 15px', borderRadius: 8, border: `1px solid ${WILKOW}`, background: WILKOW, color: '#f2f3f5',
+            }}>
+              + New Service Agreement
+            </Link>
+          </div>
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 6 }}>
           Vendor service contracts abstracted from the executed agreements in the corpus — one card per

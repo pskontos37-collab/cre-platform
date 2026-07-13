@@ -1,10 +1,11 @@
-import type { ArAgingRow } from '../hooks/useArAging'
+import type { ArAgingRow, ArFollowUp } from '../hooks/useArAging'
 import { PdfDownloadButton } from './PdfDownloadButton'
 
 // Generates the branded A/R Aging PDF client-side and triggers a download.
-export function ArAgingPdfButton({ rows, notes, reaMris, asOf }: {
+export function ArAgingPdfButton({ rows, notes, followUps, reaMris, asOf }: {
   rows: ArAgingRow[]
   notes: Record<string, string>
+  followUps?: Record<string, ArFollowUp[]>
   reaMris: Set<string>
   asOf: string | null
 }) {
@@ -19,6 +20,7 @@ export function ArAgingPdfButton({ rows, notes, reaMris, asOf }: {
         return buildArAgingPdf({
           rows,
           notes,
+          followUps,
           reaMris: Array.from(reaMris),
           asOf,
           generatedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }),
