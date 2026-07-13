@@ -1,11 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { PdfDownloadButton } from './PdfDownloadButton'
-import type { PortfolioSnapshotInput } from './PortfolioSnapshotReport'
+import type { PortfolioSnapshotInput, SnapshotPropertyDetail } from './PortfolioSnapshotReport'
 import { useGlPnl } from '../hooks/useGlPnl'
 import { useBudgetVariance } from '../hooks/useBudgetVariance'
 import {
   useOccupancy, useLeaseRollover, useTenantConcentration, useDSCR,
   useCriticalDates, useCoTenancyFlags, useDelinquency, useHealthRatio,
+  usePropertyTopTenants,
 } from '../hooks/useDashboard'
 import { useWorkOrders } from '../hooks/useWorkOrders'
 import { useDeals } from '../hooks/useDeals'
@@ -32,6 +33,11 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
   const delinq     = useDelinquency(propertyIds, propertyNames)
   const workOrders = useWorkOrders(propertyIds, propertyNames)
   const health     = useHealthRatio(propertyIds, propertyNames)
+  const propTenants = usePropertyTopTenants(propertyIds, propertyNames)
+
+  // Opt-in: append a full one-page mini-dashboard per property. Off by default
+  // so the one-click stays a lean exec summary; on = the deep per-asset packet.
+  const [includeDetail, setIncludeDetail] = useState(false)
 
   // Returns are computed from ALL deals then scoped by property in-memo.
   const dealsQ = useDeals()
@@ -51,7 +57,7 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
   const anyLoading =
     pnl.loading || bva.loading || occ.loading || roll.loading || tenants.loading ||
     dscr.loading || critical.loading || coTen.loading || delinq.loading ||
-    workOrders.loading || health.loading || dealsQ.loading
+    workOrders.loading || health.loading || propTenants.loading || dealsQ.loading
   const ready = propertyIds.length > 0 && !anyLoading
 
   const input: PortfolioSnapshotInput | null = useMemo(() => {
@@ -64,9 +70,17 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
     const pastDue = (delinq.data ?? []).reduce((s, d) => s + d.pastDue, 0)
     const openWos = (workOrders.data ?? []).filter(o => OPEN_STATUSES.includes(o.status))
 
-    // ── Per-property comparison rows ──
-    // Occupancy's byProperty covers every property in scope (built from
-    // propertyIds), so use it as the canonical list and join the rest by id/name.
+    const roleOf = (r: { contributed: number; distributed: number; currentEquity: number | null; totalValueMultiple: number | null; totalValueIrr: number | null } | null) => ({
+      contributed: r?.contributed ?? 0,
+      distributed: r?.distributed ?? 0,
+      currentEquity: r?.currentEquity ?? null,
+      totalValueMultiple: r?.totalValueMultiple ?? null,
+      totalValueIrr: r?.totalValueIrr ?? null,
+    })
+
+    // ── Per-property assembly ──
+    // Occupancy's byProperty covers every property in scope; join the rest by id
+    // (or by display name where a source only carries the name).
     const pickDscr = (name: string): { text: string; status: 'ok' | 'near' | 'breach' | null } => {
       const rows = (dscr.data ?? []).filter(d => d.propertyName === name)
       if (!rows.length) return { text: '—', status: null }
@@ -78,38 +92,76 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
         : chosen.dscr != null ? `${chosen.dscr.toFixed(2)}x` : dyText
       return { text, status }
     }
-    const byPropertyRows = (occ.data?.byProperty ?? [])
+    const mapDscrRow = (d: any) => ({
+      propertyName: d.propertyName, loanLabel: d.loan.lender_name ?? d.propertyName,
+      dscr: d.dscr, debtYield: d.debtYield, covenantType: d.covenantType,
+      headroom: d.headroom, isNear: d.isNear, isBreach: d.isBreach,
+    })
+
+    const propRows = (occ.data?.byProperty ?? [])
       .map(o => {
         const pr = (pnl.data?.byProperty ?? []).find(bp => bp.propertyId === o.propertyId)
-        const t12Noi = pr ? pr.t12.noi : null
-        const noiMargin = pr && pr.t12.revenue > 0 ? pr.t12.noi / pr.t12.revenue : null
+        const rollP = (roll.data?.byProperty ?? []).find(b => b.propertyId === o.propertyId)
+        const tops = propTenants.data?.[o.propertyId] ?? []
+        const ret = returns.properties.find(rp => rp.propertyId === o.propertyId) ?? null
         const propPastDue = (delinq.data ?? []).filter(d => d.propertyName === o.propertyName).reduce((s, d) => s + d.pastDue, 0)
         const openForProp = (workOrders.data ?? []).filter(w => w.propertyId === o.propertyId && OPEN_STATUSES.includes(w.status)).length
-        const d = pickDscr(o.propertyName)
+        const dsc = pickDscr(o.propertyName)
         return {
+          propertyId: o.propertyId,
           propertyName: o.propertyName,
-          t12Noi,
-          noiMargin,
+          t12Noi: pr ? pr.t12.noi : null,
+          noiMargin: pr && pr.t12.revenue > 0 ? pr.t12.noi / pr.t12.revenue : null,
           occupancyPct: o.totalSf > 0 ? o.physicalPct : null,
           occupiedSf: o.occupiedSf,
           totalSf: o.totalSf,
+          walt: rollP ? rollP.walt : null,
+          topTenant: tops[0]?.tenantName ?? null,
+          topTenantPct: tops[0]?.pctOfTotal ?? null,
           pastDue: propPastDue,
-          dscrText: d.text,
-          dscrStatus: d.status,
+          dscrText: dsc.text,
+          dscrStatus: dsc.status,
           openWos: openForProp,
+          _pr: pr, _rollP: rollP, _tops: tops, _ret: ret,
         }
       })
-      // Drop empty shells (no NOI, no SF, no A/R, no WOs) so unloaded entities don't clutter the grid.
+      // Drop empty shells (no NOI, no SF, no A/R, no WOs) so unloaded entities don't clutter.
       .filter(r => r.t12Noi != null || r.totalSf > 0 || r.pastDue > 0.005 || r.openWos > 0)
       .sort((a, b) => (b.t12Noi ?? -Infinity) - (a.t12Noi ?? -Infinity))
 
-    const roleOf = (r: { contributed: number; distributed: number; currentEquity: number | null; totalValueMultiple: number | null; totalValueIrr: number | null } | null) => ({
-      contributed: r?.contributed ?? 0,
-      distributed: r?.distributed ?? 0,
-      currentEquity: r?.currentEquity ?? null,
-      totalValueMultiple: r?.totalValueMultiple ?? null,
-      totalValueIrr: r?.totalValueIrr ?? null,
-    })
+    const byPropertyRows = propRows.map(r => ({
+      propertyName: r.propertyName, t12Noi: r.t12Noi, noiMargin: r.noiMargin,
+      occupancyPct: r.occupancyPct, occupiedSf: r.occupiedSf, totalSf: r.totalSf,
+      walt: r.walt, topTenant: r.topTenant, topTenantPct: r.topTenantPct,
+      pastDue: r.pastDue, dscrText: r.dscrText, dscrStatus: r.dscrStatus, openWos: r.openWos,
+    }))
+
+    // Per-property detail pages — only assembled when the user opts in.
+    const propertyDetails: SnapshotPropertyDetail[] = includeDetail
+      ? propRows.map(r => ({
+          propertyName: r.propertyName,
+          occupancyPct: r.occupancyPct, occupiedSf: r.occupiedSf, totalSf: r.totalSf,
+          t12Noi: r.t12Noi, t12Revenue: r._pr?.t12.revenue ?? 0, t12Opex: r._pr?.t12.opex ?? 0,
+          noiMargin: r.noiMargin, walt: r.walt, pastDue: r.pastDue, openWos: r.openWos,
+          noiTrend: (r._pr?.trend ?? []).map(m => ({ year: m.year, month: m.month, noi: m.noi })),
+          rollover: (r._rollP?.byYear ?? []).map(y => ({ year: y.year, sf: y.sf, count: y.count, pctOfTotal: y.pctOfTotal })),
+          topTenants: r._tops.map(t => ({ tenantName: t.tenantName, propertyName: t.propertyName, annualRent: t.annualRent, pctOfTotal: t.pctOfTotal, leasedSf: t.leasedSf })),
+          dscr: (dscr.data ?? []).filter(d => d.propertyName === r.propertyName).map(mapDscrRow),
+          criticalDates: (critical.data ?? []).filter(c => c.propertyName === r.propertyName).map(c => ({
+            propertyName: c.propertyName, tenantName: c.tenantName, dateType: c.dateType,
+            dueDate: c.dueDate, daysUntil: c.daysUntil, description: c.description,
+          })),
+          coTenancy: (coTen.data ?? []).filter(f => (propertyNames[f.property_id] ?? '') === r.propertyName)
+            .map(f => ({ propertyName: r.propertyName, triggerReason: f.trigger_reason })),
+          delinquency: (delinq.data ?? []).filter(d => d.propertyName === r.propertyName)
+            .map(d => ({ tenantName: d.tenantName, propertyName: d.propertyName, pastDue: d.pastDue })),
+          health: (health.data?.rows ?? []).filter(h => h.propertyName === r.propertyName).map(h => ({
+            tenantName: h.tenantName, propertyName: h.propertyName, ratio: h.ratio,
+            occupancyCost: h.occupancyCost, ttmSales: h.ttmSales, band: h.band, hasRecoveries: h.hasRecoveries,
+          })),
+          returns: r._ret ? { lp: roleOf(r._ret.lp), gp: roleOf(r._ret.gp), promoteEquity: r._ret.promote?.currentEquity ?? null } : null,
+        }))
+      : []
 
     return {
       scopeLabel,
@@ -193,22 +245,34 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
           }
         : null,
       byProperty: byPropertyRows,
+      propertyDetails,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, propertyIds.join(','), totalAccessible, pnl.data, bva.data, occ.data, roll.data, tenants.data, dscr.data, critical.data, coTen.data, delinq.data, workOrders.data, health.data, returns])
+  }, [ready, includeDetail, propertyIds.join(','), totalAccessible, pnl.data, bva.data, occ.data, roll.data, tenants.data, dscr.data, critical.data, coTen.data, delinq.data, workOrders.data, health.data, propTenants.data, returns])
+
+  const detailCount = input?.byProperty.length ?? 0
 
   return (
-    <PdfDownloadButton
-      label="Executive snapshot"
-      busyLabel="Building snapshot…"
-      filename={`Wilkow-Portfolio-Snapshot-${new Date().toISOString().slice(0, 10)}.pdf`}
-      disabled={!ready || !input}
-      title={ready ? 'Download a one-page executive portfolio snapshot (PDF)' : 'Loading portfolio data…'}
-      build={async () => {
-        if (!input) throw new Error('Portfolio data is still loading — try again in a moment.')
-        const { buildPortfolioSnapshotPdf } = await import('./PortfolioSnapshotReport')
-        return buildPortfolioSnapshotPdf(input)
-      }}
-    />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <label
+        title="Append a one-page detail dashboard for each property (longer PDF)"
+        style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', cursor: ready ? 'pointer' : 'default', whiteSpace: 'nowrap', opacity: ready ? 1 : 0.5 }}
+      >
+        <input type="checkbox" checked={includeDetail} disabled={!ready} onChange={e => setIncludeDetail(e.target.checked)} style={{ cursor: 'inherit' }} />
+        Per-property detail{includeDetail && detailCount > 0 ? ` (+${detailCount}p)` : ''}
+      </label>
+      <PdfDownloadButton
+        label="Executive snapshot"
+        busyLabel="Building snapshot…"
+        filename={`Wilkow-Portfolio-Snapshot-${new Date().toISOString().slice(0, 10)}.pdf`}
+        disabled={!ready || !input}
+        title={ready ? 'Download an executive portfolio snapshot (PDF)' : 'Loading portfolio data…'}
+        build={async () => {
+          if (!input) throw new Error('Portfolio data is still loading — try again in a moment.')
+          const { buildPortfolioSnapshotPdf } = await import('./PortfolioSnapshotReport')
+          return buildPortfolioSnapshotPdf(input)
+        }}
+      />
+    </div>
   )
 }

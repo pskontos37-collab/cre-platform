@@ -315,51 +315,69 @@ export interface RolloverYear {
   pctOfTotal: number
 }
 
-export interface RolloverData {
+// One property's rollover slice — same shape as the portfolio roll-up, so the
+// executive snapshot can render per-property WALT and rollover from the same
+// computation. Additive: existing consumers (RolloverWidget) ignore byProperty.
+export interface PropertyRollover {
+  propertyId: string
   walt: number
   byYear: RolloverYear[]
   totalLeasedSf: number
 }
 
+export interface RolloverData {
+  walt: number
+  byYear: RolloverYear[]
+  totalLeasedSf: number
+  byProperty: PropertyRollover[]
+}
+
+// Roll a set of active (future-dated) leases into WALT + by-year + total SF.
+function rollupLeases(
+  active: { leased_sf: number | null; expiration_date: string }[],
+  today: Date,
+): { walt: number; byYear: RolloverYear[]; totalLeasedSf: number } {
+  const yearMap = new Map<number, { sf: number; count: number }>()
+  for (const l of active) {
+    const year = new Date(l.expiration_date).getFullYear()
+    const prev = yearMap.get(year) ?? { sf: 0, count: 0 }
+    yearMap.set(year, { sf: prev.sf + (l.leased_sf ?? 0), count: prev.count + 1 })
+  }
+  const totalLeasedSf = active.reduce((s, l) => s + (l.leased_sf ?? 0), 0)
+  const byYear = Array.from(yearMap.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([year, { sf, count }]) => ({ year, sf, count, pctOfTotal: totalLeasedSf > 0 ? sf / totalLeasedSf : 0 }))
+  const walt = computeWALT(active.map(l => ({ leasedSf: l.leased_sf ?? 0, expirationDate: l.expiration_date })), today)
+  return { walt, byYear, totalLeasedSf }
+}
+
 export function useLeaseRollover(propertyIds: string[]) {
   return useQuery<RolloverData>(async () => {
-    if (!propertyIds.length) return { walt: 0, byYear: [], totalLeasedSf: 0 }
+    if (!propertyIds.length) return { walt: 0, byYear: [], totalLeasedSf: 0, byProperty: [] }
 
     const { data: leases, error } = await supabase
       .from('leases')
-      .select('id, leased_sf, expiration_date, status')
+      .select('id, property_id, leased_sf, expiration_date, status')
       .in('property_id', propertyIds)
       .eq('status', 'active')
       .not('expiration_date', 'is', null)
 
     if (error) throw new Error(error.message)
-    const leasesArr = (leases ?? []) as { id: string; leased_sf: number | null; expiration_date: string; status: string }[]
+    const leasesArr = (leases ?? []) as { id: string; property_id: string; leased_sf: number | null; expiration_date: string; status: string }[]
 
     const today = new Date()
     const active = leasesArr.filter(l => new Date(l.expiration_date) > today)
 
-    const yearMap = new Map<number, { sf: number; count: number }>()
+    const byPropMap = new Map<string, { leased_sf: number | null; expiration_date: string }[]>()
     for (const l of active) {
-      const year = new Date(l.expiration_date).getFullYear()
-      const prev = yearMap.get(year) ?? { sf: 0, count: 0 }
-      yearMap.set(year, { sf: prev.sf + (l.leased_sf ?? 0), count: prev.count + 1 })
+      const arr = byPropMap.get(l.property_id) ?? []
+      arr.push({ leased_sf: l.leased_sf, expiration_date: l.expiration_date })
+      byPropMap.set(l.property_id, arr)
     }
+    const byProperty: PropertyRollover[] = [...byPropMap.entries()]
+      .map(([propertyId, ls]) => ({ propertyId, ...rollupLeases(ls, today) }))
 
-    const totalLeasedSf = active.reduce((s, l) => s + (l.leased_sf ?? 0), 0)
-
-    const byYear = Array.from(yearMap.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([year, { sf, count }]) => ({
-        year, sf, count,
-        pctOfTotal: totalLeasedSf > 0 ? sf / totalLeasedSf : 0,
-      }))
-
-    const walt = computeWALT(
-      active.map(l => ({ leasedSf: l.leased_sf ?? 0, expirationDate: l.expiration_date })),
-      today,
-    )
-
-    return { walt, byYear, totalLeasedSf }
+    return { ...rollupLeases(active, today), byProperty }
   }, [propertyIds.join(',')])
 }
 
@@ -541,6 +559,55 @@ export function useTenantConcentration(propertyIds: string[], propertyNames: Rec
       }))
       .sort((a, b) => b.annualRent - a.annualRent)
       .slice(0, 10)
+  }, [propertyIds.join(','), JSON.stringify(propertyNames)])
+}
+
+// Top tenants ranked WITHIN each property (pct of that property's ABR), for the
+// executive snapshot's per-property table (#1 tenant) and detail pages (top N).
+// Separate from useTenantConcentration, which ranks the whole scope's top 10.
+export function usePropertyTopTenants(propertyIds: string[], propertyNames: Record<string, string>) {
+  return useQuery<Record<string, ConcentrationRow[]>>(async () => {
+    if (!propertyIds.length) return {}
+
+    const { data, error } = await supabase
+      .from('leases')
+      .select('tenant_id, property_id, leased_sf, lease_rent_schedule(annual_rent, effective_date), tenant:tenants(id, name)')
+      .in('property_id', propertyIds)
+      .eq('status', 'active')
+
+    if (error) throw new Error(error.message)
+
+    const today = new Date()
+    // property_id -> tenant_id -> aggregate
+    const byProp = new Map<string, Map<string, { name: string; rent: number; sf: number }>>()
+    for (const lease of (data ?? []) as any[]) {
+      const schedules: any[] = (lease.lease_rent_schedule ?? [])
+        .filter((s: any) => new Date(s.effective_date) <= today)
+        .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
+      const annualRent = schedules[0]?.annual_rent ?? 0
+      const tid = lease.tenant_id
+      const tenants = byProp.get(lease.property_id) ?? new Map()
+      const prev = tenants.get(tid) ?? { name: lease.tenant?.name ?? 'Unknown', rent: 0, sf: 0 }
+      tenants.set(tid, { name: prev.name, rent: prev.rent + annualRent, sf: prev.sf + (lease.leased_sf ?? 0) })
+      byProp.set(lease.property_id, tenants)
+    }
+
+    const out: Record<string, ConcentrationRow[]> = {}
+    for (const [propId, tenants] of byProp) {
+      const total = [...tenants.values()].reduce((s, t) => s + t.rent, 0)
+      out[propId] = [...tenants.entries()]
+        .map(([tenantId, t]) => ({
+          tenantId,
+          tenantName:   t.name,
+          propertyName: propertyNames[propId] ?? '',
+          annualRent:   t.rent,
+          pctOfTotal:   total > 0 ? t.rent / total : 0,
+          leasedSf:     t.sf,
+        }))
+        .sort((a, b) => b.annualRent - a.annualRent)
+        .slice(0, 12)
+    }
+    return out
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
 }
 
