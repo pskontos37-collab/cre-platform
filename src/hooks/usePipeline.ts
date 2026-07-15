@@ -96,6 +96,22 @@ export interface DealLp {
   notes: string | null
 }
 
+/** Editable acquisition-underwriting assumptions (decimals for rates), persisted
+ *  on pipeline_deals.underwriting_model. Mirrors AcqAssumptions minus closeDate. */
+export interface UnderwritingModel {
+  purchasePrice: number
+  acqCostsPct: number
+  capexUpfront: number
+  inPlaceNoi: number
+  noiGrowthPct: number
+  holdYears: number
+  exitCapPct: number
+  sellingCostsPct: number
+  ltvPct: number
+  loanRatePct: number
+  amortYears: number
+}
+
 export interface Deal {
   id: string
   name: string
@@ -136,6 +152,7 @@ export interface Deal {
   holdYears: number | null
   exitCap: number | null
   stabilizedYield: number | null
+  underwritingModel: UnderwritingModel | null
   lostReason: string | null
   propertyId: string | null
   propertyName: string | null
@@ -207,7 +224,7 @@ const DEAL_SELECT =
   'id, name, asset_type, risk_profile, sub_type, submarket, team, market, city, state, address, ' +
   'gla_sf, year_built, stage, deal_source, broker, seller, partner, ask_price, price_text, ' +
   'going_in_cap, equity_required, total_capitalization, probability, target_close_date, bid_text, thesis, ' +
-  'proj_irr, equity_multiple, avg_coc, hold_years, exit_cap, stabilized_yield, lost_reason, ' +
+  'proj_irr, equity_multiple, avg_coc, hold_years, exit_cap, stabilized_yield, lost_reason, underwriting_model, ' +
   'lead_member_id, analyst_member_id, property_id, transaction_id, folder_path, folder_files, dd_property_id, created_at, updated_at, ' +
   'property:property_id(name), lead:lead_member_id(full_name, initials), analyst:analyst_member_id(full_name, initials), ' +
   'pipeline_deal_lps(id, partner_id, status, soft_amount, committed_amount, notes, capital_partners(name))'
@@ -230,6 +247,7 @@ function mapDeal(r: any): Deal {
     probability: Number(r.probability ?? 0), targetCloseDate: r.target_close_date ?? null, bidText: r.bid_text ?? null,
     thesis: r.thesis ?? null, projIrr: num(r.proj_irr), equityMultiple: num(r.equity_multiple),
     avgCoc: num(r.avg_coc), holdYears: num(r.hold_years), exitCap: num(r.exit_cap), stabilizedYield: num(r.stabilized_yield),
+    underwritingModel: (r.underwriting_model ?? null) as UnderwritingModel | null,
     lostReason: r.lost_reason ?? null, propertyId: r.property_id ?? null, propertyName: r.property?.name ?? null,
     transactionId: r.transaction_id ?? null, folderPath: r.folder_path ?? null, folderFiles: r.folder_files ?? null,
     ddPropertyId: r.dd_property_id ?? null,
@@ -409,6 +427,29 @@ export async function updateDeal(id: string, patch: DealPatch): Promise<void> {
 
 export async function deleteDeal(id: string): Promise<void> {
   const { error } = await supabase.from('pipeline_deals').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** Persist the underwriting model + write its computed returns to the deal's
+ *  metric columns (board / meeting deck / IC memo / analytics read these). Does
+ *  NOT touch sheet-owned ask_price or going_in_cap — those stay from the weekly
+ *  book sync. */
+export async function saveUnderwriting(
+  dealId: string,
+  model: UnderwritingModel,
+  computed: {
+    projIrr: number | null; equityMultiple: number | null; avgCoc: number | null
+    exitCap: number | null; holdYears: number | null; stabilizedYield: number | null
+    equityRequired: number | null; totalCapitalization: number | null
+  },
+): Promise<void> {
+  const { error } = await supabase.from('pipeline_deals').update({
+    underwriting_model: model,
+    proj_irr: computed.projIrr, equity_multiple: computed.equityMultiple, avg_coc: computed.avgCoc,
+    exit_cap: computed.exitCap, hold_years: computed.holdYears, stabilized_yield: computed.stabilizedYield,
+    equity_required: computed.equityRequired, total_capitalization: computed.totalCapitalization,
+    updated_at: new Date().toISOString(),
+  }).eq('id', dealId)
   if (error) throw new Error(error.message)
 }
 

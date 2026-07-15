@@ -10,7 +10,7 @@ import {
   useDealTeamMembers, type TeamMember,
   createPartner, updatePartner, deletePartner, type PartnerInput,
   openDiligence, unlinkDiligence, sendDocToDiligence,
-  pipelineMetrics, fetchDeckExtras,
+  pipelineMetrics, fetchDeckExtras, saveUnderwriting, type UnderwritingModel,
   BOARD_STAGES, ALL_STAGES, STAGE_LABEL, STAGE_HUE, boardColumn, isTerminal, STAGE_PROB,
   RISK_ORDER, RISK_LABEL, RISK_COLOR, ASSET_ORDER, ASSET_LABEL, ASSET_MONO, ASSET_COLOR,
   LP_STATUS_ORDER, LP_STATUS_LABEL, PARTNER_TIER_LABEL,
@@ -21,6 +21,7 @@ import { useAssignableUsers, indexUsers, userLabel } from '../hooks/useTasks'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { PdfDownloadButton, sanitizeFilename } from '../reports/PdfDownloadButton'
+import { underwrite, sensitivity } from '../lib/acqUnderwriting'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
 // Analytics (funnel · investment-profile matrix · geo · partners), OM Intake
@@ -829,7 +830,7 @@ function DealDrawer({ deal, partners, team, onClose, onChanged }: { deal: Deal; 
         </div>
 
         {tab === 'overview' && <OverviewTab deal={deal} team={team} onSave={p => run(() => updateDeal(deal.id, p))} busy={busy} onDelete={() => run(async () => { await deleteDeal(deal.id); onClose() })} />}
-        {tab === 'underwriting' && <UnderwritingTab deal={deal} onSave={p => run(() => updateDeal(deal.id, p))} busy={busy} />}
+        {tab === 'underwriting' && <UnderwritingTab deal={deal} busy={busy} onSaveModel={(mdl, c) => run(() => saveUnderwriting(deal.id, mdl, c))} />}
         {tab === 'capital' && <CapitalTab deal={deal} partners={partners} onChanged={onChanged} onDiscuss={lpId => { setDiscussLp(lpId); setTab('discussion') }} />}
         {tab === 'documents' && <DocumentsTab dealId={deal.id} dealName={deal.name} createdBy={appUser?.id ?? null} folderPath={deal.folderPath} folderFiles={deal.folderFiles} docs={docsQ.data ?? []} loading={docsQ.loading} refetch={docsQ.refetch} ddPropertyId={deal.ddPropertyId} />}
         {tab === 'discussion' && <DiscussionTab deal={deal} createdBy={appUser?.id ?? null} initialLp={discussLp} />}
@@ -972,37 +973,127 @@ function OverviewTab({ deal, team, onSave, busy, onDelete }: { deal: Deal; team:
   )
 }
 
-function UnderwritingTab({ deal, onSave, busy }: { deal: Deal; onSave: (p: any) => void; busy: boolean }) {
-  const rows: { label: string; kind: 'pct' | 'num' | 'x'; key: keyof Deal; patch: string }[] = [
-    { label: 'Projected leveraged IRR', kind: 'pct', key: 'projIrr', patch: 'projIrr' },
-    { label: 'Equity multiple', kind: 'x', key: 'equityMultiple', patch: 'equityMultiple' },
-    { label: 'Avg cash-on-cash', kind: 'pct', key: 'avgCoc', patch: 'avgCoc' },
-    { label: 'Stabilized yield-on-cost', kind: 'pct', key: 'stabilizedYield', patch: 'stabilizedYield' },
-    { label: 'Exit cap', kind: 'pct', key: 'exitCap', patch: 'exitCap' },
-    { label: 'Hold (years)', kind: 'num', key: 'holdYears', patch: 'holdYears' },
-  ]
+type UwComputed = {
+  projIrr: number | null; equityMultiple: number | null; avgCoc: number | null
+  exitCap: number | null; holdYears: number | null; stabilizedYield: number | null
+  equityRequired: number | null; totalCapitalization: number | null
+}
+// Live first-pass underwriting model: editable assumptions -> levered returns +
+// sensitivity, computed in-browser (src/lib/acqUnderwriting). Save writes the
+// returns to the deal's metric columns (board / meeting deck / IC memo read them).
+function UnderwritingTab({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean; onSaveModel: (m: UnderwritingModel, c: UwComputed) => void }) {
+  const seed: UnderwritingModel = deal.underwritingModel ?? {
+    purchasePrice: deal.askPrice ?? 0, acqCostsPct: 0.02, capexUpfront: 0,
+    inPlaceNoi: (deal.askPrice != null && deal.goingInCap != null) ? Math.round(deal.askPrice * deal.goingInCap) : 0,
+    noiGrowthPct: 0.03, holdYears: deal.holdYears ?? 5,
+    exitCapPct: deal.exitCap ?? deal.goingInCap ?? 0.065, sellingCostsPct: 0.02,
+    ltvPct: 0.6, loanRatePct: 0.065, amortYears: 30,
+  }
+  const [m, setM] = useState<UnderwritingModel>(seed)
+  const [saved, setSaved] = useState(false)
+  const set = (k: keyof UnderwritingModel) => (v: number) => { setM(p => ({ ...p, [k]: v })); setSaved(false) }
+  const today = new Date().toISOString().slice(0, 10)
+  const r = useMemo(() => underwrite({ ...m, closeDate: today }), [m, today])
+  const exitCaps = useMemo(() => [-0.005, -0.0025, 0, 0.0025, 0.005].map(d => +(m.exitCapPct + d).toFixed(4)).filter(x => x > 0), [m.exitCapPct])
+  const growths = useMemo(() => [-0.01, 0, 0.01, 0.02].map(d => +(m.noiGrowthPct + d).toFixed(4)).filter(x => x >= 0), [m.noiGrowthPct])
+  const grid = useMemo(() => sensitivity({ ...m, closeDate: today }, exitCaps, growths), [m, today, exitCaps, growths])
+
+  const computed: UwComputed = {
+    projIrr: r.leveredIrr, equityMultiple: r.equityMultiple || null, avgCoc: r.avgCashOnCash,
+    exitCap: m.exitCapPct, holdYears: m.holdYears, stabilizedYield: r.stabilizedYieldOnCostPct,
+    equityRequired: Math.round(r.equity), totalCapitalization: Math.round(r.totalBasis),
+  }
+  const irrColor = (v: number | null) => v == null ? 'var(--text-faint)' : v >= 0.15 ? '#2e8b57' : v >= 0.10 ? 'var(--accent, #466371)' : v >= 0.07 ? 'var(--text)' : '#c0654e'
+
   return (
-    <div>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10 }}>The returns snapshot the IC and LPs see. Enter percentages as whole numbers (16.3 = 16.3%).</div>
-      {rows.map(r => <NumRow key={r.patch} label={r.label} kind={r.kind} value={deal[r.key] as number | null} disabled={busy} onSave={v => onSave({ [r.patch]: v })} />)}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+        First-pass levered underwrite. Edit the assumptions; returns recompute live. <b>Save</b> writes them to the deal — the board, meeting deck and IC memo pick them up. {deal.underwritingModel ? '' : 'Seeded from the OM guidance / cap; tune before relying.'}
+      </div>
+
+      {/* returns */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+        <Fact label="Levered IRR" value={pct(r.leveredIrr)} tint={irrColor(r.leveredIrr)} />
+        <Fact label="Equity multiple" value={r.equityMultiple ? `${r.equityMultiple.toFixed(2)}x` : '—'} />
+        <Fact label="Avg cash-on-cash" value={pct(r.avgCashOnCash)} />
+        <Fact label="Unlevered IRR" value={pct(r.unleveredIrr)} />
+        <Fact label="Equity" value={fmtM(r.equity)} />
+        <Fact label="Yield-on-cost (exit)" value={pct(r.stabilizedYieldOnCostPct)} />
+        <Fact label="DSCR (yr 1)" value={r.yearOneDscr != null ? `${r.yearOneDscr.toFixed(2)}x` : '—'} />
+        <Fact label="Debt yield (yr 1)" value={pct(r.yearOneDebtYield)} />
+      </div>
+
+      {/* assumptions */}
+      <div>
+        <SectionLabel2>Assumptions</SectionLabel2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+          <MInput label="Purchase price" kind="usd" value={m.purchasePrice} onChange={set('purchasePrice')} disabled={busy} />
+          <MInput label="In-place NOI (yr 1)" kind="usd" value={m.inPlaceNoi} onChange={set('inPlaceNoi')} disabled={busy} />
+          <MInput label="NOI growth" kind="pct" value={m.noiGrowthPct} onChange={set('noiGrowthPct')} disabled={busy} />
+          <MInput label="Hold" kind="yr" value={m.holdYears} onChange={set('holdYears')} disabled={busy} />
+          <MInput label="Exit cap" kind="pct" value={m.exitCapPct} onChange={set('exitCapPct')} disabled={busy} />
+          <MInput label="Selling costs" kind="pct" value={m.sellingCostsPct} onChange={set('sellingCostsPct')} disabled={busy} />
+          <MInput label="Acq. costs" kind="pct" value={m.acqCostsPct} onChange={set('acqCostsPct')} disabled={busy} />
+          <MInput label="Upfront capex" kind="usd" value={m.capexUpfront} onChange={set('capexUpfront')} disabled={busy} />
+          <MInput label="LTV" kind="pct" value={m.ltvPct} onChange={set('ltvPct')} disabled={busy} />
+          <MInput label="Loan rate" kind="pct" value={m.loanRatePct} onChange={set('loanRatePct')} disabled={busy} />
+          <MInput label="Amort (0 = IO)" kind="yr" value={m.amortYears} onChange={set('amortYears')} disabled={busy} />
+        </div>
+      </div>
+
+      {/* sensitivity: levered IRR over exit cap x NOI growth */}
+      <div>
+        <SectionLabel2>Levered IRR — exit cap (cols) &times; NOI growth (rows)</SectionLabel2>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 11.5 }}>
+            <thead><tr>
+              <th style={sgHead}>growth \ exit</th>
+              {exitCaps.map(ec => <th key={ec} style={sgHead}>{pct(ec, 2)}</th>)}
+            </tr></thead>
+            <tbody>
+              {growths.map((g, gi) => (
+                <tr key={g}>
+                  <td style={{ ...sgCell, fontWeight: 700, color: 'var(--text-muted)' }}>{pct(g, 1)}</td>
+                  {grid.leveredIrr[gi].map((v, ci) => (
+                    <td key={ci} style={{ ...sgCell, color: irrColor(v), fontWeight: v != null && Math.abs(g - m.noiGrowthPct) < 1e-6 && Math.abs(exitCaps[ci] - m.exitCapPct) < 1e-6 ? 800 : 500, background: Math.abs(g - m.noiGrowthPct) < 1e-6 && Math.abs(exitCaps[ci] - m.exitCapPct) < 1e-6 ? 'var(--surface-2, rgba(70,99,113,.08))' : undefined }}>{pct(v, 1)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => { onSaveModel(m, computed); setSaved(true) }}>
+          {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save underwrite'}
+        </button>
+        <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>Writes IRR / EM / CoC / exit cap / hold / equity to the deal. Sheet-owned price &amp; going-in cap are left untouched.</span>
+      </div>
     </div>
   )
 }
-function NumRow({ label, kind, value, disabled, onSave }: { label: string; kind: 'pct' | 'num' | 'x'; value: number | null; disabled: boolean; onSave: (v: number | null) => void }) {
-  const display = value == null ? '' : kind === 'pct' ? String(+(value * 100).toFixed(2)) : String(value)
-  const [v, setV] = useState(display)
+function SectionLabel2({ children }: { children: ReactNode }) {
+  return <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 7 }}>{children}</div>
+}
+const sgHead: CSSProperties = { padding: '4px 9px', fontSize: 10.5, color: 'var(--text-faint)', fontWeight: 700, border: '1px solid var(--border)', textAlign: 'right', whiteSpace: 'nowrap' }
+const sgCell: CSSProperties = { padding: '4px 9px', border: '1px solid var(--border)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
+// controlled numeric input for the underwriting model (local text, commit on blur)
+function MInput({ label, kind, value, onChange, disabled }: { label: string; kind: 'usd' | 'pct' | 'yr'; value: number; onChange: (v: number) => void; disabled?: boolean }) {
+  const disp = kind === 'pct' ? String(+(value * 100).toFixed(2)) : kind === 'usd' ? String(Math.round(value)) : String(value)
+  const [t, setT] = useState(disp)
   const commit = () => {
-    if (v.trim() === '') { if (value != null) onSave(null); return }
-    const n = Number(v); if (!isFinite(n)) return
-    const stored = kind === 'pct' ? n / 100 : n
-    if (stored !== value) onSave(stored)
+    const n = Number(t.replace(/[,$\s]/g, ''))
+    if (!isFinite(n)) { setT(disp); return }
+    onChange(kind === 'pct' ? n / 100 : n)
   }
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-      <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text-muted)' }}>{label}</span>
-      <input value={v} disabled={disabled} onChange={e => setV(e.target.value)} onBlur={commit} inputMode="decimal" style={{ ...inputStyle, width: 100, textAlign: 'right' }} />
-      <span style={{ width: 14, fontSize: 12, color: 'var(--text-faint)' }}>{kind === 'pct' ? '%' : kind === 'x' ? '×' : ''}</span>
-    </div>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{label}{kind === 'pct' ? ' (%)' : kind === 'usd' ? ' ($)' : ''}</span>
+      <input value={t} disabled={disabled} onChange={e => setT(e.target.value)} onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+        inputMode="decimal" style={{ ...inputStyle, textAlign: 'right' }} />
+    </label>
   )
 }
 
