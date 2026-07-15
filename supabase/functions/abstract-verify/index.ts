@@ -185,7 +185,7 @@ serve(async (req) => {
 
     // ── 3c. MRI system-of-record cross-check (independent ground truth) ──
     const { data: leaseRows } = await sb.from('leases')
-      .select('status, commencement_date, expiration_date, leased_sf, security_deposit, ti_allowance, has_percentage_rent, percentage_rent_rate, natural_breakpoint, artificial_breakpoint, tenants!inner(name, trade_name)')
+      .select('id, status, commencement_date, expiration_date, leased_sf, security_deposit, ti_allowance, has_percentage_rent, percentage_rent_rate, natural_breakpoint, artificial_breakpoint, tenants!inner(name, trade_name)')
       .eq('property_id', propertyId)
     const tl = tenant.toLowerCase().trim()
     const norm = (s: string | null | undefined) => (s ?? '').toLowerCase().trim()
@@ -202,6 +202,18 @@ serve(async (req) => {
         }
         return false
       }) ?? null
+
+    // MRI option data — RETAILRR-verified system of record for option notice
+    // deadlines & exercise state. The v2 abstract carries options[].notice_by /
+    // status; verify them against this payload.
+    let mriOptions: any[] = []
+    if (leaseRow?.id) {
+      const { data: lo } = await sb.from('lease_options')
+        .select('option_type, notice_days_required, notice_deadline, exercise_deadline, term_if_exercised_months, rent_at_exercise, is_exercised, requires_landlord_reminder, notes')
+        .eq('lease_id', leaseRow.id)
+      mriOptions = (lo ?? []) as any[]
+    }
+    const leaseRowOut = leaseRow ? { ...leaseRow, id: undefined } : null
 
     // ── 4. Verify ──
     const attachNote = attachments.length
@@ -220,13 +232,20 @@ Method:
 - MRI RECONCILIATION IS A DISAGREEMENT LOG, NOT A CHECKLIST. Add a field to mri_reconciliation ONLY when the two sides materially disagree AND MRI is the system of record for that field. If they agree — including the same date or number written in a different format, or both being "no percentage rent" — DO NOT log it at all. Never write a reconciliation entry whose note says the sources agree.
 - MRI DATE SEMANTICS. MRI's commencement_date and expiration_date reflect the CURRENT ACTIVE TERM — the start/end of the current option, renewal, or rent-schedule window — NOT the original lease commencement. This is expected and correct. Do NOT log a reconciliation entry merely because the abstract reports the ORIGINAL lease commencement (or original expiration) while MRI shows the current-term dates; that is two different fields, not a conflict. Log a date entry ONLY when the CURRENT-term commencement/expiration genuinely disagree with what the documents establish for that same current term.
 - MRI DOES NOT GOVERN these — never put them in mri_reconciliation: security deposit, TI/tenant allowance, natural/artificial breakpoint, guarantor, and tenant legal-name vs trade-name/DBA formatting. The documents are the source of truth for those; a difference from MRI there is not an MRI error.
-- Run the arithmetic checks: monthly rent × 12 vs. annual; annual vs. $PSF × square footage; rent_commencement + term_years vs. expiration. Set ok=false ONLY for a GENUINE numeric contradiction between values the documents STATE. If a figure simply cannot be computed or confirmed (e.g. a formula-based date with an unknown input), that is NOT an arithmetic failure — leave it out of arithmetic and record a needs_source field_check instead.
 - source_quote MUST be verbatim text copied from the documents — never paraphrase, never invent a citation. If you cannot find supporting text, source_quote = "" and verdict is unsupported or needs_source.
 - Only list a field in field_checks if you actually examined the source for it. Do not pad with trivially-confirmed fields; prioritise money, dates, and the amendment chain.
+- ABSTRACTION-STANDARD CHECKS (v2 abstracts; skip any the abstract's shape predates):
+    DATE HYGIENE — term.* and options[].notice_by and critical_dates[].date must be bare ISO dates (YYYY-MM-DD) or null; a date field containing prose/parentheticals/formulas is a discrepancy (severity medium).
+    DOCUMENT TAXONOMY — lease_documents must contain ONLY operative instruments and executed ancillary instruments. Any correspondence, email, default/past-due notice, force-majeure letter, CAM reconciliation, sales report, or invoice listed there is a discrepancy (field "lease_documents", severity medium).
+    EXCLUSIVES DISCIPLINE — exclusives.exact_language must actually restrict the LANDLORD/other occupants for THIS tenant's benefit. Language that restricts the tenant itself, lists OTHER tenants' protections (exhibit schedules), or merely cites an MRI note code is a discrepancy: it belongs in use_restrictions_on_tenant/prohibited_uses (severity high — this poisons leasing decisions).
+    OPTION LIFECYCLE — each options[] entry: status consistent with the documents and the MRI option data below (an executed exercise notice or amendment reciting exercise ⇒ exercised; a later amendment voiding it ⇒ superseded); notice_by must equal the MRI notice_deadline when one exists for that option (disagreement ⇒ mri_reconciliation entry with governs per the durable rule: MRI is the system of record for option notice dates) or be consistent with the notice period arithmetic otherwise.
+    GUARANTY CHAIN — guaranty_chain events must trace to executed instruments in the sources; the derived guarantor.name must equal the chain's current/surviving guarantor(s). An assignment in the chain silent on release ⇒ status "surviving", not "released".
+- Run the arithmetic checks: monthly rent × 12 vs. annual; annual vs. $PSF × square footage; rent_commencement + term_years vs. expiration. Set ok=false ONLY for a GENUINE numeric contradiction between values the documents STATE. If a figure simply cannot be computed or confirmed (e.g. a formula-based date with an unknown input), that is NOT an arithmetic failure — leave it out of arithmetic and record a needs_source field_check instead.
 
 Call the submit_qa tool with an object matching this schema exactly (all keys present):
 ${QA_SCHEMA}
-${leaseRow ? `\nMRI system-of-record values (a SEPARATE system, NOT one of the lease documents — use ONLY to populate mri_reconciliation; do not treat as document truth): ${JSON.stringify(leaseRow)}` : ''}
+${leaseRowOut ? `\nMRI system-of-record values (a SEPARATE system, NOT one of the lease documents — use ONLY to populate mri_reconciliation; do not treat as document truth): ${JSON.stringify(leaseRowOut)}` : ''}
+${mriOptions.length ? `\nMRI option data (RETAILRR-verified; system of record for option notice deadlines & exercise state): ${JSON.stringify(mriOptions)}` : ''}
 
 THE ABSTRACT UNDER REVIEW (produced by model "${row.model ?? 'unknown'}"):
 ${JSON.stringify(row.abstract)}

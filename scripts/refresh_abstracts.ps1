@@ -25,7 +25,9 @@ function PostFn($slug, $bodyObj) {
   $body = $bodyObj | ConvertTo-Json -Compress -Depth 6
   $tmp = "$PSScriptRoot\_refresh_body.json"
   [System.IO.File]::WriteAllText($tmp, $body, $enc)
-  $out = & curl.exe -s -w "`n%{http_code}" -X POST "$BASE/functions/v1/$slug" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -A $UA --data-binary "@$tmp" --max-time 295
+  # -join: PS captures multi-line native output as an ARRAY; without joining,
+  # $out.Length is the element count and the json extraction silently fails.
+  $out = (& curl.exe -s -w "`n%{http_code}" -X POST "$BASE/functions/v1/$slug" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -A $UA --data-binary "@$tmp" --max-time 295) -join "`n"
   $code = ($out -split "`n")[-1]
   $json = if ($out.Length -gt $code.Length) { $out.Substring(0, $out.Length - $code.Length - 1) } else { '' }
   return @{ code = $code; json = $json }
@@ -77,6 +79,16 @@ foreach ($a in $abstracts) {
   }
 
   $before = Snapshot $a.abstract
+  # Stage 1: brief the NEW document first (100%-of-text extraction) so the
+  # regeneration synthesizes from full coverage, not the raw-text fallback.
+  # Resumable: giant docs return done=false -> call again (max 15 rounds).
+  $bDone = $false; $bGuard = 0
+  while (-not $bDone -and $bGuard -lt 15) {
+    $bGuard++
+    $b = PostFn 'doc-brief' @{ document_id = $hit.id }
+    if ($b.code -ne '200') { Log ("  brief FAIL http={0} (non-fatal, raw-text fallback) :: {1}" -f $b.code, $hit.file_name); break }
+    try { $bDone = (($b.json | ConvertFrom-Json).done -ne $false) } catch { $bDone = $true }
+  }
   $g = PostFn 'lease-abstract' @{ property_id = $a.property_id; tenant = $a.tenant_name }
   if ($g.code -ne '200') {
     RestPost 'abstract_refresh_log' @{ property_id = $a.property_id; tenant_name = $a.tenant_name; document_id = $hit.id; doc_title = "$($hit.title)"; action = 'regen_failed' }

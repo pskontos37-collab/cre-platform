@@ -161,18 +161,32 @@ function AbstractBody({ d }: { d: AbstractDoc }) {
           <Fact k="Tenant legal name" v={a.tenant_legal_name} />
           <Fact k="Suite" v={a.suite} />
           <Fact k="Square footage" v={a.square_footage?.toLocaleString?.('en-US') ?? a.square_footage} />
-          <Fact k="Rent commencement" v={a.term?.rent_commencement} />
-          <Fact k="Expiration" v={a.term?.expiration} />
+          <Fact k="Rent commencement" v={a.term?.rent_commencement ? `${P(a.term.rent_commencement)}${a.term?.rcd_basis ? ` (${P(a.term.rcd_basis)})` : ''}` : a.term?.rent_commencement} />
+          <Fact k="Expiration" v={a.term?.expiration ? `${P(a.term.expiration)}${a.term?.expiration_basis ? ` (${P(a.term.expiration_basis)})` : ''}` : a.term?.expiration} />
           <Fact k="Term (yrs)" v={a.term?.term_years} />
           <Fact k="Guarantor" v={a.guarantor?.exists ? `${P(a.guarantor.name) || 'Yes'}${a.guarantor.section ? ` [${P(a.guarantor.section)}]` : ''}` : 'None'} />
+          {a.term?.original_commencement ? <Fact k="Original commencement" v={`${P(a.term.original_commencement)}${a.term?.original_commencement_basis ? ` (${P(a.term.original_commencement_basis)})` : ''}`} /> : null}
+          {a.term?.current_term_start ? <Fact k="Current term start" v={`${P(a.term.current_term_start)}${a.term?.current_term_basis ? ` (${P(a.term.current_term_basis)})` : ''}`} /> : null}
         </Grid>
       </Section>
+
+      {arr(a.guaranty_chain).length > 0 && (
+        <Section title="Guaranty chain">
+          <Table head={['Event', 'Date', 'Instrument', 'Guarantor', 'Status', 'Notes']} widths={[52, 52, 110, 90, 46, 0]}
+            rows={arr(a.guaranty_chain).map((g: any) => [P(g.event), P(g.date), P(g.instrument), P(g.guarantor), P(g.status), P(g.notes)])} />
+        </Section>
+      )}
 
       <Section title={`Lease documents (${arr(a.lease_documents).length})`}>
         {arr(a.lease_documents).length === 0
           ? <Missing />
-          : <Table head={['Type', 'Date', 'Signed', 'Notes']} widths={[130, 60, 44, 0]}
-              rows={arr(a.lease_documents).map((x: any) => [P(x.type), P(x.date), P(x.signed), P(x.notes)])} />}
+          : arr(a.lease_documents).some((x: any) => x.category)
+            ? <Table head={['Type', 'Category', 'Date', 'Signed', 'Notes']} widths={[120, 52, 56, 40, 0]}
+                rows={[...arr(a.lease_documents)]
+                  .sort((x: any, y: any) => (x.category === 'ancillary' ? 1 : 0) - (y.category === 'ancillary' ? 1 : 0) || String(x.date ?? '').localeCompare(String(y.date ?? '')))
+                  .map((x: any) => [P(x.type), P(x.category), P(x.date), P(x.signed), P(x.notes)])} />
+            : <Table head={['Type', 'Date', 'Signed', 'Notes']} widths={[130, 60, 44, 0]}
+                rows={arr(a.lease_documents).map((x: any) => [P(x.type), P(x.date), P(x.signed), P(x.notes)])} />}
       </Section>
 
       <Section title="Base / minimum rent">
@@ -185,8 +199,13 @@ function AbstractBody({ d }: { d: AbstractDoc }) {
       <Section title="Options">
         {arr(a.options).length === 0
           ? <Missing what="No renewal/extension options found" />
-          : <Table head={['Term', 'Notice', 'Start', 'End', '$ PSF', 'Annual', 'Section']} widths={[70, 60, 56, 56, 40, 70, 0]}
-              rows={arr(a.options).map((o: any) => [P(o.term), P(o.notice_period), P(o.start), P(o.end), P(o.psf), money(o.annual), P(o.section)])} />}
+          : arr(a.options).some((o: any) => o.status || o.notice_by)
+            ? <Table head={['Term', 'Status', 'Notice by', 'Start', 'End', '$ PSF', 'Annual', 'Section']} widths={[64, 44, 62, 52, 52, 36, 62, 0]}
+                rows={arr(a.options).map((o: any) => [
+                  `${o.landlord_reminder_required ? '[LL reminder] ' : ''}${P(o.term)}`,
+                  P(o.status), P(o.notice_by) || P(o.notice_period), P(o.start), P(o.end), P(o.psf), money(o.annual), P(o.section)])} />
+            : <Table head={['Term', 'Notice', 'Start', 'End', '$ PSF', 'Annual', 'Section']} widths={[70, 60, 56, 56, 40, 70, 0]}
+                rows={arr(a.options).map((o: any) => [P(o.term), P(o.notice_period), P(o.start), P(o.end), P(o.psf), money(o.annual), P(o.section)])} />}
       </Section>
 
       <Section title="Percentage rent & sales reporting">
@@ -214,7 +233,14 @@ function AbstractBody({ d }: { d: AbstractDoc }) {
       <Section title="Key clauses">
         <Long k={`Co-tenancy ${a.co_tenancy?.section ? `[${P(a.co_tenancy.section)}]` : ''}`} v={a.co_tenancy?.exists ? a.co_tenancy.exact_language_and_remedies : 'None'} />
         <Long k="Replacement tenants permitted" v={a.co_tenancy?.replacement_tenants_permitted} />
-        <Long k={`Exclusives ${a.exclusives?.section ? `[${P(a.exclusives.section)}]` : ''}`} v={a.exclusives?.exists ? a.exclusives.exact_language : 'None'} />
+        <Long k={`Exclusives — tenant's own protection ${a.exclusives?.section ? `[${P(a.exclusives.section)}]` : ''}`}
+          v={a.exclusives?.exists
+            ? [a.exclusives.exact_language, a.exclusives.remedies ? `REMEDIES: ${a.exclusives.remedies}` : null, a.exclusives.conditions ? `CONDITIONS: ${a.exclusives.conditions}` : null].filter(Boolean).map(P).join('\n')
+            : 'None'} />
+        {a.use_restrictions_on_tenant !== undefined
+          ? <Long k={`Use restrictions ON tenant (others' exclusives) ${a.use_restrictions_on_tenant?.source_exhibit ? `[${P(a.use_restrictions_on_tenant.source_exhibit)}]` : ''}`}
+              v={a.use_restrictions_on_tenant?.exists ? a.use_restrictions_on_tenant.exact_language : 'None'} />
+          : null}
         <Long k={`Termination / kickout ${a.termination_kickout?.section ? `[${P(a.termination_kickout.section)}]` : ''}`} v={a.termination_kickout?.exists ? a.termination_kickout.details : 'None'} />
         <Long k={`Permitted use ${a.permitted_use?.section ? `[${P(a.permitted_use.section)}]` : ''}`} v={a.permitted_use?.exact_language} />
         <Long k={`Prohibited uses ${a.prohibited_uses?.section ? `[${P(a.prohibited_uses.section)}]` : ''}`} v={a.prohibited_uses?.exact_language} />
@@ -237,6 +263,26 @@ function AbstractBody({ d }: { d: AbstractDoc }) {
         </Grid>
         {a.additional_rights_notes ? <Long k="More / notes" v={a.additional_rights_notes} /> : null}
       </Section>
+
+      {a.rea_pma ? (
+        <Section title="REA / property management context">
+          <Grid>
+            <Fact k="Subject to REA" v={a.rea_pma.subject_to_rea == null ? null : a.rea_pma.subject_to_rea ? `Yes${a.rea_pma.rea_name ? ` — ${P(a.rea_pma.rea_name)}` : ''}` : 'No'} />
+            <Fact k="Property manager (PMA)" v={a.rea_pma.pma_manager} />
+            <Fact k="Impact on this tenant" v={a.rea_pma.tenant_impact} wide />
+            {a.rea_pma.notes ? <Fact k="Notes" v={a.rea_pma.notes} wide /> : null}
+          </Grid>
+        </Section>
+      ) : null}
+
+      {arr(a.critical_dates).length > 0 && (
+        <Section title="Critical dates">
+          <Table head={['Date', 'Event', 'Source']} widths={[64, 220, 0]}
+            rows={[...arr(a.critical_dates)]
+              .sort((x: any, y: any) => String(x.date ?? '').localeCompare(String(y.date ?? '')))
+              .map((c: any) => [P(c.date), P(c.event), P(c.source)])} />
+        </Section>
+      )}
 
       {arr(a.open_items).length > 0 && (
         <View style={{ marginTop: 8, backgroundColor: '#faf6ec', borderWidth: 0.75, borderColor: '#e4d9b8', borderRadius: 3, paddingVertical: 6, paddingHorizontal: 9 }}>

@@ -65,9 +65,10 @@ function useAbstracts(propertyId: string | null, bump: number) {
 // Exported: the portfolio-wide /clauses page reuses the same definitions.
 export const CLAUSES: Array<{ key: string; label: string; render: (a: any) => string }> = [
   { key: 'co_tenancy', label: 'Co-tenancy', render: a => a?.co_tenancy?.exists ? `${a.co_tenancy.exact_language_and_remedies ?? ''}${a.co_tenancy.section ? ` [${a.co_tenancy.section}]` : ''}` : 'None' },
-  { key: 'exclusives', label: 'Exclusives', render: a => a?.exclusives?.exists ? `${a.exclusives.exact_language ?? ''}${a.exclusives.section ? ` [${a.exclusives.section}]` : ''}` : 'None' },
+  { key: 'exclusives', label: 'Exclusives', render: a => a?.exclusives?.exists ? `${a.exclusives.exact_language ?? ''}${a.exclusives.remedies ? `\nREMEDIES: ${a.exclusives.remedies}` : ''}${a.exclusives.section ? ` [${a.exclusives.section}]` : ''}` : 'None' },
+  { key: 'use_restrictions', label: 'Use restrictions on tenant', render: a => a?.use_restrictions_on_tenant?.exists ? `${a.use_restrictions_on_tenant.exact_language ?? ''}${a.use_restrictions_on_tenant.source_exhibit ? ` [${a.use_restrictions_on_tenant.source_exhibit}]` : ''}` : a?.use_restrictions_on_tenant ? 'None' : '— (pre-v2 abstract)' },
   { key: 'percentage_rent', label: 'Percentage rent', render: a => a?.percentage_rent?.applicable ? `${a.percentage_rent.rate_pct ?? '?'}% over ${a.percentage_rent.breakpoint ?? '?'} ${a.percentage_rent.notes ?? ''}` : 'None' },
-  { key: 'options', label: 'Options', render: a => (a?.options ?? []).length ? a.options.map((o: any) => `${o.term}${o.notice_period ? ` (notice ${o.notice_period})` : ''}`).join('; ') : 'None' },
+  { key: 'options', label: 'Options', render: a => (a?.options ?? []).length ? a.options.map((o: any) => `${o.term}${o.status ? ` [${o.status}]` : ''}${o.notice_by ? ` (notice by ${o.notice_by})` : o.notice_period ? ` (notice ${o.notice_period})` : ''}`).join('; ') : 'None' },
   { key: 'termination_kickout', label: 'Termination / kickout', render: a => a?.termination_kickout?.exists ? `${a.termination_kickout.details ?? ''}` : 'None' },
   { key: 'radius_clause', label: 'Radius clause', render: a => a?.radius_clause?.exists ? `${a.radius_clause.details ?? ''}` : 'None' },
   { key: 'continuous_operations', label: 'Continuous operations', render: a => a?.continuous_operations?.exists ? `${a.continuous_operations.details ?? ''}` : 'None' },
@@ -97,6 +98,8 @@ export function AbstractsPage() {
   const abstracts = useAbstracts(propertyId, bump)
   const [selected, setSelected] = useState<string | null>(null)
   const [generating, setGenerating] = useState<Set<string>>(new Set())
+  // Per-tenant progress detail during the two-stage generate (briefing N/M → synthesizing).
+  const [phase, setPhase] = useState<Record<string, string>>({})
   const [verifying, setVerifying] = useState<Set<string>>(new Set())
   const [genError, setGenError] = useState<string | null>(null)
   const [view, setView] = useState<'tenant' | 'clause'>('tenant')
@@ -122,10 +125,43 @@ export function AbstractsPage() {
     setGenError(null)
     setGenerating(prev => new Set(prev).add(tenant))
     try {
-      const { data: { session } } = await supabase.auth.getSession()
+      const authHeaders = async () => {
+        // Re-read per call: the brief stage can run long enough to cross a
+        // token refresh; getSession() hands back the current/refreshed token.
+        const { data: { session } } = await supabase.auth.getSession()
+        return { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' }
+      }
+      // ── Stage 1: ensure every document in the tenant's file has a brief
+      // (100%-of-text extraction; one-time per document, reused afterwards). ──
+      const planRes = await fetch(`${FN_BASE}/lease-abstract`, {
+        method: 'POST', headers: await authHeaders(),
+        body: JSON.stringify({ property_id: propertyId, tenant, plan: true }),
+      })
+      const plan = await planRes.json().catch(() => ({}))
+      if (planRes.ok && Array.isArray(plan.docs)) {
+        const toBrief = plan.docs.filter((d: any) => d.brief_status !== 'complete')
+        let n = 0
+        for (const d of toBrief) {
+          n++
+          setPhase(p => ({ ...p, [tenant]: `briefing doc ${n}/${toBrief.length}…` }))
+          // Giant instruments brief across several resumable calls (done=false).
+          let done = false, guard = 0
+          while (!done && guard++ < 15) {
+            const r = await fetch(`${FN_BASE}/doc-brief`, {
+              method: 'POST', headers: await authHeaders(),
+              body: JSON.stringify({ document_id: d.id }),
+            })
+            const j = await r.json().catch(() => ({}))
+            if (!r.ok || j.error) break     // non-fatal: synthesis falls back to raw text for this doc
+            done = j.done !== false
+          }
+        }
+      }
+      // ── Stage 2: synthesize the abstract from the briefs. ──
+      setPhase(p => ({ ...p, [tenant]: 'synthesizing…' }))
       const res = await fetch(`${FN_BASE}/lease-abstract`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ property_id: propertyId, tenant }),
       })
       const json = await res.json().catch(() => ({}))
@@ -135,6 +171,7 @@ export function AbstractsPage() {
     } catch (e) {
       setGenError(`${tenant}: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
+      setPhase(p => { const n = { ...p }; delete n[tenant]; return n })
       setGenerating(prev => { const n = new Set(prev); n.delete(tenant); return n })
     }
   }
@@ -171,8 +208,10 @@ export function AbstractsPage() {
         <AccuracyChip />
       </div>
       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 18 }}>
-        AI-generated abstracts following the firm's Lease Abstract Template — exact clause language with section
-        citations, built from the lease + amendments in the document corpus. Generation takes 1–2 minutes per tenant.
+        AI-generated abstracts following the firm's Abstraction Standard — every document in the tenant's file is
+        fully read into a structured brief (one-time per document), then the abstract is synthesized from the briefs
+        with MRI option-date and REA/PMA cross-checks. First generation briefs the file (~30s per document);
+        regeneration reuses briefs and takes 1–2 minutes.
       </div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
@@ -244,7 +283,7 @@ export function AbstractsPage() {
                       background: selected === t ? 'var(--accent-dim)' : 'transparent' }}>
                     <span style={{ fontSize: 12, color: selected === t ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t}</span>
                     {busy
-                      ? <span style={{ fontSize: 10, color: 'var(--amber)' }}>generating…</span>
+                      ? <span style={{ fontSize: 10, color: 'var(--amber)', whiteSpace: 'nowrap' }}>{phase[t] ?? 'generating…'}</span>
                       : verifying.has(t)
                         ? <span style={{ fontSize: 10, color: 'var(--amber)' }}>verifying…</span>
                         : a
@@ -268,7 +307,7 @@ export function AbstractsPage() {
                   <div style={{ textAlign: 'center', marginTop: 10 }}>
                     <button onClick={() => void generate(selected)} disabled={generating.has(selected)}
                       style={{ fontSize: 12, fontWeight: 600, padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
-                      {generating.has(selected) ? 'Generating (1–2 min)…' : `Generate abstract for ${selected}`}
+                      {generating.has(selected) ? (phase[selected] ?? 'Generating…') : `Generate abstract for ${selected}`}
                     </button>
                   </div>
                 )}
@@ -511,18 +550,36 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
           <Fact k="Tenant legal name" v={a.tenant_legal_name} />
           <Fact k="Suite" v={a.suite} />
           <Fact k="Square footage" v={a.square_footage?.toLocaleString?.() ?? a.square_footage} />
-          <Fact k="Rent commencement" v={a.term?.rent_commencement} />
-          <Fact k="Expiration" v={a.term?.expiration} />
+          <Fact k="Rent commencement" v={a.term?.rent_commencement} sub={a.term?.rcd_basis} />
+          <Fact k="Expiration" v={a.term?.expiration} sub={a.term?.expiration_basis} />
           <Fact k="Term (yrs)" v={a.term?.term_years} />
           <Fact k="Guarantor" v={a.guarantor?.exists ? `${a.guarantor.name ?? 'Yes'}${a.guarantor.section ? ` [${a.guarantor.section}]` : ''}` : 'None'} />
+          {(a.term?.original_commencement || a.term?.current_term_start) && (<>
+            <Fact k="Original commencement" v={a.term?.original_commencement} sub={a.term?.original_commencement_basis} />
+            <Fact k="Current term start" v={a.term?.current_term_start} sub={a.term?.current_term_basis} />
+          </>)}
         </Grid>
       </Widget>
+
+      {(a.guaranty_chain ?? []).length > 0 && (
+        <Widget title="Guaranty chain" chip={a.guarantor?.exists ? `current: ${a.guarantor?.name ?? '?'}` : 'no current guarantor'}>
+          <MiniTable head={['Event', 'Date', 'Instrument', 'Guarantor', 'Status', 'Notes']}
+            rows={a.guaranty_chain.map((g: any) => [g.event, g.date, g.instrument, g.guarantor, g.status, g.notes])} />
+        </Widget>
+      )}
 
       <Widget title="Lease documents" chip={`${(a.lease_documents ?? []).length} instruments`}>
         {(a.lease_documents ?? []).length === 0
           ? <MissingNote what="No instruments catalogued" />
-          : <MiniTable head={['Type', 'Date', 'Signed', 'Notes']}
-              rows={a.lease_documents.map((d: any) => [d.type, d.date, d.signed, d.notes])} />}
+          : (a.lease_documents ?? []).some((d: any) => d.category)
+            // v2: operative chain first, then ancillary executed instruments.
+            // Correspondence/notices are excluded from this list at generation.
+            ? <MiniTable head={['Type', 'Category', 'Date', 'Signed', 'Notes']}
+                rows={[...a.lease_documents]
+                  .sort((x: any, y: any) => (x.category === 'ancillary' ? 1 : 0) - (y.category === 'ancillary' ? 1 : 0) || String(x.date ?? '').localeCompare(String(y.date ?? '')))
+                  .map((d: any) => [d.type, d.category, d.date, d.signed, d.notes])} />
+            : <MiniTable head={['Type', 'Date', 'Signed', 'Notes']}
+                rows={a.lease_documents.map((d: any) => [d.type, d.date, d.signed, d.notes])} />}
       </Widget>
 
       <Widget title="Base / minimum rent">
@@ -535,8 +592,18 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
       <Widget title="Options" chip={(a.options ?? [])[0]?.section}>
         {(a.options ?? []).length === 0
           ? <MissingNote what="No renewal/extension options found" />
-          : <MiniTable head={['Term', 'Notice', 'Start', 'End', '$ PSF', 'Annual', 'Section']}
-              rows={a.options.map((o: any) => [o.term, o.notice_period, o.start, o.end, o.psf, fmtMoney(o.annual), o.section])} />}
+          : (a.options ?? []).some((o: any) => o.status || o.notice_by)
+            // v2 lifecycle view: status + hard notice-by date (MRI-reconciled),
+            // ⚑ = lease obliges LANDLORD to remind the tenant of the window.
+            ? <MiniTable head={['Term', 'Status', 'Notice by', 'Start', 'End', '$ PSF', 'Annual', 'Section']}
+                rows={a.options.map((o: any) => [
+                  `${o.landlord_reminder_required ? '⚑ ' : ''}${o.term ?? ''}`,
+                  o.status,
+                  o.notice_by ? `${o.notice_by}${o.notice_by_basis ? ` (${o.notice_by_basis})` : ''}` : o.notice_period,
+                  o.start, o.end, o.psf, fmtMoney(o.annual), o.section,
+                ])} />
+            : <MiniTable head={['Term', 'Notice', 'Start', 'End', '$ PSF', 'Annual', 'Section']}
+                rows={a.options.map((o: any) => [o.term, o.notice_period, o.start, o.end, o.psf, fmtMoney(o.annual), o.section])} />}
       </Widget>
 
       <Widget title="Percentage rent & sales reporting">
@@ -564,7 +631,16 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
       <Widget title="Key clauses">
         <LongFact k={`Co-tenancy ${a.co_tenancy?.section ? `[${a.co_tenancy.section}]` : ''}`} v={a.co_tenancy?.exists ? a.co_tenancy.exact_language_and_remedies : 'None'} />
         <LongFact k="Replacement tenants" v={a.co_tenancy?.replacement_tenants_permitted} />
-        <LongFact k={`Exclusives ${a.exclusives?.section ? `[${a.exclusives.section}]` : ''}`} v={a.exclusives?.exists ? a.exclusives.exact_language : 'None'} />
+        <LongFact k={`Exclusives — tenant's own protection ${a.exclusives?.section ? `[${a.exclusives.section}]` : ''}`}
+          v={a.exclusives?.exists
+            ? [a.exclusives.exact_language,
+               a.exclusives.remedies ? `REMEDIES: ${a.exclusives.remedies}` : null,
+               a.exclusives.conditions ? `CONDITIONS: ${a.exclusives.conditions}` : null].filter(Boolean).join('\n')
+            : 'None'} />
+        {a.use_restrictions_on_tenant !== undefined && (
+          <LongFact k={`Use restrictions ON tenant (others' exclusives) ${a.use_restrictions_on_tenant?.source_exhibit ? `[${a.use_restrictions_on_tenant.source_exhibit}]` : a.use_restrictions_on_tenant?.section ? `[${a.use_restrictions_on_tenant.section}]` : ''}`}
+            v={a.use_restrictions_on_tenant?.exists ? a.use_restrictions_on_tenant.exact_language : 'None'} />
+        )}
         <LongFact k={`Termination / kickout ${a.termination_kickout?.section ? `[${a.termination_kickout.section}]` : ''}`} v={a.termination_kickout?.exists ? a.termination_kickout.details : 'None'} />
         <LongFact k={`Permitted use ${a.permitted_use?.section ? `[${a.permitted_use.section}]` : ''}`} v={a.permitted_use?.exact_language} />
         <LongFact k={`Prohibited uses ${a.prohibited_uses?.section ? `[${a.prohibited_uses.section}]` : ''}`} v={a.prohibited_uses?.exact_language} />
@@ -582,11 +658,31 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
           <Fact k="Tenant allowance" v={a.tenant_allowance?.exists ? `${fmtMoney(a.tenant_allowance.total)}${a.tenant_allowance.psf ? ` ($${a.tenant_allowance.psf}/SF)` : ''}` : 'None'} />
           <Fact k="Parking" v={a.parking?.spaces_per_1000 ? `${a.parking.spaces_per_1000}/1000 SF` : a.parking?.notes} />
           <Fact k="Signage — pylon/monument" v={a.signage?.pylon_monument_right == null ? a.signage?.notes : a.signage.pylon_monument_right ? `Yes ${a.signage?.notes ?? ''}` : 'No'} />
-          <Fact k="Estoppel delivery" v={a.estoppel?.timing_for_delivery} />
-          <Fact k="SNDA delivery" v={a.snda?.timing_for_delivery} />
+          <Fact k="Estoppel delivery" v={a.estoppel?.timing_for_delivery} sub={a.estoppel?.executed_on_file ? `Executed on file: ${a.estoppel.executed_on_file}` : undefined} />
+          <Fact k="SNDA delivery" v={a.snda?.timing_for_delivery} sub={a.snda?.executed_on_file ? `Executed on file: ${a.snda.executed_on_file}` : undefined} />
         </Grid>
         {a.additional_rights_notes && <LongFact k="More / notes" v={a.additional_rights_notes} />}
       </Widget>
+
+      {a.rea_pma && (
+        <Widget title="REA / property management context">
+          <Grid>
+            <Fact k="Subject to REA" v={a.rea_pma.subject_to_rea == null ? null : a.rea_pma.subject_to_rea ? `Yes${a.rea_pma.rea_name ? ` — ${a.rea_pma.rea_name}` : ''}` : 'No'} />
+            <Fact k="Property manager (PMA)" v={a.rea_pma.pma_manager} />
+            <Fact k="Impact on this tenant" v={a.rea_pma.tenant_impact} wide />
+            {a.rea_pma.notes && <Fact k="Notes" v={a.rea_pma.notes} wide />}
+          </Grid>
+        </Widget>
+      )}
+
+      {(a.critical_dates ?? []).length > 0 && (
+        <Widget title="Critical dates" chip={`${a.critical_dates.length}`}>
+          <MiniTable head={['Date', 'Event', 'Source']}
+            rows={[...a.critical_dates]
+              .sort((x: any, y: any) => String(x.date ?? '').localeCompare(String(y.date ?? '')))
+              .map((c: any) => [c.date, c.event, c.source])} />
+        </Widget>
+      )}
 
       {(a.open_items ?? []).length > 0 && (
         <Widget title="Open items / missing documents" chip={`${a.open_items.length}`}>
@@ -629,10 +725,50 @@ const VERDICT_META: Record<string, { color: string; label: string }> = {
 // source documents (text chunks carry page_number) and open the actual PDF at
 // that page (browsers honor #page=N on inline PDFs). Field-level trust: see the
 // clause, not just a citation string.
-async function openQuoteSource(quote: string, sourceDocIds: string[]): Promise<boolean> {
+//
+// The locator is CITATION-AWARE: amendment chains share boilerplate ("Tenant is
+// hereby granted…" appears in every renewal grant), so a bare text match
+// regularly lands in the WRONG instrument (Batteries Plus: a "Second Amendment
+// §4" quote opened the First Amendment). Documents whose title matches the
+// cited instrument (ordinal + type tokens) are searched preferentially, and
+// among multiple matches the best-cited document wins.
+const CITE_ORDINALS: Array<[string, string]> = [
+  ['first', '1st'], ['second', '2nd'], ['third', '3rd'], ['fourth', '4th'],
+  ['fifth', '5th'], ['sixth', '6th'], ['seventh', '7th'], ['eighth', '8th'],
+]
+const CITE_TYPES = ['amendment', 'amend', 'amd', 'supplement', 'guaranty', 'snda', 'subordination',
+  'estoppel', 'commencement', 'memorandum', 'assignment', 'exercise', 'renewal notice', 'termination']
+function rankDocsByCitation(docs: Array<{ id: string; title: string | null; file_name: string | null }>, citation: string) {
+  const cit = (citation || '').toLowerCase()
+  const citOrds = CITE_ORDINALS.filter(([a, b]) => cit.includes(a) || cit.includes(b))
+  const score = (d: any) => {
+    const t = `${d.title ?? ''} ${d.file_name ?? ''}`.toLowerCase()
+    let s = 0
+    for (const [a, b] of CITE_ORDINALS) {
+      const inCit = citOrds.some(([x, y]) => x === a && y === b)
+      const inDoc = t.includes(a) || t.includes(b)
+      if (inCit && inDoc) s += 4
+      // citation names an ordinal, doc carries a DIFFERENT ordinal → wrong instrument
+      else if (citOrds.length && !inCit && inDoc) s -= 3
+    }
+    for (const tok of CITE_TYPES) if (cit.includes(tok) && t.includes(tok)) s += 2
+    return s
+  }
+  return [...docs].sort((a, b) => score(b) - score(a))
+}
+async function openQuoteSource(quote: string, citation: string, sourceDocIds: string[]): Promise<boolean> {
   if (!quote || !sourceDocIds.length) return false
-  const words = quote.replace(/[%_]/g, ' ').replace(/\s+/g, ' ').trim().split(' ')
-  for (const n of [8, 4]) {                      // distinctive first, looser fallback
+  // Verifiers abridge quotes with "…"/"..." mid-quote; the needle must come
+  // from ONE contiguous verbatim fragment (the longest), or the literal dots
+  // poison the pattern and force the loose fallback.
+  const fragment = quote.split(/\.{3,}|…/).map(f => f.trim()).sort((a, b) => b.length - a.length)[0] ?? quote
+  const words = fragment.replace(/[%_]/g, ' ').replace(/\s+/g, ' ').trim().split(' ')
+  const { data: docRows } = await supabase.from('documents')
+    .select('id, title, file_name, storage_path')
+    .in('id', sourceDocIds)
+  const ranked = rankDocsByCitation((docRows ?? []) as any[], citation)
+  const rankIdx = new Map(ranked.map((d, i) => [d.id, i]))
+  for (const n of [12, 8, 4]) {                  // distinctive first, looser fallback
     if (words.length < Math.min(n, 3)) continue
     const pat = '%' + words.slice(0, n).join('%') + '%'
     const { data } = await supabase.from('document_chunks')
@@ -640,30 +776,31 @@ async function openQuoteSource(quote: string, sourceDocIds: string[]): Promise<b
       .in('document_id', sourceDocIds)
       .eq('kind', 'text')
       .ilike('content', pat)
-      .limit(1)
-    const hit = data?.[0]
-    if (hit) {
-      const { data: doc } = await supabase.from('documents')
-        .select('storage_path').eq('id', hit.document_id).single()
-      if (!doc?.storage_path) return false
-      const { data: signed } = await supabase.storage.from('documents')
-        .createSignedUrl(doc.storage_path, 3600)
-      if (!signed?.signedUrl) return false
-      window.open(signed.signedUrl + (hit.page_number ? `#page=${hit.page_number}` : ''), '_blank')
-      return true
-    }
+      .limit(20)
+    if (!data?.length) continue
+    // best-cited document wins; earliest page within it
+    const hit = [...data].sort((a, b) =>
+      (rankIdx.get(a.document_id) ?? 99) - (rankIdx.get(b.document_id) ?? 99) ||
+      (a.page_number ?? 9999) - (b.page_number ?? 9999))[0]
+    const doc = ranked.find(d => d.id === hit.document_id) as any
+    if (!doc?.storage_path) return false
+    const { data: signed } = await supabase.storage.from('documents')
+      .createSignedUrl(doc.storage_path, 3600)
+    if (!signed?.signedUrl) return false
+    window.open(signed.signedUrl + (hit.page_number ? `#page=${hit.page_number}` : ''), '_blank')
+    return true
   }
   return false
 }
 
-function SourceLink({ quote, sourceDocIds }: { quote: string; sourceDocIds: string[] }) {
+function SourceLink({ quote, citation, sourceDocIds }: { quote: string; citation?: string; sourceDocIds: string[] }) {
   const [state, setState] = useState<'idle' | 'busy' | 'miss'>('idle')
   if (!quote || !sourceDocIds.length) return null
   return (
     <button
       onClick={async () => {
         setState('busy')
-        const ok = await openQuoteSource(quote, sourceDocIds).catch(() => false)
+        const ok = await openQuoteSource(quote, citation ?? '', sourceDocIds).catch(() => false)
         setState(ok ? 'idle' : 'miss')
       }}
       disabled={state === 'busy'}
@@ -714,7 +851,7 @@ function QaPanel({ qa, status, at, sourceDocIds }: { qa: any; status: string | n
         {c.source_quote && (
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 8, borderLeft: '2px solid var(--border-2)', fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
             “{c.source_quote}”{c.citation ? <span style={{ fontStyle: 'normal', color: 'var(--text-faint)' }}> — {c.citation}</span> : null}
-            <SourceLink quote={c.source_quote} sourceDocIds={sourceDocIds} />
+            <SourceLink quote={c.source_quote} citation={c.citation} sourceDocIds={sourceDocIds} />
           </div>
         )}
       </div>
@@ -944,11 +1081,12 @@ function ReviewPanel({ row, onSaved, reviewerId }: { row: AbstractRow; onSaved: 
 function Grid({ children }: { children: React.ReactNode }) {
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px 16px' }}>{children}</div>
 }
-function Fact({ k, v, wide }: { k: string; v: any; wide?: boolean }) {
+function Fact({ k, v, wide, sub }: { k: string; v: any; wide?: boolean; sub?: string | null }) {
   return (
     <div style={{ gridColumn: wide ? '1 / -1' : undefined }}>
       <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{k}</div>
       <div style={{ fontSize: 13, color: 'var(--text)' }}>{v == null || v === '' ? '—' : String(v)}</div>
+      {sub ? <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 1, lineHeight: 1.35 }}>{sub}</div> : null}
     </div>
   )
 }

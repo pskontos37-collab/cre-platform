@@ -1,29 +1,34 @@
 // lease-abstract — generates a Wilkow-template lease abstract for one tenant.
+// v2 "brief synthesis" architecture (docs/abstraction-standard.md):
 //
-// Pipeline:
-//   1. Find the tenant's documents at the property (title/file_path whole-word
-//      match, tenant folders live at …\TENANTS\<name>\…), leases+amendments first.
-//   2. Pull the full chunk text of the top documents (capped char budget).
-//   3. One claude-sonnet-5 call produces JSON shaped EXACTLY like the firm's
-//      "Lease Abstract Template.xlsx" — exact language where the template asks
-//      for it, lease section references, UNKNOWN where the docs are silent.
-//   4. Upsert into lease_abstracts (property_id, tenant_name unique).
+//   Stage 1 (doc-brief fn, separate): every document in the tenant's file gets
+//   a structured brief extracted from 100% of its text — no truncation.
+//   Stage 2 (THIS fn): synthesize the abstract from those briefs + the FULL
+//   file inventory + MRI cross-checks (leases, lease_options notice deadlines,
+//   latest rent roll) + property-level instruments (REAs, PMA).
+//
+// Why briefs: the v1 single-call design truncated each document at ~60K chars,
+// which produced "NOT FULLY REVIEWED" on 91/98 abstracts and guessed terms.
+// Briefs make every instrument fully-read; synthesis reasons over compact
+// structured extractions instead of raw text.
+//
+// Unbriefed documents degrade gracefully: their raw text is included (bounded)
+// exactly like v1, and the model is told which docs those are.
 //
 // Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY.
-// Usage: POST JSON { property_id: uuid, tenant: string, force?: boolean }
+// Usage: POST JSON { property_id: uuid, tenant: string, max_pdfs?: number }
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MODEL = Deno.env.get('ABSTRACT_MODEL') ?? 'claude-sonnet-5'
-const CHAR_BUDGET = 350_000   // ~90k tokens of document text
+const BRIEF_BUDGET = 300_000      // chars of brief JSON included in full
+const RAWTEXT_BUDGET = 150_000    // chars of raw text for unbriefed docs
+const RAW_PER_DOC_CAP = 40_000
 
 const ilikeSafe = (s: string) => s.replace(/[(),%_]/g, ' ').replace(/\s+/g, ' ').trim()
 
-// Forced tool-use call: the API returns the abstract as an already-parsed JSON
-// object (tool_use.input), so quoted lease language can never break parsing.
-// `content` is a message-content array (document blocks + text).
 async function anthropicJson(key: string, model: string, content: any[], maxTokens: number): Promise<any> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -44,18 +49,43 @@ async function anthropicJson(key: string, model: string, content: any[], maxToke
   if (d.stop_reason === 'max_tokens') throw new Error('Abstract truncated at max_tokens — retry')
   const block = (d.content ?? []).find((c: { type: string }) => c.type === 'tool_use')
   if (!block) throw new Error('Model returned no tool_use block')
-  return block.input
+  // Some generations wrap the payload in an envelope key despite the schema —
+  // observed variants: {"abstract": {...}} and literal placeholder keys
+  // {"$PARAMETER_NAME"/"$PARAMETER_VALUE": {...}}. Unwrap generically: if the
+  // top level doesn't look like the abstract but exactly one child does, use
+  // the child; if nothing looks right, THROW so the caller retries instead of
+  // storing an empty abstract.
+  const looksLikeAbstract = (o: any) =>
+    o && typeof o === 'object' && !Array.isArray(o) && ('trade_name' in o || 'term' in o || 'lease_documents' in o)
+  let out = block.input ?? {}
+  if (!looksLikeAbstract(out)) {
+    const kids = Object.values(out).filter(looksLikeAbstract)
+    if (kids.length === 1) out = kids[0]
+  }
+  if (!looksLikeAbstract(out)) throw new Error('Model returned a malformed abstract envelope — retry')
+  return out
 }
 
-// The JSON shape mirrors the template sheet section-for-section.
+// Template schema v2 — a SUPERSET of v1 so the renderer/exports/clause matrix
+// keep working on old abstracts. New in v2: date provenance (basis fields,
+// bare-ISO date discipline), option lifecycle (notice_by/status/exercise
+// evidence), guaranty_chain, exclusives split from use restrictions binding
+// the tenant, document categories, rea_pma, critical_dates.
 const SCHEMA = `{
  "trade_name": str, "tenant_legal_name": str, "suite": str, "square_footage": num|null,
- "lease_documents": [{"type": str, "date": "YYYY-MM-DD"|str, "signed": "Y"|"N"|"?", "notes": str}],
- "term": {"rent_commencement": str, "expiration": str, "term_years": num|null, "section": str},
+ "lease_documents": [{"type": str, "category": "operative"|"ancillary", "date": "YYYY-MM-DD"|str, "signed": "Y"|"N"|"partial"|"?", "notes": str}],
+ "term": {
+   "rent_commencement": "YYYY-MM-DD"|null, "rcd_basis": str|null,
+   "original_commencement": "YYYY-MM-DD"|null, "original_commencement_basis": str|null,
+   "current_term_start": "YYYY-MM-DD"|null, "current_term_basis": str|null,
+   "expiration": "YYYY-MM-DD"|null, "expiration_basis": str|null,
+   "term_years": num|null, "section": str
+ },
  "guarantor": {"exists": bool, "name": str|null, "details": str|null, "section": str|null},
+ "guaranty_chain": [{"event": "original"|"reaffirmed"|"replaced"|"released"|"assignment", "date": "YYYY-MM-DD"|str|null, "instrument": str, "guarantor": str|null, "status": "current"|"released"|"superseded"|"surviving", "notes": str|null}],
  "base_rent_schedule": [{"months": num|null, "start": str, "end": str, "psf": num|null, "monthly": num|null, "annual": num|null}],
- "options": [{"term": str, "notice_period": str, "start": str|null, "end": str|null, "psf": num|null, "monthly": num|null, "annual": num|null, "section": str}],
- "percentage_rent": {"applicable": bool, "rate_pct": num|null, "breakpoint": str|null, "start": str|null, "end": str|null, "notes": str|null, "section": str|null},
+ "options": [{"term": str, "status": "open"|"exercised"|"lapsed"|"superseded", "notice_period": str, "notice_by": "YYYY-MM-DD"|null, "notice_by_basis": str|null, "exercise_evidence": str|null, "landlord_reminder_required": bool|null, "start": str|null, "end": str|null, "psf": num|null, "monthly": num|null, "annual": num|null, "section": str}],
+ "percentage_rent": {"applicable": bool, "rate_pct": num|null, "breakpoint": str|null, "breakpoint_type": "natural"|"artificial"|null, "start": str|null, "end": str|null, "notes": str|null, "section": str|null},
  "sales_reporting": {"reports": bool, "frequency": "Does Not Report"|"Monthly"|"Quarterly"|"Semi-Annually"|"Annually"|str, "section": str|null},
  "cam": {"methodology": str, "includes": {"management_fee": bool|null, "marketing_promo": bool|null, "insurance": bool|null, "roof_repairs": bool|null, "seasonal_decorations": bool|null, "capital_expenses": bool|null},
    "details_exact_language": str, "prorata_share_calc": str, "shopping_center_definition": str, "admin_fee": str, "caps_exclusions": str,
@@ -64,7 +94,8 @@ const SCHEMA = `{
  "insurance": {"methodology": str, "section": str},
  "security_deposit": {"exists": bool, "type": "Letter of Credit"|"Cash"|str|null, "total": num|null},
  "tenant_allowance": {"exists": bool, "total": num|null, "psf": num|null},
- "exclusives": {"exists": bool, "exact_language": str|null, "section": str|null},
+ "exclusives": {"exists": bool, "exact_language": str|null, "remedies": str|null, "conditions": str|null, "section": str|null},
+ "use_restrictions_on_tenant": {"exists": bool, "exact_language": str|null, "source_exhibit": str|null, "section": str|null},
  "co_tenancy": {"exists": bool, "exact_language_and_remedies": str|null, "replacement_tenants_permitted": str|null, "section": str|null},
  "termination_kickout": {"exists": bool, "details": str|null, "section": str|null},
  "prohibited_uses": {"exact_language": str|null, "section": str|null},
@@ -77,8 +108,10 @@ const SCHEMA = `{
  "assignment_subletting": {"allowed": str|null, "liability_continues_post_assignment": str|null, "notes": str|null, "section": str|null},
  "option_to_purchase": {"exists": bool, "details": str|null, "section": str|null},
  "signage": {"pylon_monument_right": bool|null, "exhibit": str|null, "notes": str|null, "section": str|null},
- "estoppel": {"timing_for_delivery": str|null, "section": str|null},
- "snda": {"timing_for_delivery": str|null, "section": str|null},
+ "estoppel": {"timing_for_delivery": str|null, "executed_on_file": str|null, "section": str|null},
+ "snda": {"timing_for_delivery": str|null, "executed_on_file": str|null, "section": str|null},
+ "rea_pma": {"subject_to_rea": bool|null, "rea_name": str|null, "tenant_impact": str|null, "pma_manager": str|null, "notes": str|null},
+ "critical_dates": [{"date": "YYYY-MM-DD", "event": str, "source": str}],
  "additional_rights_notes": str|null,
  "open_items": [str]
 }`
@@ -106,7 +139,7 @@ serve(async (req) => {
     // Inc."), &/and swaps ("AT AND T" vs "AT&T"), stray apostrophes ("Cafe'").
     const addVariants = (cands: Set<string>, seed: string) => {
       // accent folding: MRI says "Café", the file system almost always "Cafe"
-      for (const s of new Set([seed, seed.normalize('NFD').replace(/[\u0300-\u036f]/g, '')])) {
+      for (const s of new Set([seed, seed.normalize('NFD').replace(/[̀-ͯ]/g, '')])) {
         const c = ilikeSafe(s).trim()
         if (c.length < 3) continue
         cands.add(c)
@@ -147,11 +180,10 @@ serve(async (req) => {
     addVariants(cands, noSuffixRaw)
     if (!cands.size) throw new Error('tenant name too short to match')
 
-    // ── Lease-model row FIRST: it carries file_aliases (folder names that
-    // diverge from the MRI trade name — renamed practices, assignments) which
-    // must feed the document search needles.
+    // ── Lease-model row FIRST: carries file_aliases (folder names that diverge
+    // from the MRI trade name) which must feed the document search needles.
     const { data: leaseRows } = await sb.from('leases')
-      .select('status, commencement_date, expiration_date, leased_sf, security_deposit, ti_allowance, has_percentage_rent, percentage_rent_rate, natural_breakpoint, artificial_breakpoint, has_exclusives, has_co_tenancy_clause, has_radius_restriction, tenants!inner(name, trade_name, file_aliases), units(unit_number)')
+      .select('id, status, commencement_date, expiration_date, leased_sf, security_deposit, ti_allowance, has_percentage_rent, percentage_rent_rate, natural_breakpoint, artificial_breakpoint, has_exclusives, has_co_tenancy_clause, has_radius_restriction, tenants!inner(name, trade_name, file_aliases), units(unit_number)')
       .eq('property_id', propertyId)
     const nameRe = buildRe([...cands])
     const leaseRowFull = ((leaseRows ?? []) as any[]).find(l => {
@@ -159,18 +191,41 @@ serve(async (req) => {
       return nameRe.test(n)
     })
     for (const alias of (leaseRowFull?.tenants?.file_aliases ?? []) as string[]) addVariants(cands, alias)
-    // strip file_aliases from the cross-check payload the model sees
+    // strip file_aliases + internal id from the cross-check payload the model sees
     const leaseRow = leaseRowFull
-      ? { ...leaseRowFull, tenants: { name: leaseRowFull.tenants?.name, trade_name: leaseRowFull.tenants?.trade_name } }
+      ? { ...leaseRowFull, id: undefined, tenants: { name: leaseRowFull.tenants?.name, trade_name: leaseRowFull.tenants?.trade_name } }
       : null
+
+    // ── MRI option data (system of record for option notice dates — durable
+    // rule #4). The v1 abstractor never joined this table, which is why 73/98
+    // abstracts had no actual notice-by dates. ──
+    let mriOptions: any[] = []
+    if (leaseRowFull?.id) {
+      const { data: lo } = await sb.from('lease_options')
+        .select('option_type, notice_days_required, notice_deadline, exercise_deadline, term_if_exercised_months, rent_at_exercise, is_exercised, requires_landlord_reminder, notes')
+        .eq('lease_id', leaseRowFull.id)
+      mriOptions = (lo ?? []) as any[]
+    }
+
+    // ── Latest MRI rent-roll row (current-term window + RCD evidence) ──
+    const { data: rrRows } = await sb.from('rent_roll_rows')
+      .select('tenant_name, suite, sqft, lease_start, lease_end, monthly_base_rent, annual_base_rent, created_at')
+      .eq('property_id', propertyId)
+      .order('created_at', { ascending: false })
+      .limit(300)
+    const rrRow = ((rrRows ?? []) as any[]).find(r => nameRe.test(r.tenant_name ?? '')) ?? null
+    const mriRentRoll = rrRow ? { ...rrRow, created_at: undefined } : null
 
     const candList = [...cands]
     const orExpr = candList.flatMap(c => [`title.ilike.%${c}%`, `file_path.ilike.%${c}%`]).join(',')
+    // v2: pull EVERY match (v1's limit of 160 + top-30 cap silently dropped
+    // ancillary instruments in acquisition binders, producing false "MISSING
+    // FROM FILE" claims — e.g. BCBS's executed SNDA).
     const { data: tdocs, error: dErr } = await sb.from('documents')
       .select('id, doc_type, title, file_name, file_path, storage_path, file_size_bytes')
       .eq('property_id', propertyId)
       .or(orExpr)
-      .limit(160)
+      .limit(500)
     if (dErr) throw new Error('document search failed: ' + dErr.message)
 
     // Whole-word-ish match: tokens may be separated by ANY punctuation run
@@ -193,7 +248,7 @@ serve(async (req) => {
         const o = ord[0]
         s += /6th|sixth/.test(o) ? 6 : /5th|fifth/.test(o) ? 5 : /4th|fourth/.test(o) ? 4 : /3rd|third/.test(o) ? 3 : /2nd|second/.test(o) ? 2 : 1
       }
-      if (/\b(guaranty|snda|estoppel|commencement|assignment)\b/.test(both)) s += 1
+      if (/\b(guaranty|snda|subordination|estoppel|commencement|supplement|assignment|exercise|renewal)\b/.test(both)) s += 1
       if (/unexecuted|draft|redline|blackline/.test(both)) s -= 5   // never spend attach budget on drafts
       if (/control sheet/.test(both)) s -= 3
       return s
@@ -202,76 +257,103 @@ serve(async (req) => {
       .filter(d => wordRe.test(d.title ?? '') || wordRe.test(d.file_path ?? ''))
       .map(d => ({ ...d, s: score(d) }))
       .sort((a, b) => b.s - a.s)
-      .slice(0, 30)
     if (!docs.length) throw new Error(`No documents found for "${tenant}" at this property`)
 
-    // Heavy-job guard: a lease with a long instrument stack (many amendments +
-    // ancillary docs) can push a single generation past the edge runtime's hard
-    // 150s wall (e.g. Ross Dress for Less, 30 docs — timed out even at 2 PDFs).
-    // When the matched set is large, trim the FULL-TEXT payload to the top-scored
-    // governing instruments and lighten default PDF attachments; the amendment-
-    // ordinal scorer already floats the controlling lease+amendments to the top.
-    // Overridable with body.max_docs / body.max_pdfs.
-    // Two tiers: 'heavy' trims text + PDFs; 'veryHeavy' additionally drops native
-    // PDF attachment entirely (text-only). Native PDF parsing of large scanned
-    // instruments is the dominant latency — Ross (30 docs) timed out at ~151s even
-    // with 2 PDFs, but completed in 69s text-only. Text-only forfeits primary-source
-    // PDF grounding for these extreme stacks, the only way to finish inside 150s.
-    const heavy = docs.length > 18
-    const veryHeavy = docs.length > 25
-    const md = Number(body.max_docs)
-    const TEXT_DOC_CAP = Number.isFinite(md) ? Math.max(1, md) : (veryHeavy ? 10 : heavy ? 14 : 30)
-    const EFF_CHAR_BUDGET = veryHeavy ? 180_000 : heavy ? 220_000 : CHAR_BUDGET
-    const textDocs = docs.slice(0, TEXT_DOC_CAP)
+    // ── 2. Briefs for the matched documents (Stage-1 output) ──
+    const { data: briefRows } = await sb.from('doc_briefs')
+      .select('document_id, doc_class, chain_role, brief, status, segments_done, segments_total')
+      .in('document_id', docs.map(d => d.id))
+    const briefBy = new Map<string, any>()
+    for (const b of (briefRows ?? []) as any[]) briefBy.set(b.document_id, b)
 
-    // ── 2. Full text of the top documents, lease/amendments first, capped ──
-    const { data: chunks } = await sb.from('document_chunks')
+    const briefed = docs.filter(d => briefBy.get(d.id)?.status === 'complete' && briefBy.get(d.id)?.brief)
+    const unbriefed = docs.filter(d => !briefed.includes(d))
+
+    // PLAN MODE: return the matched file + brief coverage without generating,
+    // so the caller (UI/batch script) can run Stage 1 (doc-brief) on the
+    // unbriefed documents first, then call back for the real synthesis.
+    if (body.plan) {
+      return new Response(JSON.stringify({
+        success: true, plan: true, tenant, property_id: propertyId,
+        docs: docs.map(d => ({
+          id: d.id, title: d.title ?? d.file_name,
+          brief_status: briefBy.get(d.id)?.status ?? 'none',
+        })),
+      }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+    }
+
+    // Order briefed docs for the prompt: operative chain in instrument-date
+    // order (the synthesis walks the chain forward), then ancillary, then the
+    // rest as one-line inventory entries.
+    const cls = (d: any) => briefBy.get(d.id)?.doc_class ?? 'other'
+    const briefDate = (d: any) => briefBy.get(d.id)?.brief?.instrument_date ?? briefBy.get(d.id)?.brief?.effective_date ?? ''
+    const operative = briefed.filter(d => cls(d) === 'operative_instrument')
+      .sort((a, b) => String(briefDate(a)).localeCompare(String(briefDate(b))))
+    const ancillary = briefed.filter(d => ['ancillary_executed', 'property_level'].includes(cls(d)))
+      .sort((a, b) => String(briefDate(a)).localeCompare(String(briefDate(b))))
+    const background = briefed.filter(d => !operative.includes(d) && !ancillary.includes(d))
+
+    // Full brief JSON for operative+ancillary within budget; compact lines for
+    // background docs (their briefs exist — the model can request nothing, but
+    // key_facts keep material events like uncured defaults visible).
+    let briefChars = 0
+    const briefBlocks: string[] = []
+    const briefIncluded = new Set<string>()
+    for (const d of [...operative, ...ancillary]) {
+      const b = briefBy.get(d.id)
+      const json = JSON.stringify(b.brief)
+      if (briefChars + json.length > BRIEF_BUDGET) break
+      briefBlocks.push(`===== BRIEF: "${d.title ?? d.file_name}" [${b.doc_class}/${b.chain_role}] =====\n${json}`)
+      briefChars += json.length
+      briefIncluded.add(d.id)
+    }
+    const backgroundLines = background.map(d => {
+      const b = briefBy.get(d.id)
+      const kf = Array.isArray(b?.brief?.key_facts) ? b.brief.key_facts.slice(0, 3).join(' | ') : ''
+      return `- "${d.title ?? d.file_name}" [${b.doc_class}/${b.chain_role}${b.brief?.instrument_date ? ` ${b.brief.instrument_date}` : ''}]${kf ? ` — ${kf}` : ''}`
+    }).join('\n')
+
+    // ── 2b. Raw-text fallback for unbriefed docs (v1 behavior, bounded).
+    // Top-scored unbriefed docs get text so a tenant can be abstracted before
+    // Stage 1 has swept the file; the prompt names them explicitly.
+    const { data: chunks } = unbriefed.length ? await sb.from('document_chunks')
       .select('document_id, chunk_index, content')
-      .in('document_id', textDocs.map(d => d.id))
-      .order('chunk_index')
+      .in('document_id', unbriefed.slice(0, 12).map(d => d.id))
+      .order('chunk_index') : { data: [] as any[] }
     const byDoc = new Map<string, string[]>()
     for (const c of (chunks ?? []) as any[]) {
       if (!byDoc.has(c.document_id)) byDoc.set(c.document_id, [])
       byDoc.get(c.document_id)!.push(c.content ?? '')
     }
-    // Per-doc cap: since the OCR/verbatim-text layer landed, one instrument's
-    // full text can run 100K+ chars and starve the rest of the tenant file
-    // (Kay Jewelers: the superseded 2012 amendment chain consumed the whole
-    // budget and the governing 2016 lease never made it in). Cap each doc so
-    // the budget always covers BREADTH across the instrument stack; the model
-    // still gets the operative sections (front matter, defined terms, rent
-    // schedule) of every top-scored document.
-    const PER_DOC_CAP = Math.min(60_000, Math.floor(EFF_CHAR_BUDGET / 6))
-    let used = 0
-    const parts: string[] = []
-    const usedDocIds: string[] = []
-    for (const d of textDocs) {
+    let rawUsed = 0
+    const rawParts: string[] = []
+    const rawIncluded = new Set<string>()
+    for (const d of unbriefed) {
       const text = (byDoc.get(d.id) ?? []).join('\n')
       if (!text) continue
-      const room = EFF_CHAR_BUDGET - used
+      const room = RAWTEXT_BUDGET - rawUsed
       if (room < 2000) break
-      const slice = text.slice(0, Math.min(room, PER_DOC_CAP))
-      const clipped = text.length > slice.length ? `\n[…document truncated at ${slice.length.toLocaleString()} of ${text.length.toLocaleString()} chars]` : ''
-      parts.push(`===== DOCUMENT: "${d.title ?? d.file_name}" (type: ${d.doc_type}) =====\n${slice}${clipped}`)
-      used += slice.length
-      usedDocIds.push(d.id)
+      const slice = text.slice(0, Math.min(room, RAW_PER_DOC_CAP))
+      const clipped = text.length > slice.length ? `\n[…truncated at ${slice.length.toLocaleString()} of ${text.length.toLocaleString()} chars — brief this document for full coverage]` : ''
+      rawParts.push(`===== RAW TEXT (no brief yet): "${d.title ?? d.file_name}" (type: ${d.doc_type}) =====\n${slice}${clipped}`)
+      rawUsed += slice.length
+      rawIncluded.add(d.id)
     }
 
-    // ── 2b. Primary sources: attach the governing PDFs (base lease + every
-    // amendment the scorer surfaced) when mirrored and small enough for native
-    // reading. Grounds exact language and section cites in the real lease
-    // rather than extraction summaries. Budget: ≤5 docs, ≤8MB each, ≤20MB
-    // total (native-PDF page cap safeguarded by the text-only retry below).
+    // source_doc_ids: everything that materially informed this abstract.
+    const usedDocIds = [...briefIncluded, ...rawIncluded]
+
+    // ── 2c. Primary-source PDFs: attach the top operative instruments when
+    // mirrored and small enough, grounding exact language & section cites. ──
     const MAX_ATTACH_BYTES = 8_000_000
     const MAX_ATTACH_TOTAL = 20_000_000
-    // body.max_pdfs caps attachments for heavyweight files whose 5-PDF runs
-    // exceed the edge function's 150s idle limit (e.g. multi-piece OCR leases).
     const mp = Number(body.max_pdfs)
-    const MAX_ATTACH_DOCS = Number.isFinite(mp) ? Math.max(0, Math.min(mp, 5)) : (veryHeavy ? 0 : heavy ? 2 : 5)
+    const MAX_ATTACH_DOCS = Number.isFinite(mp) ? Math.max(0, Math.min(mp, 5)) : 3
     let attachBytes = 0
     const attachable: any[] = []
-    for (const d of docs) {
+    for (const d of [...operative].reverse().concat(docs)) {   // newest operative first, then best-scored
       if (attachable.length >= MAX_ATTACH_DOCS) break
+      if (attachable.includes(d)) continue
       if (typeof d.storage_path !== 'string' || !d.storage_path.startsWith('p/')) continue
       const sz = Number(d.file_size_bytes)
       if (!(sz > 0) || sz > MAX_ATTACH_BYTES || attachBytes + sz > MAX_ATTACH_TOTAL) continue
@@ -287,74 +369,86 @@ serve(async (req) => {
         .map((s: any) => ({ type: 'document', source: { type: 'url', url: s.signedUrl } }))
     }
 
-    // ── 3. Generate the abstract ──
-    const attachNote = attachments.length
-      ? `\nThe ${attachments.length} attached PDF(s) are PRIMARY SOURCES (${attachable.map((d: any) => `"${d.title ?? d.file_name}"`).join(', ')}) — ground exact language and section citations in them; the text excerpts below supplement with amendments/letters.`
-      : ''
-    // FILE INVENTORY: every matched document with how it is presented in this
-    // request. Grounds the model's "missing document" claims — it must never
-    // say a doc was "not provided" when the doc is in the tenant's file.
-    // (If the stepped retry below drops attachments, a few FULL-PDF labels may
-    // overstate — rare and preferable to rebuilding the prompt mid-retry.)
+    // ── 3. Inventories & property-level context ──
+    // FILE INVENTORY: EVERY matched document — the ground for any "missing"
+    // claim. A doc listed here is IN THE FILE, full stop.
     const attachedIds = new Set(attachable.map((d: any) => d.id))
-    const summarizedIds = new Set(usedDocIds)
     const inventory = docs.map((d: any) => {
+      const b = briefBy.get(d.id)
       const how = attachedIds.has(d.id) ? 'FULL PDF ATTACHED'
-        : summarizedIds.has(d.id) ? 'in file — summary text included below'
-        : 'in file — title only (text not included in this request)'
-      return `- "${d.title ?? d.file_name}" [${d.doc_type}] — ${how}`
+        : briefIncluded.has(d.id) ? 'structured brief included below'
+        : rawIncluded.has(d.id) ? 'raw text included below (no brief yet)'
+        : b?.status === 'complete' ? 'brief on file (summarized above)'
+        : 'in file — title only in this request'
+      return `- "${d.title ?? d.file_name}" [${d.doc_type}${b?.doc_class ? ` · ${b.doc_class}` : ''}] — ${how}`
     }).join('\n')
 
-    // Property-level instruments (REAs/OEAs/declarations) live outside tenant
-    // folders — leases reference them constantly. List them so the model cites
-    // "on file at property level" instead of claiming they are missing.
+    // Property-level instruments (REAs/OEAs, PMA) — leases reference them
+    // constantly; they are "on file at property level", never missing.
     const { data: reas } = await sb.from('rea_agreements')
-      .select('name, agreement_date, source_docs')
+      .select('name, agreement_date, operator, members, term_summary, key_provisions')
       .eq('property_id', propertyId)
     const reaInventory = ((reas ?? []) as any[]).map((r: any) => {
-      const docsList = ((r.source_docs ?? []) as any[]).map((d: any) => d.title).join('; ')
-      return `- ${r.name} (${r.agreement_date ?? 'undated'})${docsList ? ` — documents on file: ${docsList}` : ''}`
+      const prov = typeof r.key_provisions === 'string' ? r.key_provisions.slice(0, 600)
+        : r.key_provisions ? JSON.stringify(r.key_provisions).slice(0, 600) : ''
+      return `- ${r.name} (${r.agreement_date ?? 'undated'})${r.operator ? ` — operator: ${r.operator}` : ''}${r.members ? ` — members: ${typeof r.members === 'string' ? r.members : JSON.stringify(r.members)}` : ''}${prov ? `\n  key provisions: ${prov}` : ''}`
     }).join('\n')
-    const prompt = `You are a commercial real estate lease abstractor for M&J Wilkow. Produce a lease abstract for tenant "${tenant}" following the firm's Lease Abstract Template, using ONLY the attached documents and text below.${attachNote}
+    const { data: pmas } = await sb.from('management_agreements')
+      .select('manager_name, sub_manager_name, mgmt_fee_pct, term_start, term_end, is_current')
+      .eq('property_id', propertyId)
+      .eq('is_current', true)
+    const pmaLine = ((pmas ?? []) as any[]).map((m: any) =>
+      `${m.manager_name}${m.sub_manager_name ? ` / ${m.sub_manager_name}` : ''} — mgmt fee ${m.mgmt_fee_pct != null ? (m.mgmt_fee_pct * 100).toFixed(2) + '%' : '?'}${m.term_start ? `, term ${m.term_start}→${m.term_end ?? 'evergreen'}` : ''}`
+    ).join('; ')
 
-FILE INVENTORY (every document in this tenant's file that matched the search):
+    // ── 4. Synthesis prompt (distilled from docs/abstraction-standard.md) ──
+    const attachNote = attachments.length
+      ? `\nThe ${attachments.length} attached PDF(s) are PRIMARY SOURCES (${attachable.map((d: any) => `"${d.title ?? d.file_name}"`).join(', ')}) — ground exact language and section citations in them.`
+      : ''
+    const prompt = `You are a commercial real estate lease abstractor for M&J Wilkow producing a lease abstract for tenant "${tenant}" per the firm's Abstraction Standard. Synthesize from the structured DOCUMENT BRIEFS below (each extracted from 100% of that document's text), the raw text of unbriefed documents, and the attached PDFs.${attachNote}
+
+FILE INVENTORY (every document in this tenant's file that matched the search — a document listed here IS IN THE FILE):
 ${inventory}
-${reaInventory ? `\nPROPERTY-LEVEL INSTRUMENTS ON FILE (REAs/OEAs/declarations held at property level, outside tenant folders — when the lease references one of these, cite it as "on file at property level", NOT as missing):\n${reaInventory}\n` : ''}
-Abstraction method (firm standard):
-- THE LATEST AMENDMENT IS THE LEASE. Establish the amendment chain from recitals, then abstract CURRENT effective terms newest-instrument-first, falling back to older instruments only for unamended provisions. Note superseded terms in notes fields.
-- SOURCE HIERARCHY when instruments disagree on a term: trust the EXECUTED, binding instrument over secondary or derived documents. Authority order, highest first: (1) the lease and its executed amendments, and executed Commencement-Date / Lease-Commencement Agreements (these FIX otherwise-formula-based dates and rent-start — prefer them over the base lease's projected/estimated schedule); (2) executed guaranties, assignments, SNDAs, and estoppel certificates signed by the parties; (3) landlord-prepared summaries, CAM/RET reconciliations, rent rolls, control sheets. NEVER let an estoppel, reconciliation, or rent roll override an executed lease instrument. Example: if an executed Commencement Date Agreement states expiration 2028-12-31 and an estoppel or CAM recon implies 2026-12-31, abstract 2028-12-31 and flag the conflict in open_items ("DISCREPANCY: …").
-- MRI IS A CROSS-CHECK, NOT A SOURCE. The system-of-record row below is provided ONLY to flag disagreements. NEVER populate an abstract field (dates, square_footage, rent, party names) with a value that comes only from MRI and is not stated in the documents — use the DOCUMENTED value, or null plus a "CONFIRM: …" open item. When MRI and the documents disagree, abstract the DOCUMENTED value and add "DISCREPANCY: MRI says X, documents say Y".
-- GUARANTOR: set guarantor.exists=true and a guarantor.name ONLY if an executed guaranty, or a guaranty provision naming the guarantor, actually appears in the file. Do NOT infer a guarantor from a franchise/parent relationship or the tenant's trade name. If none is in the file, guarantor.exists=false (or null) + "MISSING FROM FILE: guaranty" if the lease references one.
-- Track the assignment chain — assignments can change the tenant legal name and guaranty survival.
-- MULTIPLE SEQUENTIAL TENANCIES: a tenant file may contain a PRIOR tenant's complete lease chain for the same space (a superseded tenancy — different legal tenant, older base lease that ended) alongside the CURRENT tenancy's lease. Abstract the CURRENT tenancy: the newest base lease and its amendments/CDA/option notices, using the system-of-record cross-check (commencement/expiration) to identify which chain is operative. This rule OVERRIDES attachment primacy — if the attached PDFs happen to belong to the prior tenancy, abstract the current tenancy from its text excerpts anyway, note the prior tenancy briefly in additional_rights_notes, and flag any of the current chain's instruments that need fuller review in open_items.
-- Before submitting, run consistency checks and flag failures as DISCREPANCY items: commencement + term length vs. expiration; monthly rent × 12 vs. annual; annual vs. PSF × SF; option windows sequential and after the current term.
+${backgroundLines ? `\nBACKGROUND DOCUMENTS (briefed; correspondence/financial — NOT lease documents, corroboration only):\n${backgroundLines}\n` : ''}
+${reaInventory ? `\nPROPERTY-LEVEL INSTRUMENTS ON FILE (REAs/OEAs/declarations — cite as "on file at property level", NEVER as missing):\n${reaInventory}\n` : ''}${pmaLine ? `\nPROPERTY MANAGEMENT AGREEMENT (current): ${pmaLine}\n` : ''}
+ABSTRACTION METHOD (firm standard — binding):
+1. THE LATEST AMENDMENT IS THE LEASE. Establish the amendment chain from the briefs' chain/recitals, then abstract CURRENT effective terms newest-instrument-first, falling back to older instruments only for unamended provisions. Note superseded terms in notes fields only.
+2. SOURCE HIERARCHY when instruments disagree: (1) executed lease/amendments + executed Commencement Date Agreements/Lease Supplements/Acknowledgments (these FIX formula dates); (2) executed option-exercise notices (they roll the term); (3) executed guaranties, assignments, SNDAs, estoppels; (4) MRI system of record (see date rules); (5) landlord summaries/CAM recons/control sheets/correspondence — corroboration only, never override 1-4.
+3. DATE DISCIPLINE — every date field holds a bare ISO date (YYYY-MM-DD) or null; NEVER prose, parentheticals, or formulas inside a date field. Provenance goes in the companion *_basis field ("Fourth Amendment §2.A", "executed Lease Supplement 2012-08-24", "MRI system of record", "estoppel (corroboration)").
+   - rent_commencement (RCD): use an executed CDA/Lease Supplement/Acknowledgment if one is in the file; OTHERWISE USE THE MRI RCD from the system-of-record/rent-roll payload below with rcd_basis "MRI system of record". A lease-formula projection ("X days after delivery") is NEVER presented as the RCD — mention it only in rcd_basis or open_items if it materially contradicts MRI.
+   - original_commencement = start of the initial term (documents). current_term_start = start of the CURRENT term segment (MRI governs; typically the latest renewal/extension start). These are different fields — do not conflate, do not flag their difference as a discrepancy.
+   - expiration: latest executed instrument that extends/resets the term; cross-check MRI current-term end; disagreement → "DISCREPANCY:" open item naming both values.
+4. OPTIONS ARE A LIFECYCLE: granted → exercised/lapsed/renegotiated → term rolls. For each option: status ("exercised" when an executed exercise notice is in the file, an amendment recites exercise, or MRI shows the rolled term — cite which in exercise_evidence; "superseded" when a later amendment voids/regrants it; otherwise "open"). notice_by = the hard date notice is due: prefer the MRI notice_deadline from the payload below (system of record, durable rule), else compute from the notice period and term end; state which in notice_by_basis and add "DISCREPANCY:" if your computation and MRI materially disagree. An exercised option's period IS the current term — do not list it as a future option. Set landlord_reminder_required=true when the lease obliges LANDLORD to notify the tenant of the window.
+5. GUARANTY CHAIN: build guaranty_chain from every guaranty creation/reaffirmation/replacement/release and every assignment (assignor released or surviving? replacement guaranty delivered?). Silence in an assignment = assignor/guarantor NOT released (market standard) — status "surviving", note the silence. guarantor.name = the CURRENT guarantor(s) derived from the chain. Never infer a guarantor from a franchise/parent relationship; only executed guaranties or instruments reciting one.
+6. EXCLUSIVES DISCIPLINE — three different things: permitted_use = what THIS tenant may do. exclusives = the tenant's OWN protection (a covenant restricting LANDLORD/other occupants for this tenant's benefit) — quote the operative language AND the remedies (rent abatement %, alternative rent, termination) and conditions (operating, not in default). use_restrictions_on_tenant = OTHER tenants' exclusives / prohibited-use schedules that BIND this tenant (typically an exhibit — name it in source_exhibit). Never mix these three.
+   HARD RULE: exclusives.exists=true REQUIRES exact_language to QUOTE (verbatim, from an operative instrument's brief or PDF) a covenant by which the LANDLORD restricts other occupants/premises. NOT sufficient for exists=true: an MRI note code or has_exclusives flag; a landlord summary/control sheet asserting exclusivity; a paraphrase like "Tenant has exclusive rights to [its own permitted use]"; the tenant's own radius/non-compete covenant (binds TENANT — belongs in radius_clause); demise language ("for Tenant's exclusive use" = possession, not competition protection); a landlord NO-CONFLICT WARRANTY or indemnity about other tenants' exclusives (that protects tenant FROM exclusives — note it in additional_rights_notes, it is not an exclusive). If a flag/summary asserts an exclusive but no covenant can be quoted: exists=false + "CONFIRM: MRI/summary indicates an exclusive-use right but no operative covenant located in the file — obtain the granting instrument".
+7. LEASE DOCUMENTS: list ONLY operative instruments (category "operative": lease, amendments, CDA/supplement, assignment, termination, executed exercise notices) and executed ancillary instruments (category "ancillary": guaranty, SNDA, estoppel, MOL, license). NEVER list correspondence, emails, default/past-due notices, force-majeure letters, CAM recons, sales reports, or invoices as lease documents — a material event they evidence (e.g. uncured default) goes in additional_rights_notes with the source named. Dates AS STATED on each instrument. "partial" for signature blocks blank in the copy on hand.
+8. REA/PMA: fill rea_pma from the property-level inventory — is the premises subject to an REA (subject_to_rea; the center's REA obligations affect co-tenancy math and CAM denominators)? tenant_impact = how it touches THIS tenant (anchor operating covenants, REA-driven restrictions, CAM contribution structure). pma_manager from the PMA line. If the property has no REA, subject_to_rea=false.
+9. CRITICAL DATES: every date creating a future duty or right — option notice_by dates, expiration, kickout windows, co-tenancy cure deadlines, landlord-reminder dates — also goes in critical_dates with its source.
+10. base_rent_schedule — CURRENT CONTROLLING SCHEDULE ONLY, from the latest instrument that sets or resets rent. Never carry superseded rows; never invent/interpolate/pad. If the current term's rent isn't stated anywhere in the file, list substantiated rows only + "CONFIRM: current-term rent" in open_items.
+11. Before submitting run consistency checks and flag failures as "DISCREPANCY:" items: commencement + term vs expiration; monthly × 12 vs annual; annual vs PSF × SF; option windows sequential and after the current term; breakpoint arithmetic (natural = annual fixed rent ÷ rate).
 
-GROUNDING — NO FABRICATION (critical): every concrete value you output — a date, dollar amount, PSF, party/legal name, lender, guarantor, document title, or section cite — MUST be traceable to the attached PDFs or the text excerpts below. NEVER invent, estimate, or supply a plausible-looking value the documents do not state. In particular for ancillary instruments (SNDA, estoppel certificate, guaranty, assignment, commencement-date agreement, CAM reconciliation): do NOT emit a date, lender, or counterparty you did not read verbatim in the provided materials. If the lease merely references such an instrument but its executed copy is not in the FILE INVENTORY, leave the related fields null/false and add a "MISSING FROM FILE: …" line — do not fabricate its details. If a value is derived rather than stated (e.g. an expiration computed from a commencement-date formula), say so in the relevant notes/section field and flag it "CONFIRM: …" rather than presenting it as a firm figure.
+GROUNDING — NO FABRICATION: every concrete value must be traceable to a brief (whose quotes came from the document), the raw text, or an attached PDF. Values the documents do not state are null + open item. MRI-sourced values are labeled as such in the *_basis fields.
 
-Document-claim discipline for "open_items" (each entry MUST start with exactly one prefix):
-- "MISSING FROM FILE: …" — ONLY for an instrument that reviewed documents reference (recitals, exhibit lists, estoppels) but that does NOT appear in the FILE INVENTORY above. Name the instrument and its date.
-- "NOT FULLY REVIEWED: …" — for a document that IS in the inventory but was presented as summary/title only, when its full text is needed to confirm a term. Never describe these as "not provided" or "not received" — they are in the file.
-- "CONFIRM: …" — a term that should be verified against MRI or ancillary documents.
-- "DISCREPANCY: …" — conflicting values between instruments or vs. the system-of-record cross-check.
+OPEN-ITEM DISCIPLINE (each entry starts with exactly one prefix):
+- "MISSING FROM FILE: …" — ONLY for an instrument that reviewed documents reference but that appears NOWHERE in the FILE INVENTORY above. The inventory is the complete file — check it before claiming missing.
+- "NOT FULLY REVIEWED: …" — ONLY for a document listed as "title only in this request" or whose raw text was truncated. Documents with briefs were read in full — never mark them not-fully-reviewed.
+- "CONFIRM: …" — a term needing verification against a source outside this request.
+- "DISCREPANCY: …" — conflicting values between instruments or vs. the MRI cross-check (name both values and both sources).
 
-Rules:
-- Call the submit_abstract tool with an object matching this schema exactly (all keys present):
+Call the submit_abstract tool with an object matching this schema exactly (all keys present):
 ${SCHEMA}
-- "section" fields: cite the lease/amendment section or article (e.g. "§6.1.3(j)" or "Art. 24; 2nd Amd §3").
-- Where the template asks for exact language (CAM details, exclusives, co-tenancy, prohibited/permitted use), QUOTE the operative language verbatim (trim boilerplate; keep remedies).
-- base_rent_schedule — CURRENT CONTROLLING SCHEDULE ONLY. Use the rent table from the LATEST instrument that sets or resets rent (newest amendment / executed Commencement-Date Agreement / exercised-option notice). If a later instrument REPLACES or DELETES an earlier rent schedule, do NOT carry the superseded rows into base_rent_schedule — reference them, only if useful, in additional_rights_notes as "superseded by <instrument>". Never invent, interpolate, or pad a row to fill a gap; every row's start/end/psf/monthly/annual MUST trace to the controlling instrument. If the controlling schedule can't be fully read, list only the substantiated rows and add "NOT FULLY REVIEWED: base rent schedule …" to open_items — do not backfill with older/original-lease rows.
-- Any item the documents do not address: use null/false and add a prefixed line to "open_items".
-- lease_documents: list ONLY instruments actually present in the FILE INVENTORY or quoted in the reviewed text, each with the date AS STATED in that document. Do NOT create an entry (with a guessed date) for an instrument you did not actually see — a referenced-but-absent SNDA/estoppel/guaranty/assignment belongs in open_items as "MISSING FROM FILE: …", never in lease_documents with an invented date. Use "?" for signed when execution cannot be confirmed from the copy on hand.
-- estoppel.timing_for_delivery / snda.timing_for_delivery are the DELIVERY-TIMING REQUIREMENTS from the lease clause (e.g. "within 10 days of request"), NOT the date of any executed estoppel/SNDA. Leave null if the lease is silent; never put a fabricated execution date here.
-${leaseRow ? `\nSystem-of-record cross-check (MRI-reconciled; flag disagreements in open_items): ${JSON.stringify(leaseRow)}` : ''}
+- "section" fields cite the instrument + section (e.g. "§6.1.3(j)" or "3rd Amd §5").
+- Where the template asks for exact language (CAM, exclusives, co-tenancy, permitted/prohibited use), QUOTE the operative language verbatim from the briefs/PDFs (trim boilerplate; keep remedies).
+- MULTIPLE SEQUENTIAL TENANCIES: if the file holds a PRIOR tenant's superseded chain for the same space, abstract the CURRENT tenancy (use the MRI cross-check to identify it), note the prior tenancy briefly in additional_rights_notes.
+${leaseRow ? `\nMRI SYSTEM-OF-RECORD CROSS-CHECK (current-term window; governs current-term dates/SF/suite/current rent/pct-rent flag; documents govern deposits/TI/clauses/options-language/guarantor/legal name): ${JSON.stringify(leaseRow)}` : ''}
+${mriOptions.length ? `\nMRI OPTION DATA (RETAILRR-verified system of record for option notice dates & exercise state): ${JSON.stringify(mriOptions)}` : ''}
+${mriRentRoll ? `\nMRI RENT ROLL (latest load — current term start/end, rent): ${JSON.stringify(mriRentRoll)}` : ''}
 
-DOCUMENTS:
-${parts.join('\n\n')}`
+DOCUMENT BRIEFS (each extracted from 100% of the document's text; operative chain in date order, then ancillary):
+${briefBlocks.join('\n\n')}
+${rawParts.length ? `\nRAW TEXT OF UNBRIEFED DOCUMENTS (bounded — flag truncated ones NOT FULLY REVIEWED if needed):\n${rawParts.join('\n\n')}` : ''}`
 
-    // Reduce the text budget when PDFs are attached (context headroom).
-    const textPrompt = attachments.length && used > 150_000
-      ? prompt.slice(0, prompt.length - used + 150_000)
-      : prompt
     // Stepped degradation: all attachments → top 2 → text-only. PDFs can blow
     // the native 100-page/context caps; each step keeps as much primary source
     // as fits.
@@ -362,25 +456,72 @@ ${parts.join('\n\n')}`
       /page|too long|too large|exceed|prompt is too long/i.test(e instanceof Error ? e.message : String(e))
     let abstract: any
     try {
-      abstract = await anthropicJson(anthropicKey, MODEL, [...attachments, { type: 'text', text: textPrompt }], 16000)
+      abstract = await anthropicJson(anthropicKey, MODEL, [...attachments, { type: 'text', text: prompt }], 20000)
     } catch (e) {
       if (!attachments.length || !isCapError(e)) throw e
       if (attachments.length > 2) {
         try {
           attachments = attachments.slice(0, 2)
-          abstract = await anthropicJson(anthropicKey, MODEL, [...attachments, { type: 'text', text: textPrompt }], 16000)
+          abstract = await anthropicJson(anthropicKey, MODEL, [...attachments, { type: 'text', text: prompt }], 20000)
         } catch (e2) {
           if (!isCapError(e2)) throw e2
-          abstract = await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }], 16000)
+          abstract = await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }], 20000)
           attachments = []
         }
       } else {
-        abstract = await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }], 16000)
+        abstract = await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }], 20000)
         attachments = []
       }
     }
 
-    // ── 4. Upsert ──
+    // ── 4b. Deterministic consistency checks (code, not model). The model is
+    // told to run these too — this layer catches what it misses and makes the
+    // failures machine-visible regardless of model behavior. ──
+    const flags: string[] = []
+    const isIso = (v: any) => v == null || /^\d{4}-\d{2}-\d{2}$/.test(String(v))
+    const term = abstract?.term ?? {}
+    for (const [k, v] of Object.entries({
+      rent_commencement: term.rent_commencement, original_commencement: term.original_commencement,
+      current_term_start: term.current_term_start, expiration: term.expiration,
+    })) {
+      if (!isIso(v)) flags.push(`DISCREPANCY: term.${k} is not a bare ISO date ("${String(v).slice(0, 60)}…") — dates must be YYYY-MM-DD with provenance in the *_basis field`)
+    }
+    const sf = Number(abstract?.square_footage)
+    const sched = Array.isArray(abstract?.base_rent_schedule) ? abstract.base_rent_schedule : []
+    sched.forEach((r: any, i: number) => {
+      const m = Number(r?.monthly), a = Number(r?.annual), p = Number(r?.psf)
+      if (m > 0 && a > 0 && Math.abs(m * 12 - a) > Math.max(10, a * 0.01)) {
+        flags.push(`DISCREPANCY: base_rent_schedule[${i}] monthly×12 (${(m * 12).toFixed(2)}) ≠ annual (${a.toFixed(2)})`)
+      }
+      if (p > 0 && a > 0 && sf > 0 && Math.abs(p * sf - a) > Math.max(50, a * 0.02)) {
+        flags.push(`DISCREPANCY: base_rent_schedule[${i}] PSF×SF (${(p * sf).toFixed(0)}) ≠ annual (${a.toFixed(0)})`)
+      }
+    })
+    // Exclusives hard rule (abstraction-standard §5.1): exists=true demands a
+    // substantive quoted covenant that names the restricting party. Paraphrases
+    // and MRI-flag-only assertions get machine-flagged for the verifier/human.
+    const ex = abstract?.exclusives
+    if (ex?.exists === true) {
+      const lang = String(ex.exact_language ?? '')
+      if (lang.length < 60 || !/landlord|lessor/i.test(lang)) {
+        flags.push('DISCREPANCY: exclusives.exists=true but exact_language does not quote a landlord-restricting covenant (paraphrase/flag-only assertion) — per the abstraction standard this must be exists=false + CONFIRM unless the granting covenant is quoted')
+      }
+    }
+
+    // Every OPEN MRI option notice deadline must surface on an abstract option
+    // (MRI RETAILRR = system of record for option notice dates, durable rule).
+    const abstractNoticeBys = new Set(
+      (Array.isArray(abstract?.options) ? abstract.options : []).map((o: any) => String(o?.notice_by ?? '')))
+    for (const o of mriOptions) {
+      if (o?.notice_deadline && !o?.is_exercised && !abstractNoticeBys.has(String(o.notice_deadline))) {
+        flags.push(`DISCREPANCY: MRI holds an open option notice deadline ${o.notice_deadline} that no abstract option carries as notice_by — reconcile against RETAILRR`)
+      }
+    }
+    if (flags.length) {
+      abstract.open_items = [...(Array.isArray(abstract?.open_items) ? abstract.open_items : []), ...flags]
+    }
+
+    // ── 5. Upsert ──
     const { error: upErr } = await sb.from('lease_abstracts').upsert({
       property_id: propertyId,
       tenant_name: tenant,
@@ -401,7 +542,9 @@ ${parts.join('\n\n')}`
 
     return new Response(JSON.stringify({
       success: true, tenant, property_id: propertyId,
-      docs_used: usedDocIds.length, chars_used: used, pdf_sources: attachments.length, abstract,
+      docs_matched: docs.length, briefs_used: briefIncluded.size,
+      unbriefed_in_file: unbriefed.length, raw_fallback_docs: rawIncluded.size,
+      pdf_sources: attachments.length, abstract,
     }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   } catch (err: unknown) {
