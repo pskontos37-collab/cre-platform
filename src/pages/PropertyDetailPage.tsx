@@ -10,6 +10,7 @@ import { useDeals } from '../hooks/useDeals'
 import { useManagementAgreements } from '../hooks/useManagementAgreements'
 import { useCriticalDates } from '../hooks/useDashboard'
 import { useLoansForProperty, usePropertyDocs } from '../hooks/usePropertyHub'
+import { usePropertyDataStatus } from '../hooks/usePropertyDataStatus'
 import { useSitePlans } from '../hooks/useSitePlans'
 import { viewHref } from '../lib/viewer'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
@@ -53,6 +54,8 @@ export function PropertyDetailPage() {
   const { data: dates }     = useCriticalDates(propertyIds, names)
   const { data: docs }      = usePropertyDocs(id)
   const { data: sitePlans } = useSitePlans(id)
+  const { data: dataStatus } = usePropertyDataStatus()
+  const onboarding = !!(id && dataStatus && dataStatus[id] && !dataStatus[id].data_loaded)
 
   const deals = (allDeals ?? []).filter(d => d.property_id === id)
   const currentMa = (agreements ?? []).filter(a => a.is_current && a.mgmt_fee_pct != null)
@@ -113,6 +116,25 @@ export function PropertyDetailPage() {
           />
         </div>
       </div>
+
+      {onboarding && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: 'rgba(245,158,11,0.08)',
+            border: '1px solid rgba(245,158,11,0.35)',
+            borderRadius: 10, padding: '10px 14px', marginBottom: 14,
+            fontSize: 12.5, color: 'var(--text-muted)',
+          }}
+        >
+          <span style={{ fontSize: 16, lineHeight: 1 }}>🗂️</span>
+          <span>
+            <strong style={{ color: 'var(--text)' }}>Data onboarding in progress.</strong>{' '}
+            Financials, leases and documents for this property haven't been loaded into the
+            platform yet — figures below will populate once onboarding completes.
+          </span>
+        </div>
+      )}
 
       {/* ── KPI strip ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>

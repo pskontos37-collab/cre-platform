@@ -68,7 +68,7 @@ export function PropertiesPage() {
                     {p.total_sf ? ` · ${sf(p.total_sf)}` : ''}
                   </div>
                 </div>
-                {hasData && (
+                {hasData ? (
                   <span
                     style={{
                       fontSize: 9, fontWeight: 700, letterSpacing: '0.05em',
@@ -77,6 +77,17 @@ export function PropertiesPage() {
                     }}
                   >
                     Live data
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: 9, fontWeight: 700, letterSpacing: '0.05em',
+                      color: 'var(--text-faint)', background: 'var(--surface-2)',
+                      border: '1px solid var(--border-2)',
+                      padding: '2px 7px', borderRadius: 99, textTransform: 'uppercase',
+                    }}
+                  >
+                    Onboarding
                   </span>
                 )}
               </div>

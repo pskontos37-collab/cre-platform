@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, type CSSProperties } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useFilter } from '../../contexts/FilterContext'
 import { useProperties, usePortfolios } from '../../hooks/useProperties'
+import { usePropertyDataStatus } from '../../hooks/usePropertyDataStatus'
 import { ThemePicker } from '../ui/ThemePicker'
 import { HelpCenter } from '../help/HelpCenter'
 
@@ -9,6 +10,7 @@ export function Header() {
   const { filter, setFilter } = useFilter()
   const { data: properties } = useProperties()
   const { data: portfolios } = usePortfolios()
+  const { data: dataStatus } = usePropertyDataStatus()
 
   return (
     <header
@@ -41,7 +43,11 @@ export function Header() {
         )}
         {(properties ?? []).length > 0 && (
           <PropertyPicker
-            properties={properties!.map(p => ({ id: p.id, name: p.name }))}
+            properties={properties!.map(p => ({
+              id: p.id,
+              name: p.name,
+              loaded: dataStatus ? (dataStatus[p.id]?.data_loaded ?? false) : true,
+            }))}
           />
         )}
       </div>
@@ -266,7 +272,9 @@ function modalBtn(variant?: 'primary'): CSSProperties {
 }
 
 // Multi-select property picker: check one property or any combination.
-function PropertyPicker({ properties }: { properties: Array<{ id: string; name: string }> }) {
+// Data-loaded assets list first; not-yet-loaded ones sit under an
+// "Onboarding" divider so empty properties read as pending, not broken.
+function PropertyPicker({ properties }: { properties: Array<{ id: string; name: string; loaded?: boolean }> }) {
   const { filter, setFilter } = useFilter()
   const [open, setOpen] = useState(false)
   const [checked, setChecked] = useState<Set<string>>(new Set())
@@ -358,30 +366,41 @@ function PropertyPicker({ properties }: { properties: Array<{ id: string; name: 
               Clear
             </button>
           </div>
-          {properties.map(p => (
-            <label
-              key={p.id}
-              style={{
-                display:      'flex',
-                alignItems:   'center',
-                gap:          8,
-                padding:      '5px 6px',
-                borderRadius: 6,
-                cursor:       'pointer',
-                fontSize:     12,
-                color:        checked.has(p.id) ? 'var(--text)' : 'var(--text-muted)',
-                background:   checked.has(p.id) ? 'var(--surface-2)' : 'transparent',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={checked.has(p.id)}
-                onChange={() => toggle(p.id)}
-                style={{ accentColor: 'var(--accent)' }}
-              />
-              {p.name}
-            </label>
-          ))}
+          {[...properties.filter(p => p.loaded !== false), ...properties.filter(p => p.loaded === false)]
+            .map((p, i, arr) => {
+              const firstOnboarding = p.loaded === false && (i === 0 || arr[i - 1].loaded !== false)
+              return (
+                <div key={p.id}>
+                  {firstOnboarding && (
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)', padding: '8px 6px 3px', borderTop: '1px solid var(--border)', marginTop: 6 }}>
+                      Onboarding — data not yet loaded
+                    </div>
+                  )}
+                  <label
+                    style={{
+                      display:      'flex',
+                      alignItems:   'center',
+                      gap:          8,
+                      padding:      '5px 6px',
+                      borderRadius: 6,
+                      cursor:       'pointer',
+                      fontSize:     12,
+                      opacity:      p.loaded === false ? 0.6 : 1,
+                      color:        checked.has(p.id) ? 'var(--text)' : 'var(--text-muted)',
+                      background:   checked.has(p.id) ? 'var(--surface-2)' : 'transparent',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked.has(p.id)}
+                      onChange={() => toggle(p.id)}
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                    {p.name}
+                  </label>
+                </div>
+              )
+            })}
           <div style={{ position: 'sticky', bottom: 0, background: 'var(--surface)', paddingTop: 8, display: 'flex', gap: 8 }}>
             <button
               onClick={apply}
