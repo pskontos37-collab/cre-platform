@@ -140,6 +140,10 @@ export function WaterfallPage() {
   const glForSel = sel && glNca && glNca.propertyId === sel.propertyId ? glNca : null
   const [inputs, setInputs] = useState<Inputs | null>(null)
   const [ncaTouched, setNcaTouched] = useState(false)
+  // Governing-agreement abstracts are kept collapsed — they're a reference for
+  // comparing the modeled tiers against the executed OA, not the primary view.
+  // Toggle open on demand from the header button.
+  const [showAbstracts, setShowAbstracts] = useState(false)
   // On every tab switch, re-seed from the new property's own defaults (stored config unless a
   // matching GL figure is already in hand) and clear any prior manual override.
   useEffect(() => {
@@ -302,6 +306,20 @@ export function WaterfallPage() {
               </button>
             ))}
             <span style={{ flex: 1 }} />
+            {(sel.l1.abstract || sel.l2?.abstract) && (
+              <button
+                onClick={() => setShowAbstracts(s => !s)}
+                title="Show the verified abstracts of the governing operating agreements to compare against the modeled tiers"
+                style={{
+                  padding: '7px 14px', fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: 'pointer',
+                  border: '1px solid ' + (showAbstracts ? 'var(--accent)' : 'var(--border)'),
+                  background: showAbstracts ? 'var(--accent-soft, rgba(59,130,246,0.12))' : 'var(--surface)',
+                  color: showAbstracts ? 'var(--accent)' : 'var(--text-muted)',
+                }}
+              >
+                ⚖ Agreement abstracts {showAbstracts ? '▾' : '▸'}
+              </button>
+            )}
             <PdfDownloadButton
               label="⬇ Excel (formulas)"
               busyLabel="Generating Excel…"
@@ -322,7 +340,7 @@ export function WaterfallPage() {
               independent verification verdict (agreement-abstract/verify
               kind=jv). Backs the "tier terms verified against the executed
               operating agreements" note below. */}
-          {(sel.l1.abstract || sel.l2?.abstract) && (
+          {showAbstracts && (sel.l1.abstract || sel.l2?.abstract) && (
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 8 }}>
                 Governing operating agreements
