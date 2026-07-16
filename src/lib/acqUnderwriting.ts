@@ -24,6 +24,9 @@ export interface AcqAssumptions {
   ltvPct?: number             // loan sized as % of purchase price (default 0 = all cash)
   loanRatePct?: number        // annual interest rate (decimal)
   amortYears?: number         // amortization term; 0/undefined => interest-only
+  ioYears?: number            // interest-only years at the start
+  loanFeePct?: number         // origination fee % of the loan
+  refi?: RefinanceTerms | null
   closeDate: string           // ISO 'yyyy-mm-dd' — anchors the dated IRR
 }
 
@@ -55,6 +58,18 @@ export interface AcqResult {
   debtYieldByYear: (number | null)[] // NOI_t / loan balance_t
 }
 
+/** Mid-hold cash-out refinance: at `yearsFromClose`, pay off the going-in loan and
+ *  place a new loan sized to `ltvPct` of the then-value (forward NOI / capPct). */
+export interface RefinanceTerms {
+  yearsFromClose: number
+  ltvPct: number
+  ratePct: number
+  amortYears: number
+  ioYears: number
+  costPct: number   // refi costs as % of the new loan
+  capPct: number    // cap rate used to value the asset at refinance
+}
+
 export interface ReturnsInput {
   noiByYear: number[]         // t=1..hold operating NOI (after OpEx, before capital + debt)
   capitalByYear: number[]     // t=1..hold TI/LC/reserve capital (>=0 outflow); same length as noiByYear
@@ -67,6 +82,9 @@ export interface ReturnsInput {
   ltvPct: number
   loanRatePct: number
   amortYears: number
+  ioYears?: number            // interest-only years at the start (0 = amortize from yr1)
+  loanFeePct?: number         // origination fee/points as % of the going-in loan (added to equity)
+  refi?: RefinanceTerms | null
   closeDate: string
 }
 
@@ -86,25 +104,63 @@ function balanceAfter(loan: number, rate: number, amortYears: number, k: number)
   const f = Math.pow(1 + rate, k)
   return Math.max(0, loan * f - pmt * (f - 1) / rate)
 }
+// Debt service in the `elapsed`-th year of a loan (IO for ioY years, then amortizing).
+function dsFor(loan: number, rate: number, amortYears: number, ioY: number, elapsed: number): number {
+  if (loan <= 0) return 0
+  if (elapsed <= ioY) return loan * rate
+  return annualPayment(loan, rate, amortYears)
+}
+// Ending balance after `elapsed` years (IO for ioY years, then amortizing).
+function balFor(loan: number, rate: number, amortYears: number, ioY: number, elapsed: number): number {
+  if (loan <= 0) return 0
+  if (elapsed <= ioY) return loan
+  return balanceAfter(loan, rate, amortYears, elapsed - ioY)
+}
+
+interface DebtSchedule { L0: number; loanFee: number; ds: number[]; balance: number[]; refiCash: number[]; exitPayoff: number }
+/** Per-year debt service + ending balance + refi cash event, over a `hold`-year hold. */
+function computeDebt(inp: ReturnsInput, hold: number): DebtSchedule {
+  const L0 = Math.max(0, inp.purchasePrice * inp.ltvPct)
+  const io0 = Math.max(0, Math.round(inp.ioYears ?? 0))
+  const loanFee = L0 * (inp.loanFeePct ?? 0)
+  const refi = inp.refi && inp.refi.yearsFromClose >= 1 && inp.refi.yearsFromClose < hold && inp.refi.capPct > 0 ? inp.refi : null
+  const R = refi ? Math.round(refi.yearsFromClose) : 0
+  const oldBalAtR = refi ? balFor(L0, inp.loanRatePct, inp.amortYears, io0, R) : 0
+  const fwdNoiAtR = refi ? (R < inp.noiByYear.length ? inp.noiByYear[R] : inp.exitYearNoi) : 0
+  const L1 = refi ? (fwdNoiAtR / refi.capPct) * refi.ltvPct : 0
+  const refiCashOut = refi ? L1 - oldBalAtR - L1 * (refi.costPct ?? 0) : 0
+
+  const ds: number[] = [], balance: number[] = [], refiCash: number[] = []
+  for (let t = 1; t <= hold; t++) {
+    if (!refi || t <= R) {
+      ds.push(dsFor(L0, inp.loanRatePct, inp.amortYears, io0, t))
+      balance.push(balFor(L0, inp.loanRatePct, inp.amortYears, io0, t))
+    } else {
+      const e = t - R
+      ds.push(dsFor(L1, refi.ratePct, refi.amortYears, Math.round(refi.ioYears ?? 0), e))
+      balance.push(balFor(L1, refi.ratePct, refi.amortYears, Math.round(refi.ioYears ?? 0), e))
+    }
+    refiCash.push(refi && t === R ? refiCashOut : 0)
+  }
+  return { L0, loanFee, ds, balance, refiCash, exitPayoff: balance[hold - 1] ?? 0 }
+}
 
 /** Shared returns core — NOI + capital streams -> levered returns. */
 export function computeReturns(inp: ReturnsInput): AcqResult {
   const hold = inp.noiByYear.length
   const totalBasis = inp.purchasePrice * (1 + inp.acqCostsPct) + inp.capexUpfront
-  const loanAmount = Math.max(0, inp.purchasePrice * inp.ltvPct)
-  const equity = totalBasis - loanAmount
-  const io = !(inp.amortYears > 0 && inp.loanRatePct > 0)
-  const annualDs = loanAmount > 0 ? (io ? loanAmount * inp.loanRatePct : annualPayment(loanAmount, inp.loanRatePct, inp.amortYears)) : 0
+  const debt = computeDebt(inp, hold)
+  const loanAmount = debt.L0
+  const equity = totalBasis - loanAmount + debt.loanFee   // origination fee is an equity outlay
 
-  const yearlyDebtService: number[] = []
+  const yearlyDebtService = debt.ds.slice()
   const yearlyOperatingCf: number[] = []
   for (let t = 1; t <= hold; t++) {
-    yearlyDebtService.push(annualDs)
-    yearlyOperatingCf.push(inp.noiByYear[t - 1] - (inp.capitalByYear[t - 1] ?? 0) - annualDs)
+    yearlyOperatingCf.push(inp.noiByYear[t - 1] - (inp.capitalByYear[t - 1] ?? 0) - debt.ds[t - 1])
   }
 
   const exitValue = inp.exitCapPct > 0 ? inp.exitYearNoi / inp.exitCapPct : 0
-  const loanPayoff = loanAmount > 0 ? (io ? loanAmount : balanceAfter(loanAmount, inp.loanRatePct, inp.amortYears, hold)) : 0
+  const loanPayoff = debt.exitPayoff
   const netSaleProceeds = exitValue * (1 - inp.sellingCostsPct) - loanPayoff
 
   const lev: DatedFlow[] = [{ date: inp.closeDate, amount: -equity }]
@@ -112,7 +168,8 @@ export function computeReturns(inp: ReturnsInput): AcqResult {
   for (let t = 1; t <= hold; t++) {
     const d = iso(inp.closeDate, t)
     const cap = inp.capitalByYear[t - 1] ?? 0
-    lev.push({ date: d, amount: yearlyOperatingCf[t - 1] + (t === hold ? netSaleProceeds : 0) })
+    // levered flow includes the refi cash-out event (financing distribution to equity)
+    lev.push({ date: d, amount: yearlyOperatingCf[t - 1] + (debt.refiCash[t - 1] ?? 0) + (t === hold ? netSaleProceeds : 0) })
     unlev.push({ date: d, amount: inp.noiByYear[t - 1] - cap + (t === hold ? exitValue * (1 - inp.sellingCostsPct) : 0) })
   }
 
@@ -125,9 +182,8 @@ export function computeReturns(inp: ReturnsInput): AcqResult {
   const dscrByYear: (number | null)[] = []
   const debtYieldByYear: (number | null)[] = []
   for (let t = 1; t <= hold; t++) {
-    dscrByYear.push(annualDs > 0 ? inp.noiByYear[t - 1] / annualDs : null)
-    const bal = loanAmount > 0 ? (io ? loanAmount : balanceAfter(loanAmount, inp.loanRatePct, inp.amortYears, t)) : 0
-    debtYieldByYear.push(bal > 0 ? inp.noiByYear[t - 1] / bal : null)
+    dscrByYear.push(debt.ds[t - 1] > 0 ? inp.noiByYear[t - 1] / debt.ds[t - 1] : null)
+    debtYieldByYear.push(debt.balance[t - 1] > 0 ? inp.noiByYear[t - 1] / debt.balance[t - 1] : null)
   }
   const stabilizedYieldOnCostPct = totalBasis > 0 ? inp.exitYearNoi / totalBasis : 0
 
@@ -158,7 +214,8 @@ export function underwrite(a: AcqAssumptions): AcqResult {
     exitYearNoi: a.inPlaceNoi * Math.pow(1 + g, hold),
     purchasePrice: a.purchasePrice, acqCostsPct: a.acqCostsPct ?? 0.02, capexUpfront: a.capexUpfront ?? 0,
     exitCapPct: a.exitCapPct, sellingCostsPct: a.sellingCostsPct ?? 0.02,
-    ltvPct: a.ltvPct ?? 0, loanRatePct: a.loanRatePct ?? 0, amortYears: a.amortYears ?? 0, closeDate: a.closeDate,
+    ltvPct: a.ltvPct ?? 0, loanRatePct: a.loanRatePct ?? 0, amortYears: a.amortYears ?? 0,
+    ioYears: a.ioYears, loanFeePct: a.loanFeePct, refi: a.refi, closeDate: a.closeDate,
   })
 }
 

@@ -111,6 +111,10 @@ export interface UnderwritingModel {
   ltvPct: number
   loanRatePct: number
   amortYears: number
+  // financing realism (v3.2)
+  ioYears?: number            // interest-only years at the start
+  loanFeePct?: number         // origination fee % of the loan
+  refi?: UwRefi | null        // optional mid-hold cash-out refinance
   // tenant-level (v2) — present when mode === 'tenant'
   mode?: 'simple' | 'tenant'
   glaSf?: number
@@ -118,6 +122,7 @@ export interface UnderwritingModel {
   rollover?: UwRollover
   opex?: UwOpex
 }
+export interface UwRefi { yearsFromClose: number; ltvPct: number; ratePct: number; amortYears: number; ioYears: number; costPct: number; capPct: number }
 export interface UwLeaseLine { name: string; sf: number; baseRentPsf: number; annualBumpPct: number; termRemainingYears: number; recovery: 'nnn' | 'gross' | 'base_year'; proRataSharePct?: number }
 export interface UwRollover { renewalProbPct: number; marketRentPsf: number; marketRentGrowthPct: number; downtimeMonths: number; tiNewPsf: number; tiRenewPsf: number; lcNewPsf: number; lcRenewPsf: number; freeRentMonthsNew: number; releaseTermYears?: number }
 export interface UwOpex { recoverableOpexPsf: number; nonRecoverableOpexPsf: number; opexGrowthPct: number; generalVacancyPct: number; creditLossPct: number; capitalReservePsf: number; otherIncomePsf?: number }

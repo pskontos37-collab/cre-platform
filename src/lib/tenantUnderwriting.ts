@@ -19,7 +19,7 @@
 // monthly granularity, multiple re-rollovers within one hold. Sanity-check against
 // ARGUS before relying for a bid.
 
-import { computeReturns, type AcqResult } from './acqUnderwriting'
+import { computeReturns, type AcqResult, type RefinanceTerms } from './acqUnderwriting'
 
 export type RecoveryType = 'nnn' | 'gross' | 'base_year'
 
@@ -67,6 +67,9 @@ export interface TenantModelAssumptions {
   ltvPct: number
   loanRatePct: number
   amortYears: number
+  ioYears?: number
+  loanFeePct?: number
+  refi?: RefinanceTerms | null
   closeDate: string
   leases: LeaseLine[]
   rollover: RolloverAssumptions
@@ -159,7 +162,8 @@ export function underwriteTenant(m: TenantModelAssumptions): TenantUnderwriteRes
     noiByYear, capitalByYear, exitYearNoi,
     purchasePrice: m.purchasePrice, acqCostsPct: m.acqCostsPct, capexUpfront: m.capexUpfront,
     exitCapPct: m.exitCapPct, sellingCostsPct: m.sellingCostsPct,
-    ltvPct: m.ltvPct, loanRatePct: m.loanRatePct, amortYears: m.amortYears, closeDate: m.closeDate,
+    ltvPct: m.ltvPct, loanRatePct: m.loanRatePct, amortYears: m.amortYears,
+    ioYears: m.ioYears, loanFeePct: m.loanFeePct, refi: m.refi, closeDate: m.closeDate,
   })
   return { ...base, breakdown }
 }

@@ -23,7 +23,7 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { PdfDownloadButton, sanitizeFilename } from '../reports/PdfDownloadButton'
 import { underwrite, sensitivity, type AcqResult } from '../lib/acqUnderwriting'
 import { underwriteTenant } from '../lib/tenantUnderwriting'
-import type { UwLeaseLine, UwRollover, UwOpex } from '../hooks/usePipeline'
+import type { UwLeaseLine, UwRollover, UwOpex, UwRefi } from '../hooks/usePipeline'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
 // Analytics (funnel · investment-profile matrix · geo · partners), OM Intake
@@ -1060,6 +1060,32 @@ function UwSensitivity({ exitCaps, rows, irr, baseCol, baseRow }: { exitCaps: nu
     </div>
   )
 }
+const D_REFI: UwRefi = { yearsFromClose: 3, ltvPct: 0.65, ratePct: 0.065, amortYears: 30, ioYears: 0, costPct: 0.01, capPct: 0.065 }
+// Optional mid-hold cash-out refinance editor (shared by both underwriting modes).
+function UwRefiEditor({ refi, onChange, busy }: { refi: UwRefi | null; onChange: (r: UwRefi | null) => void; busy: boolean }) {
+  const on = !!refi
+  const r = refi ?? D_REFI
+  const set = (k: keyof UwRefi) => (v: number) => onChange({ ...r, [k]: v })
+  return (
+    <div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', marginBottom: on ? 8 : 0 }}>
+        <input type="checkbox" checked={on} disabled={busy} onChange={e => onChange(e.target.checked ? { ...D_REFI } : null)} />
+        <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Cash-out refinance{on ? '' : ' (off)'}</span>
+      </label>
+      {on && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
+          <MInput label="Refi year" kind="yr" value={r.yearsFromClose} onChange={set('yearsFromClose')} disabled={busy} />
+          <MInput label="Refi LTV" kind="pct" value={r.ltvPct} onChange={set('ltvPct')} disabled={busy} />
+          <MInput label="Refi cap (value)" kind="pct" value={r.capPct} onChange={set('capPct')} disabled={busy} />
+          <MInput label="Refi rate" kind="pct" value={r.ratePct} onChange={set('ratePct')} disabled={busy} />
+          <MInput label="Refi amort" kind="yr" value={r.amortYears} onChange={set('amortYears')} disabled={busy} />
+          <MInput label="Refi IO (yrs)" kind="yr" value={r.ioYears} onChange={set('ioYears')} disabled={busy} />
+          <MInput label="Refi cost" kind="pct" value={r.costPct} onChange={set('costPct')} disabled={busy} />
+        </div>
+      )}
+    </div>
+  )
+}
 function UwSaveBar({ busy, saved, onSave }: { busy: boolean; saved: boolean; onSave: () => void }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1079,12 +1105,13 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     noiGrowthPct: um?.noiGrowthPct ?? 0.03, holdYears: um?.holdYears ?? deal.holdYears ?? 5,
     exitCapPct: um?.exitCapPct ?? deal.exitCap ?? deal.goingInCap ?? 0.065, sellingCostsPct: um?.sellingCostsPct ?? 0.02,
     ltvPct: um?.ltvPct ?? 0.6, loanRatePct: um?.loanRatePct ?? 0.065, amortYears: um?.amortYears ?? 30,
+    ioYears: um?.ioYears ?? 0, loanFeePct: um?.loanFeePct ?? 0, refi: um?.refi ?? null,
   }
   const [m, setM] = useState<UnderwritingModel>(seed)
   const [saved, setSaved] = useState(false)
   const set = (k: keyof UnderwritingModel) => (v: number) => { setM(p => ({ ...p, [k]: v })); setSaved(false) }
   const today = new Date().toISOString().slice(0, 10)
-  const r = useMemo(() => underwrite({ ...m, closeDate: today }), [m, today])
+  const r = useMemo(() => underwrite({ ...m, closeDate: today, refi: m.refi }), [m, today])
   const exitCaps = useMemo(() => [-0.005, -0.0025, 0, 0.0025, 0.005].map(d => +(m.exitCapPct + d).toFixed(4)).filter(x => x > 0), [m.exitCapPct])
   const growths = useMemo(() => [-0.01, 0, 0.01, 0.02].map(d => +(m.noiGrowthPct + d).toFixed(4)).filter(x => x >= 0), [m.noiGrowthPct])
   const grid = useMemo(() => sensitivity({ ...m, closeDate: today }, exitCaps, growths), [m, today, exitCaps, growths])
@@ -1114,8 +1141,11 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
           <MInput label="LTV" kind="pct" value={m.ltvPct} onChange={set('ltvPct')} disabled={busy} />
           <MInput label="Loan rate" kind="pct" value={m.loanRatePct} onChange={set('loanRatePct')} disabled={busy} />
           <MInput label="Amort (0 = IO)" kind="yr" value={m.amortYears} onChange={set('amortYears')} disabled={busy} />
+          <MInput label="IO years" kind="yr" value={m.ioYears ?? 0} onChange={set('ioYears')} disabled={busy} />
+          <MInput label="Loan fee" kind="pct" value={m.loanFeePct ?? 0} onChange={set('loanFeePct')} disabled={busy} />
         </div>
       </div>
+      <UwRefiEditor refi={m.refi ?? null} onChange={refi => { setM(p => ({ ...p, refi })); setSaved(false) }} busy={busy} />
       <div>
         <SectionLabel2>Levered IRR — exit cap (cols) &times; NOI growth (rows)</SectionLabel2>
         <UwSensitivity exitCaps={exitCaps} rows={growths} irr={grid.leveredIrr} baseCol={m.exitCapPct} baseRow={m.noiGrowthPct} />
@@ -1135,6 +1165,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     inPlaceNoi: 0, noiGrowthPct: 0.03, holdYears: um?.holdYears ?? deal.holdYears ?? 5,
     exitCapPct: um?.exitCapPct ?? deal.exitCap ?? deal.goingInCap ?? 0.065, sellingCostsPct: um?.sellingCostsPct ?? 0.02,
     ltvPct: um?.ltvPct ?? 0.6, loanRatePct: um?.loanRatePct ?? 0.065, amortYears: um?.amortYears ?? 30,
+    ioYears: um?.ioYears ?? 0, loanFeePct: um?.loanFeePct ?? 0, refi: um?.refi ?? null,
     mode: 'tenant', glaSf: um?.glaSf ?? deal.glaSf ?? 0,
     leases: um?.leases ?? [], rollover: { ...D_ROLL, ...(um?.rollover ?? {}) }, opex: { ...D_OPEX, ...(um?.opex ?? {}) },
   }
@@ -1154,7 +1185,8 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
   const model = {
     glaSf: m.glaSf ?? 0, purchasePrice: m.purchasePrice, acqCostsPct: m.acqCostsPct, capexUpfront: m.capexUpfront,
     holdYears: m.holdYears, exitCapPct: m.exitCapPct, sellingCostsPct: m.sellingCostsPct,
-    ltvPct: m.ltvPct, loanRatePct: m.loanRatePct, amortYears: m.amortYears, closeDate: today,
+    ltvPct: m.ltvPct, loanRatePct: m.loanRatePct, amortYears: m.amortYears,
+    ioYears: m.ioYears, loanFeePct: m.loanFeePct, refi: m.refi, closeDate: today,
     leases: leases as any, rollover: roll as any, opex: opex as any,
   }
   const r = useMemo(() => underwriteTenant(model), [m, today])
@@ -1264,8 +1296,12 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
           <MInput label="LTV" kind="pct" value={m.ltvPct} onChange={setF('ltvPct')} disabled={busy} />
           <MInput label="Loan rate" kind="pct" value={m.loanRatePct} onChange={setF('loanRatePct')} disabled={busy} />
           <MInput label="Amort (0 = IO)" kind="yr" value={m.amortYears} onChange={setF('amortYears')} disabled={busy} />
+          <MInput label="IO years" kind="yr" value={m.ioYears ?? 0} onChange={setF('ioYears')} disabled={busy} />
+          <MInput label="Loan fee" kind="pct" value={m.loanFeePct ?? 0} onChange={setF('loanFeePct')} disabled={busy} />
         </div>
       </div>
+
+      <UwRefiEditor refi={m.refi ?? null} onChange={refi => { setM(p => ({ ...p, refi })); setSaved(false) }} busy={busy} />
 
       <div>
         <SectionLabel2>Levered IRR — exit cap (cols) &times; market-rent growth (rows)</SectionLabel2>
