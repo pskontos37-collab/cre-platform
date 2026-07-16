@@ -12,13 +12,18 @@ interface AbstractRowLite {
 
 type Scope = 'tenant' | 'property' | 'choose' | 'all'
 type Format = 'full' | 'matrix'
+type Output = 'pdf' | 'excel'
 
-// Client-side full-pack render degrades superlinearly with size; keep it snappy.
-// Larger scopes are steered to the (lightweight) Clause Matrix.
-const FULL_CAP = 50
+// Client-side full-pack PDF render is heavy (batched @react-pdf + pdf-lib merge,
+// all on the main thread). The cap covers the full portfolio (~100 abstracts) with
+// headroom; beyond SLOW_HINT tenants we warn that generation takes a while.
+// Excel output is rows-only and has no cap.
+const FULL_CAP = 150
+const SLOW_HINT = 50
 
 // Export toolbar for the Abstracts page. Scope (this tenant / this property /
-// chosen properties / all properties) × format (full pack / clause matrix).
+// chosen properties / all properties) × format (full pack / clause matrix)
+// × output (polished PDF / Excel workbook).
 // Current-property rows come from the page; other scopes fetch on click. The
 // "Choose properties" picker only lists properties that actually have abstracts.
 export function AbstractsExportBar({ properties, propertyId, propertyName, selectedTenant, currentAbstracts }: {
@@ -30,6 +35,7 @@ export function AbstractsExportBar({ properties, propertyId, propertyName, selec
 }) {
   const [scope, setScope] = useState<Scope>('property')
   const [format, setFormat] = useState<Format>('full')
+  const [output, setOutput] = useState<Output>('pdf')
   const [chosen, setChosen] = useState<Set<string>>(new Set())
   const [pickerOpen, setPickerOpen] = useState(false)
   const [counts, setCounts] = useState<Record<string, number> | null>(null)
@@ -111,20 +117,25 @@ export function AbstractsExportBar({ properties, propertyId, propertyName, selec
       : scope === 'property' ? propertyName
         : scope === 'choose' ? (chosen.size === 1 ? (nameById[[...chosen][0]] ?? 'property') : `${chosen.size}-Properties`)
           : 'All-Properties'
-  const filename = `${format === 'matrix' ? 'Wilkow-Clause-Matrix' : 'Wilkow-Abstracts'}-${sanitizeFilename(scopeName)}.pdf`
+  const filename = `${format === 'matrix' ? 'Wilkow-Clause-Matrix' : 'Wilkow-Abstracts'}-${sanitizeFilename(scopeName)}.${output === 'excel' ? 'xlsx' : 'pdf'}`
 
-  // Count known before click for property/choose scopes; enforce the full-pack cap.
+  // Count known before click; enforce the full-pack cap. PDF only — the Excel
+  // workbook is one row per tenant, so any scope is fine. For 'all' the count
+  // comes from the per-property tally (Infinity until it loads, so the button
+  // can't fire on an unknown-size pack).
   const knownFullCount =
     scope === 'property' ? withAbstract.length
       : scope === 'choose' ? chosenCount
-        : scope === 'all' ? Infinity
+        : scope === 'all' ? (counts ? Object.values(counts).reduce((s, n) => s + n, 0) : Infinity)
           : 0
   const blockReason =
-    format === 'full' && scope === 'all'
-      ? 'Full pack isn’t practical for all properties (100s of pages) — use Clause matrix'
-      : format === 'full' && (scope === 'property' || scope === 'choose') && knownFullCount > FULL_CAP
-        ? `Full pack is limited to ${FULL_CAP} tenants (${knownFullCount} selected) — use Clause matrix or fewer properties`
-        : null
+    output === 'pdf' && format === 'full' && knownFullCount > FULL_CAP
+      ? `Full-pack PDF is limited to ${FULL_CAP} tenants (${knownFullCount === Infinity ? 'counting…' : knownFullCount} selected) — use Clause matrix, Excel, or fewer properties`
+      : null
+  const slowHint =
+    !blockReason && output === 'pdf' && format === 'full' && knownFullCount > SLOW_HINT && knownFullCount !== Infinity
+      ? `Large pack (${knownFullCount} tenants) — generation can take a few minutes; keep this tab open`
+      : null
 
   const disabled =
     (scope === 'tenant' && !selectedHasAbstract) ||
@@ -135,9 +146,10 @@ export function AbstractsExportBar({ properties, propertyId, propertyName, selec
   async function build(): Promise<Blob> {
     const docs = await gatherDocs()
     if (docs.length === 0) throw new Error('No abstracts in the selected scope')
-    if (format === 'full' && docs.length > FULL_CAP) {
-      throw new Error(`Full pack is limited to ${FULL_CAP} tenants (${docs.length} selected). Use the Clause matrix, or pick fewer properties.`)
+    if (output === 'pdf' && format === 'full' && docs.length > FULL_CAP) {
+      throw new Error(`Full-pack PDF is limited to ${FULL_CAP} tenants (${docs.length} selected). Use the Clause matrix, Excel, or fewer properties.`)
     }
+
     const propCount = new Set(docs.map(d => d.propertyName)).size
     const multiProperty = propCount > 1
     const gen = generatedAt()
@@ -148,6 +160,17 @@ export function AbstractsExportBar({ properties, propertyId, propertyName, selec
           : scope === 'choose' ? (chosen.size === 1 ? (nameById[[...chosen][0]] ?? 'Selected') : `${chosen.size} Properties`)
             : 'All Properties'
     const countLabel = `${docs.length} ${docs.length === 1 ? 'abstract' : 'abstracts'}${multiProperty ? ` across ${propCount} properties` : ''}`
+
+    if (output === 'excel') {
+      const { buildClauseMatrixXlsx, buildAbstractsXlsx } = await import('./abstractsExcel')
+      const input = {
+        title: format === 'matrix' ? `Clause Matrix — ${scopeTitle}` : `Lease Abstracts — ${scopeTitle}`,
+        subtitle: format === 'matrix' ? `${countLabel} · key-clause comparison` : countLabel,
+        docs,
+        generatedAt: gen,
+      }
+      return format === 'matrix' ? buildClauseMatrixXlsx(input) : buildAbstractsXlsx(input)
+    }
 
     if (format === 'matrix') {
       const { buildClauseMatrixPdf } = await import('./ClauseMatrixReport')
@@ -181,6 +204,9 @@ export function AbstractsExportBar({ properties, propertyId, propertyName, selec
     <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
       {blockReason && (
         <span style={{ fontSize: 11, color: 'var(--amber)', maxWidth: 320, textAlign: 'right', lineHeight: 1.3 }}>{blockReason}</span>
+      )}
+      {slowHint && (
+        <span style={{ fontSize: 11, color: 'var(--text-faint)', maxWidth: 320, textAlign: 'right', lineHeight: 1.3 }}>{slowHint}</span>
       )}
 
       <select value={scope} onChange={e => { setScope(e.target.value as Scope); setPickerOpen(e.target.value === 'choose') }} style={sel} title="What to include">
@@ -234,12 +260,18 @@ export function AbstractsExportBar({ properties, propertyId, propertyName, selec
         <option value="matrix">Clause matrix</option>
       </select>
 
+      <select value={output} onChange={e => setOutput(e.target.value as Output)} style={sel} title="Output file type">
+        <option value="pdf">Polished PDF</option>
+        <option value="excel">Excel (.xlsx)</option>
+      </select>
+
       <PdfDownloadButton
-        label="⬇ PDF"
+        label={output === 'excel' ? '⬇ Excel' : '⬇ PDF'}
+        busyLabel={output === 'excel' ? 'Generating Excel…' : undefined}
         filename={filename}
         build={build}
         disabled={disabled}
-        title={blockReason ?? (disabled ? 'Nothing selected to export' : 'Download the selected abstracts as a branded PDF')}
+        title={blockReason ?? (disabled ? 'Nothing selected to export' : output === 'excel' ? 'Download the selected abstracts as an Excel workbook' : 'Download the selected abstracts as a branded PDF')}
       />
     </span>
   )
