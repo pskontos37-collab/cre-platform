@@ -193,6 +193,16 @@ export function FinancialsPage() {
         />
       </div>
 
+      {/* Expense reconciliations — CAM / INS / RET true-ups. Shows only a short
+          preview until expanded. */}
+      <div style={{ marginTop: 16 }}>
+        <CAMReconWidget
+          propertyIds={propertyId ? [propertyId] : []}
+          propertyNames={propertyNames}
+          previewCount={5}
+        />
+      </div>
+
       {/* Recent documents — most recently modified corpus docs for this property,
           so you don't have to jump to the Documents panel. */}
       <div style={{ marginTop: 16 }}>
@@ -202,16 +212,6 @@ export function FinancialsPage() {
           error={recentDocs.error}
           window={docWindow}
           onWindowChange={setDocWindow}
-        />
-      </div>
-
-      {/* Expense reconciliations — CAM / INS / RET true-ups. Rarely referenced,
-          so it lives at the bottom and shows only a short preview until expanded. */}
-      <div style={{ marginTop: 16 }}>
-        <CAMReconWidget
-          propertyIds={propertyId ? [propertyId] : []}
-          propertyNames={propertyNames}
-          previewCount={5}
         />
       </div>
     </div>
