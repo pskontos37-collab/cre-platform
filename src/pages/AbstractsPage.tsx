@@ -61,6 +61,40 @@ function useAbstracts(propertyId: string | null, bump: number) {
   }, [propertyId, bump])
 }
 
+// Active (non-archived) resolutions for the given abstracts, so the worklist can
+// mark items resolved. Keyed on the id set so switching property refetches.
+function useResolutions(abstractIds: string[], bump: number) {
+  const key = abstractIds.slice().sort().join(',')
+  return useQuery<Resolution[]>(async () => {
+    if (!abstractIds.length) return []
+    const { data, error } = await supabase.from('abstract_item_resolutions')
+      .select('id, abstract_id, item_key, kind, status, note, task_id, resolved_by, resolved_at, archived')
+      .in('abstract_id', abstractIds).eq('archived', false)
+    if (error) throw new Error(error.message)
+    return (data ?? []) as Resolution[]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, bump])
+}
+
+// Per-tenant count of UNRESOLVED red (discrepancy/confirm) open items for the
+// property, from the portfolio view — powers the tenant-list attention badge.
+function useUnresolvedRed(propertyId: string | null, bump: number) {
+  return useQuery<Record<string, number>>(async () => {
+    if (!propertyId) return {}
+    const { data, error } = await supabase.from('v_abstract_open_items')
+      .select('tenant_name, severity, resolved').eq('property_id', propertyId)
+    if (error) throw new Error(error.message)
+    const out: Record<string, number> = {}
+    for (const r of (data ?? []) as any[]) {
+      if (!r.resolved && (r.severity === 'discrepancy' || r.severity === 'confirm')) {
+        const k = (r.tenant_name || '').toLowerCase()
+        out[k] = (out[k] ?? 0) + 1
+      }
+    }
+    return out
+  }, [propertyId, bump])
+}
+
 // Clause-matrix choices: label + path into the abstract JSON.
 // Exported: the portfolio-wide /clauses page reuses the same definitions.
 export const CLAUSES: Array<{ key: string; label: string; render: (a: any) => string }> = [
@@ -96,6 +130,16 @@ export function AbstractsPage() {
   const [bump, setBump] = useState(0)
   const tenants = useTenantsForProperty(propertyId)
   const abstracts = useAbstracts(propertyId, bump)
+  const abstractIds = useMemo(() => (abstracts.data ?? []).map(a => a.id), [abstracts.data])
+  const resolutions = useResolutions(abstractIds, bump)
+  const unresolvedRed = useUnresolvedRed(propertyId, bump)
+  const resByAbstract = useMemo(() => {
+    const m = new Map<string, Resolution[]>()
+    for (const r of resolutions.data ?? []) {
+      const arr = m.get(r.abstract_id); if (arr) arr.push(r); else m.set(r.abstract_id, [r])
+    }
+    return m
+  }, [resolutions.data])
   const [selected, setSelected] = useState<string | null>(null)
   const [generating, setGenerating] = useState<Set<string>>(new Set())
   // Per-tenant progress detail during the two-stage generate (briefing N/M → synthesizing).
@@ -298,7 +342,14 @@ export function AbstractsPage() {
                       : verifying.has(t)
                         ? <span style={{ fontSize: 10, color: 'var(--amber)' }}>verifying…</span>
                         : a
-                          ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{a.locked && <span title="Human-verified & locked" style={{ fontSize: 10 }}>🔒</span>}<QaBadge status={a.qa_status} /></span>
+                          ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              {(unresolvedRed.data?.[t.toLowerCase()] ?? 0) > 0 && (
+                                <span title={`${unresolvedRed.data?.[t.toLowerCase()]} unresolved discrepancy/confirm item(s)`}
+                                  style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10, color: 'var(--red, #ef4444)', background: 'rgba(239,68,68,0.12)' }}>
+                                  {unresolvedRed.data?.[t.toLowerCase()]}
+                                </span>
+                              )}
+                              {a.locked && <span title="Human-verified & locked" style={{ fontSize: 10 }}>🔒</span>}<QaBadge status={a.qa_status} /></span>
                           : <button onClick={e => { e.stopPropagation(); void generate(t) }}
                               style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                               Generate
@@ -328,7 +379,8 @@ export function AbstractsPage() {
             {selectedAbstract && <AbstractView row={selectedAbstract}
               onRegenerate={() => void generate(selectedAbstract.tenant_name)} busy={generating.has(selectedAbstract.tenant_name)}
               onVerify={() => void verify(selectedAbstract.tenant_name)} verifying={verifying.has(selectedAbstract.tenant_name)}
-              onSaved={() => setBump(b => b + 1)} reviewerId={appUser?.id} />}
+              onSaved={() => setBump(b => b + 1)} reviewerId={appUser?.id}
+              resolutions={resByAbstract.get(selectedAbstract.id) ?? []} propertyId={propertyId} />}
           </div>
         </div>
       ) : (
@@ -526,9 +578,9 @@ const fmtMoney = (n: number | null | undefined) =>
   n == null ? '—' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 
 // Exported: the /diligence DD workspace renders the same abstract view.
-export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onSaved, reviewerId }: {
+export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onSaved, reviewerId, resolutions, propertyId }: {
   row: AbstractRow; onRegenerate: () => void; busy: boolean; onVerify: () => void; verifying: boolean
-  onSaved: () => void; reviewerId?: string
+  onSaved: () => void; reviewerId?: string; resolutions?: Resolution[]; propertyId?: string | null
 }) {
   // Display/export the human-corrected values layered over the AI abstract.
   const a = applyOverrides(row.abstract, row.overrides) ?? {}
@@ -543,6 +595,11 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
       const hay = `${p.field ?? ''} ${p.text}`.toLowerCase()
       return keywords.some(k => hay.includes(k.toLowerCase()))
     }).map(p => p.n)
+  // Resolution state: key → resolution, and the worklist that drives the top box.
+  const resByKey = new Map<string, Resolution>()
+  for (const r of resolutions ?? []) resByKey.set(r.item_key, r)
+  const worklist = buildWorklist(openItems, row.qa, a)
+  const unresolvedRedCount = worklist.filter(w => w.red && !resByKey.has(w.key)).length
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -565,11 +622,11 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
         </div>
       </div>
 
-      <TriagePanel qa={row.qa} openItems={openItems} />
+      <ResolutionWorklist row={row} worklist={worklist} resByKey={resByKey} reviewerId={reviewerId} propertyId={propertyId ?? null} onSaved={onSaved} />
 
-      <ReviewPanel row={row} onSaved={onSaved} reviewerId={reviewerId} />
+      <ReviewPanel row={row} onSaved={onSaved} reviewerId={reviewerId} unresolvedRedCount={unresolvedRedCount} />
 
-      {row.qa && <div id="abstract-verification"><QaPanel qa={row.qa} status={row.qa_status} at={row.qa_at} sourceDocIds={row.source_doc_ids ?? []} /></div>}
+      {row.qa && <div id="abstract-verification"><QaPanel qa={row.qa} status={row.qa_status} at={row.qa_at} sourceDocIds={row.source_doc_ids ?? []} resByKey={resByKey} /></div>}
 
       <div id="abstract-source-docs"><SourceDocsPanel docIds={srcIds} /></div>
 
@@ -726,7 +783,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
         </Widget>
       )}
 
-      {openItems.length > 0 && <OpenItemsPanel items={openItems} sourceDocIds={srcIds} />}
+      {openItems.length > 0 && <OpenItemsPanel items={openItems} sourceDocIds={srcIds} resByKey={resByKey} />}
     </div>
   )
 }
@@ -825,6 +882,62 @@ function OpenItemsJump() {
   )
 }
 
+// ── Item resolution (migration 20240105) ────────────────────────────────────
+// A resolution attaches to a STABLE item_key so it survives regeneration. The
+// key derivation MUST stay identical to the SQL in migration 20240105 /
+// v_abstract_open_items, or the portfolio view and the client will disagree.
+interface Resolution {
+  id: string; abstract_id: string; item_key: string; kind: string
+  status: 'corrected' | 'accepted' | 'waived' | 'needs_doc'
+  note: string | null; task_id: string | null; resolved_by: string | null; resolved_at: string; archived: boolean
+}
+type ResStatus = Resolution['status']
+const RES_META: Record<ResStatus, { label: string; color: string }> = {
+  corrected: { label: 'Corrected',    color: 'var(--green, #22c55e)' },
+  accepted:  { label: 'Accepted',     color: 'var(--green, #22c55e)' },
+  waived:    { label: 'Waived / N/A', color: 'var(--text-muted)' },
+  needs_doc: { label: 'Needs document', color: 'var(--amber)' },
+}
+// collapse whitespace → trim → lowercase → first 120 chars (mirrors the SQL).
+const normalizeKeyText = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 120)
+const keyForOpenItem = (p: ParsedOpenItem) => p.field ? `field:${p.field.toLowerCase()}` : `text:${normalizeKeyText(p.text)}`
+const keyForField = (field: string) => `field:${String(field ?? '').toLowerCase()}`
+
+async function upsertResolution(abstractId: string, itemKey: string, kind: 'open_item' | 'qa_check',
+  status: ResStatus, note: string | null, resolvedBy?: string, taskId?: string | null) {
+  const { error } = await supabase.from('abstract_item_resolutions').upsert({
+    abstract_id: abstractId, item_key: itemKey, kind, status, note: note || null,
+    task_id: taskId ?? null, resolved_by: resolvedBy ?? null,
+    resolved_at: new Date().toISOString(), updated_at: new Date().toISOString(), archived: false,
+  }, { onConflict: 'abstract_id,item_key' })
+  if (error) throw new Error(error.message)
+}
+async function clearResolution(abstractId: string, itemKey: string) {
+  const { error } = await supabase.from('abstract_item_resolutions').delete()
+    .eq('abstract_id', abstractId).eq('item_key', itemKey)
+  if (error) throw new Error(error.message)
+}
+// A "Correct" writes the human value into the abstract's override map (dotted
+// path → value), the same layer ReviewPanel and applyOverrides use.
+async function saveFieldOverride(row: AbstractRow, path: string, value: any, reviewerId?: string) {
+  const overrides = { ...(row.overrides ?? {}) }
+  overrides[path] = value
+  const { error } = await supabase.from('lease_abstracts').update({
+    overrides, reviewed_by: reviewerId ?? null,
+    reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).eq('id', row.id)
+  if (error) throw new Error(error.message)
+}
+// "Needs document" spins off a tracked /tasks item and returns its id to link.
+async function createDocTask(title: string, details: string | null, propertyId: string | null, createdBy: string): Promise<string | null> {
+  const { data, error } = await supabase.from('tasks').insert({
+    title: title.slice(0, 200), details: details || null, priority: 'normal',
+    property_id: propertyId || null, created_by: createdBy,
+  }).select('id').single()
+  if (error) throw new Error(error.message)
+  return data?.id ?? null
+}
+
 // Open a document's signed PDF in a new tab.
 async function openDocPdf(storagePath: string | null) {
   if (!storagePath) return
@@ -912,7 +1025,7 @@ function SourceDocsPanel({ docIds }: { docIds: string[] }) {
 // Open items, color-graded by severity (discrepancies first, then confirms, then
 // informational gaps) and numbered so the section footnotes above can point here.
 // A verbatim quote inside an item gets a click-to-source link.
-function OpenItemsPanel({ items, sourceDocIds }: { items: ParsedOpenItem[]; sourceDocIds: string[] }) {
+function OpenItemsPanel({ items, sourceDocIds, resByKey }: { items: ParsedOpenItem[]; sourceDocIds: string[]; resByKey?: Map<string, Resolution> }) {
   const order: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
   const sorted = [...items].sort((a, b) => order[a.severity] - order[b.severity])
   const counts = { discrepancy: 0, confirm: 0, info: 0 } as Record<OpenSeverity, number>
@@ -929,16 +1042,18 @@ function OpenItemsPanel({ items, sourceDocIds }: { items: ParsedOpenItem[]; sour
           {sorted.map(p => {
             const m = OPEN_META[p.severity]
             const q = quotedFragment(p.text)
+            const res = resByKey?.get(keyForOpenItem(p))
             return (
               <div key={p.n} id={`open-item-${p.n}`}
-                style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '6px 8px', borderRadius: 6, background: m.bg }}>
+                style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '6px 8px', borderRadius: 6, background: res ? 'transparent' : m.bg, opacity: res ? 0.6 : 1 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: m.color, minWidth: 16 }}>{p.n}.</span>
                 <span style={{ fontSize: 11, color: m.color }} title={m.label}>{m.icon}</span>
-                <span style={{ fontSize: 12, color: p.severity !== 'info' ? 'var(--text)' : 'var(--text-muted)', flex: 1, lineHeight: 1.45, fontWeight: p.severity === 'discrepancy' ? 600 : p.severity === 'confirm' ? 500 : 400 }}>
+                <span style={{ fontSize: 12, color: p.severity !== 'info' ? 'var(--text)' : 'var(--text-muted)', flex: 1, lineHeight: 1.45, fontWeight: p.severity === 'discrepancy' ? 600 : p.severity === 'confirm' ? 500 : 400, textDecoration: res ? 'line-through' : 'none' }}>
                   {p.field && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 6 }}>{p.field}</span>}
                   {p.text}
-                  {q && <SourceLink quote={q} citation={p.field ?? ''} sourceDocIds={sourceDocIds} />}
+                  {q && !res && <SourceLink quote={q} citation={p.field ?? ''} sourceDocIds={sourceDocIds} />}
                 </span>
+                {res && <span style={{ fontSize: 9, fontWeight: 700, color: RES_META[res.status].color, whiteSpace: 'nowrap' }}>{RES_META[res.status].label}</span>}
               </div>
             )
           })}
@@ -948,37 +1063,196 @@ function OpenItemsPanel({ items, sourceDocIds }: { items: ParsedOpenItem[]; sour
   )
 }
 
-// "Needs a human" triage: one always-open box at the top consolidating every
-// signal a reviewer must resolve — QA field flags, arithmetic failures, MRI
-// conflicts, and discrepancy/confirm open items — each linking down to its
-// detail. Renders nothing on a clean abstract.
-function TriagePanel({ qa, openItems }: { qa: any; openItems: ParsedOpenItem[] }) {
-  const checks: any[] = Array.isArray(qa?.field_checks) ? qa.field_checks : []
-  const flagged = checks.filter(c => c?.verdict && c.verdict !== 'confirmed')
-  const arith: any[] = (Array.isArray(qa?.arithmetic) ? qa.arithmetic : []).filter((a: any) => a?.ok === false)
-  const mri: any[] = Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : []
-  const oiAction = openItems.filter(p => p.severity !== 'info')
-  const total = flagged.length + arith.length + mri.length + oiAction.length
-  if (!total) return null
-  const Row = ({ color, tag, text, id }: { color: string; tag: string; text: string; id: string }) => (
-    <a href={`#${id}`} onClick={e => scrollToId(e, id)}
-      style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '5px 8px', borderRadius: 6, textDecoration: 'none' }}>
-      <span style={{ fontSize: 10, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: 78, whiteSpace: 'nowrap' }}>{tag}</span>
-      <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
-      <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>→</span>
-    </a>
-  )
+// A work item = one thing to resolve, keyed by its stable item_key so the
+// generator's open item and the verifier's check about the SAME field collapse
+// into ONE row (resolving it clears both — the single passthrough). Arithmetic
+// failures have no stable field, so they show but aren't individually
+// resolvable (they clear on re-verify once the underlying values are fixed).
+interface WorkItem {
+  key: string
+  resolvable: boolean
+  kind: 'open_item' | 'qa_check'
+  field: string | null
+  red: boolean               // counts toward the soft lock gate
+  severity: OpenSeverity
+  correctable: boolean       // field points at a scalar we can override inline
+  currentValue: string
+  sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith'; text: string; jumpId: string }>
+}
+const ORIGIN_LABEL: Record<string, string> = { open: 'Open item', verify: 'Verify', mri: 'MRI', arith: 'Arithmetic' }
+function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any): WorkItem[] {
+  const map = new Map<string, WorkItem>()
+  const rank: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
+  const ensure = (key: string, field: string | null, kind: 'open_item' | 'qa_check', severity: OpenSeverity, red: boolean) => {
+    let w = map.get(key)
+    if (!w) {
+      const v = field ? getPath(effective, field) : undefined
+      w = { key, resolvable: true, kind, field, red, severity,
+        correctable: !!field && (v == null || typeof v !== 'object'),
+        currentValue: v == null ? '' : String(v), sources: [] }
+      map.set(key, w)
+    } else {
+      if (red) w.red = true
+      if (rank[severity] < rank[w.severity]) w.severity = severity
+    }
+    return w
+  }
+  for (const p of openItems) {
+    ensure(keyForOpenItem(p), p.field, 'open_item', p.severity, p.severity !== 'info')
+      .sources.push({ origin: 'open', text: `${p.field ? `${p.field}: ` : ''}${p.text}`, jumpId: `open-item-${p.n}` })
+  }
+  for (const c of (Array.isArray(qa?.field_checks) ? qa.field_checks : [])) {
+    if (!c?.verdict || c.verdict === 'confirmed' || !c.field) continue
+    ensure(keyForField(c.field), c.field, 'qa_check', 'discrepancy', true)
+      .sources.push({ origin: 'verify', text: `${VERDICT_META[c.verdict]?.label ?? c.verdict}: ${c.field}${c.note ? ` — ${c.note}` : ''}`, jumpId: 'abstract-verification' })
+  }
+  for (const m of (Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : [])) {
+    if (!m?.field) continue
+    ensure(keyForField(m.field), m.field, 'qa_check', 'discrepancy', true)
+      .sources.push({ origin: 'mri', text: `${m.field} — abstract ${String(m.abstract_value ?? '—')} vs MRI ${String(m.mri_value ?? '—')}${m.note ? ` — ${m.note}` : ''}`, jumpId: 'abstract-verification' })
+  }
+  ;(Array.isArray(qa?.arithmetic) ? qa.arithmetic : []).filter((x: any) => x?.ok === false).forEach((x: any, i: number) => {
+    const w = ensure(`arith:${i}`, null, 'qa_check', 'discrepancy', true)
+    w.resolvable = false
+    w.sources.push({ origin: 'arith', text: `${x.check}${x.detail ? ` — ${x.detail}` : ''}`, jumpId: 'abstract-verification' })
+  })
+  return [...map.values()].sort((a, b) => rank[a.severity] - rank[b.severity])
+}
+
+const VERB_BTN: React.CSSProperties = { fontSize: 10, fontWeight: 600, padding: '2px 9px', borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)', cursor: 'pointer', whiteSpace: 'nowrap' }
+const RES_INPUT: React.CSSProperties = { width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 5, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' }
+
+// One worklist row: either the resolved view (status + note + undo) or the
+// source line(s) + the four resolution verbs with an inline form.
+function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved }: {
+  row: AbstractRow; w: WorkItem; resolution?: Resolution
+  reviewerId?: string; propertyId: string | null; onSaved: () => void
+}) {
+  const [mode, setMode] = useState<null | ResStatus>(null)
+  const [note, setNote] = useState('')
+  const [val, setVal] = useState(w.currentValue)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const color = w.red ? OPEN_META[w.severity].color : 'var(--text-muted)'
+
+  if (resolution) {
+    const meta = RES_META[resolution.status]
+    return (
+      <div style={{ padding: '5px 8px', display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: meta.color, minWidth: 96, whiteSpace: 'nowrap' }}>{meta.label}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-faint)', flex: 1, textDecoration: 'line-through' }}>{w.sources[0]?.text}</span>
+        {resolution.note && <span style={{ fontSize: 11, color: 'var(--text-faint)', fontStyle: 'italic' }} title={resolution.note}>“{resolution.note.slice(0, 48)}{resolution.note.length > 48 ? '…' : ''}”</span>}
+        {resolution.task_id && <span style={{ fontSize: 10, color: 'var(--amber)' }}>task created</span>}
+        <button onClick={async () => { setBusy(true); try { await clearResolution(row.id, w.key); onSaved() } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) } }}
+          disabled={busy} style={{ fontSize: 10, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}>undo</button>
+        {err && <span style={{ fontSize: 11, color: 'var(--red)' }}>{err}</span>}
+      </div>
+    )
+  }
+
+  async function apply(status: ResStatus) {
+    setBusy(true); setErr(null)
+    try {
+      if (status === 'corrected') {
+        if (!w.field) throw new Error('No field to correct')
+        let v: any = val.trim()
+        if (v !== '' && /^-?\d/.test(v) && !Number.isNaN(Number(v))) v = Number(v)
+        await saveFieldOverride(row, w.field, v, reviewerId)
+        await upsertResolution(row.id, w.key, w.kind, 'corrected', note.trim() || `Corrected to "${val.trim()}"`, reviewerId)
+      } else if (status === 'needs_doc') {
+        const taskId = await createDocTask(
+          `Abstract follow-up: ${row.tenant_name} — ${w.field ?? 'missing document'}`,
+          `${w.sources.map(s => `[${ORIGIN_LABEL[s.origin]}] ${s.text}`).join('\n')}${note.trim() ? `\n\nNote: ${note.trim()}` : ''}`,
+          propertyId, reviewerId ?? '')
+        await upsertResolution(row.id, w.key, w.kind, 'needs_doc', note.trim() || null, reviewerId, taskId)
+      } else {
+        await upsertResolution(row.id, w.key, w.kind, status, note.trim() || null, reviewerId)
+      }
+      onSaved()
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
   return (
-    <div style={{ border: '1px solid var(--red, #ef4444)', background: 'rgba(239,68,68,0.06)', borderRadius: 12, padding: '10px 14px' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red, #ef4444)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
-        Needs a human — {total} item{total === 1 ? '' : 's'}
+    <div style={{ padding: '6px 8px', borderRadius: 6, background: w.red ? OPEN_META[w.severity].bg : 'transparent' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {w.sources.map((s, i) => (
+          <a key={i} href={`#${s.jumpId}`} onClick={e => scrollToId(e, s.jumpId)}
+            style={{ fontSize: 12, color: 'var(--text)', textDecoration: 'none', lineHeight: 1.4 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 6 }}>{ORIGIN_LABEL[s.origin]}</span>
+            {s.text} <span style={{ color: 'var(--text-faint)' }}>→</span>
+          </a>
+        ))}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {flagged.map((c, i) => <Row key={`f${i}`} color={VERDICT_META[c.verdict]?.color ?? 'var(--red, #ef4444)'} tag={VERDICT_META[c.verdict]?.label ?? c.verdict} text={`${c.field}${c.note ? ` — ${c.note}` : ''}`} id="abstract-verification" />)}
-        {arith.map((x, i) => <Row key={`a${i}`} color="var(--red, #ef4444)" tag="Arithmetic" text={`${x.check}${x.detail ? ` — ${x.detail}` : ''}`} id="abstract-verification" />)}
-        {mri.map((x, i) => <Row key={`m${i}`} color="var(--accent)" tag="MRI conflict" text={`${x.field} — abstract ${String(x.abstract_value ?? '—')} vs MRI ${String(x.mri_value ?? '—')}`} id="abstract-verification" />)}
-        {oiAction.map(p => <Row key={`o${p.n}`} color={OPEN_META[p.severity].color} tag={OPEN_META[p.severity].label} text={`${p.field ? `${p.field}: ` : ''}${p.text}`} id={`open-item-${p.n}`} />)}
+      {w.resolvable ? (
+        mode === null ? (
+          <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+            {w.correctable && <button style={VERB_BTN} onClick={() => { setMode('corrected'); setVal(w.currentValue) }}>Correct</button>}
+            <button style={VERB_BTN} onClick={() => setMode('accepted')}>Accept</button>
+            <button style={VERB_BTN} onClick={() => setMode('waived')}>Waive</button>
+            <button style={VERB_BTN} onClick={() => setMode('needs_doc')}>Needs doc</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 }}>
+            {mode === 'corrected' && <input value={val} onChange={e => setVal(e.target.value)} placeholder="corrected value" style={RES_INPUT} />}
+            <input value={note} onChange={e => setNote(e.target.value)} style={RES_INPUT}
+              placeholder={mode === 'accepted' ? 'why it is fine (e.g. confirmed vs MRI / Third Amendment)' : mode === 'waived' ? 'reason' : mode === 'needs_doc' ? 'what to obtain (optional)' : 'note (optional)'} />
+            {err && <span style={{ fontSize: 11, color: 'var(--red)' }}>{err}</span>}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => void apply(mode)} disabled={busy || (mode === 'corrected' && !val.trim())}
+                style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+                {busy ? 'Saving…' : mode === 'corrected' ? 'Save correction' : mode === 'needs_doc' ? 'Create task & resolve' : mode === 'accepted' ? 'Accept' : 'Waive'}
+              </button>
+              <button onClick={() => { setMode(null); setErr(null) }} disabled={busy}
+                style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
+        )
+      ) : (
+        <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 3 }}>Clears on re-verify once the underlying values are corrected.</div>
+      )}
+    </div>
+  )
+}
+
+// The single passthrough: one always-open box consolidating everything a
+// reviewer must resolve. Red (discrepancy/confirm/verify/MRI) leads and gates
+// locking; missing-document / note items follow; resolved items fold away.
+function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, onSaved }: {
+  row: AbstractRow; worklist: WorkItem[]; resByKey: Map<string, Resolution>
+  reviewerId?: string; propertyId: string | null; onSaved: () => void
+}) {
+  const [showResolved, setShowResolved] = useState(false)
+  if (!worklist.length) return null
+  const unresolved = worklist.filter(w => !resByKey.has(w.key))
+  const resolved = worklist.filter(w => resByKey.has(w.key))
+  const red = unresolved.filter(w => w.red)
+  const info = unresolved.filter(w => !w.red)
+  const hot = red.length > 0
+  return (
+    <div style={{ border: `1px solid ${hot ? 'var(--red, #ef4444)' : 'var(--border)'}`, background: hot ? 'rgba(239,68,68,0.06)' : 'var(--surface)', borderRadius: 12, padding: '10px 14px' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: hot ? 'var(--red, #ef4444)' : 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+        Needs a human — {red.length} to resolve{info.length ? ` · ${info.length} missing/notes` : ''}{resolved.length ? ` · ${resolved.length} resolved` : ''}
       </div>
+      {red.length === 0 && info.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--green, #22c55e)', fontWeight: 600 }}>✓ All items resolved.</div>
+      )}
+      {red.map(w => <WorklistRow key={w.key} row={row} w={w} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} />)}
+      {info.length > 0 && (
+        <div style={{ marginTop: red.length ? 8 : 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Missing documents / notes</div>
+          {info.map(w => <WorklistRow key={w.key} row={row} w={w} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} />)}
+        </div>
+      )}
+      {resolved.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => setShowResolved(s => !s)}
+            style={{ fontSize: 11, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+            {showResolved ? '▾' : '▸'} {resolved.length} resolved
+          </button>
+          {showResolved && resolved.map(w => <WorklistRow key={w.key} row={row} w={w} resolution={resByKey.get(w.key)} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} />)}
+        </div>
+      )}
     </div>
   )
 }
@@ -1146,7 +1420,7 @@ function SourceLink({ quote, citation, sourceDocIds, label }: {
   )
 }
 
-function QaPanel({ qa, status, at, sourceDocIds }: { qa: any; status: string | null; at: string | null; sourceDocIds: string[] }) {
+function QaPanel({ qa, status, at, sourceDocIds, resByKey }: { qa: any; status: string | null; at: string | null; sourceDocIds: string[]; resByKey?: Map<string, Resolution> }) {
   const [showConfirmed, setShowConfirmed] = useState(false)
   // Collapsed by default so the abstract reads clean; auto-open only when the
   // verdict is "issues" (a real problem a human must see). The summary + any
@@ -1172,12 +1446,14 @@ function QaPanel({ qa, status, at, sourceDocIds }: { qa: any; status: string | n
 
   const Check = ({ c }: { c: any }) => {
     const vm = VERDICT_META[c.verdict] ?? { color: 'var(--text-muted)', label: c.verdict }
+    const res = c.field && c.verdict !== 'confirmed' ? resByKey?.get(keyForField(c.field)) : undefined
     return (
-      <div style={{ padding: '7px 0', borderTop: '1px solid var(--border)' }}>
+      <div style={{ padding: '7px 0', borderTop: '1px solid var(--border)', opacity: res ? 0.6 : 1 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: vm.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{vm.label}</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{c.field}</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', textDecoration: res ? 'line-through' : 'none' }}>{c.field}</span>
           {c.severity && c.verdict !== 'confirmed' && <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>({c.severity})</span>}
+          {res && <span style={{ fontSize: 9, fontWeight: 700, color: RES_META[res.status].color, whiteSpace: 'nowrap' }}>· {RES_META[res.status].label}</span>}
         </div>
         {c.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.45 }}>{c.note}</div>}
         {c.abstract_value != null && c.abstract_value !== '' && (
@@ -1306,7 +1582,7 @@ const REVIEW_FIELDS: Array<{ path: string; label: string; num?: boolean }> = [
   { path: 'term.term_years', label: 'Term (years)', num: true },
 ]
 
-function ReviewPanel({ row, onSaved, reviewerId }: { row: AbstractRow; onSaved: () => void; reviewerId?: string }) {
+function ReviewPanel({ row, onSaved, reviewerId, unresolvedRedCount = 0 }: { row: AbstractRow; onSaved: () => void; reviewerId?: string; unresolvedRedCount?: number }) {
   const effective = applyOverrides(row.abstract, row.overrides) ?? {}
   const [edits, setEdits] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
@@ -1317,8 +1593,12 @@ function ReviewPanel({ row, onSaved, reviewerId }: { row: AbstractRow; onSaved: 
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
+  // Soft lock gate: unresolved red items don't block locking, but the reviewer
+  // must acknowledge them with a one-line reason.
+  const [gateOpen, setGateOpen] = useState(false)
+  const [gateReason, setGateReason] = useState('')
 
-  async function save(opts: { lock?: boolean; verified?: boolean }) {
+  async function save(opts: { lock?: boolean; verified?: boolean; lockReason?: string }) {
     setSaving(true); setErr(null)
     try {
       // Store an override only where the reviewer's value differs from the AI value.
@@ -1331,9 +1611,13 @@ function ReviewPanel({ row, onSaved, reviewerId }: { row: AbstractRow; onSaved: 
         const aiVal = getPath(row.abstract, f.path)
         if (String(aiVal ?? '') !== String(val)) overrides[f.path] = val
       }
+      const reviewNote = [
+        note.trim() || null,
+        opts.lockReason ? `[locked over ${unresolvedRedCount} unresolved item(s): ${opts.lockReason.trim()}]` : null,
+      ].filter(Boolean).join(' ') || null
       const patch: any = {
         overrides: Object.keys(overrides).length ? overrides : null,
-        review_note: note.trim() || null,
+        review_note: reviewNote,
         reviewed_by: reviewerId ?? null,
         reviewed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -1342,9 +1626,16 @@ function ReviewPanel({ row, onSaved, reviewerId }: { row: AbstractRow; onSaved: 
       if (opts.lock !== undefined) patch.locked = opts.lock
       const { error } = await supabase.from('lease_abstracts').update(patch).eq('id', row.id)
       if (error) throw new Error(error.message)
+      setGateOpen(false); setGateReason('')
       onSaved()
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
     finally { setSaving(false) }
+  }
+
+  // Lock entrypoint: clean → lock directly; unresolved red → open the gate.
+  function requestLock() {
+    if (unresolvedRedCount > 0) setGateOpen(true)
+    else void save({ verified: true, lock: true })
   }
 
   const overrideCount = row.overrides ? Object.keys(row.overrides).length : 0
@@ -1393,16 +1684,33 @@ function ReviewPanel({ row, onSaved, reviewerId }: { row: AbstractRow; onSaved: 
               style={{ width: '100%', fontSize: 12, padding: '6px 8px', borderRadius: 5, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)', resize: 'vertical' }} />
           </div>
           {err && <div style={{ fontSize: 12, color: 'var(--red)' }}>{err}</div>}
+          {gateOpen && (
+            <div style={{ border: '1px solid var(--red, #ef4444)', background: 'rgba(239,68,68,0.06)', borderRadius: 8, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--red, #ef4444)', fontWeight: 600 }}>
+                {unresolvedRedCount} unresolved discrepancy/confirm item{unresolvedRedCount === 1 ? '' : 's'} in the worklist above. Locking anyway — add a one-line reason.
+              </span>
+              <input value={gateReason} onChange={e => setGateReason(e.target.value)} placeholder="reason for locking with items unresolved"
+                style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 5, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' }} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => void save({ verified: true, lock: true, lockReason: gateReason })} disabled={saving || !gateReason.trim()}
+                  style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, border: 'none', background: 'var(--red, #ef4444)', color: '#fff', cursor: 'pointer' }}>
+                  {saving ? '…' : 'Lock anyway'}
+                </button>
+                <button onClick={() => { setGateOpen(false); setGateReason('') }} disabled={saving}
+                  style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={() => void save({})} disabled={saving}
               style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--surface-2)', color: 'var(--text)', cursor: 'pointer' }}>
               {saving ? 'Saving…' : 'Save corrections'}
             </button>
-            <button onClick={() => void save({ verified: true, lock: true })} disabled={saving}
-              style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--green, #22c55e)', color: '#fff', cursor: 'pointer' }}>
-              {saving ? '…' : 'Mark verified & lock'}
+            <button onClick={requestLock} disabled={saving || gateOpen}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--green, #22c55e)', color: '#fff', cursor: saving || gateOpen ? 'default' : 'pointer', opacity: gateOpen ? 0.5 : 1 }}>
+              {saving ? '…' : unresolvedRedCount > 0 ? `Mark verified & lock (${unresolvedRedCount} open)` : 'Mark verified & lock'}
             </button>
-            <button onClick={() => { setOpen(false); setErr(null) }} disabled={saving}
+            <button onClick={() => { setOpen(false); setErr(null); setGateOpen(false) }} disabled={saving}
               style={{ fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
               Cancel
             </button>

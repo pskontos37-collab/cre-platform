@@ -25,6 +25,24 @@ import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared
 const MODEL = Deno.env.get('QA_MODEL') ?? 'claude-opus-4-8'
 const CHAR_BUDGET = 350_000
 
+// Layer the reviewer's overrides (dotted-path → value) over the AI abstract so
+// the verifier audits the human-corrected values. Mirrors applyOverrides in
+// src/pages/AbstractsPage.tsx (kept intentionally identical).
+function applyOverrides(abstract: any, overrides: Record<string, any> | null | undefined) {
+  if (!overrides || !Object.keys(overrides).length) return abstract
+  const clone = JSON.parse(JSON.stringify(abstract ?? {}))
+  for (const [path, val] of Object.entries(overrides)) {
+    const parts = path.split('.')
+    let o = clone
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (o[parts[i]] == null || typeof o[parts[i]] !== 'object') o[parts[i]] = {}
+      o = o[parts[i]]
+    }
+    o[parts[parts.length - 1]] = val
+  }
+  return clone
+}
+
 // Forced tool-use so the verdict comes back as parsed JSON (quoted lease
 // language in source_quote can never break parsing).
 async function anthropicJson(key: string, model: string, content: any[], maxTokens: number): Promise<any> {
@@ -116,12 +134,17 @@ serve(async (req) => {
 
     // ── 1. The abstract to verify ──
     const { data: row, error: rErr } = await sb.from('lease_abstracts')
-      .select('id, abstract, source_doc_ids, model')
+      .select('id, abstract, overrides, source_doc_ids, model')
       .eq('property_id', propertyId)
       .eq('tenant_name', tenant)
       .maybeSingle()
     if (rErr) throw new Error('load abstract failed: ' + rErr.message)
     if (!row || !row.abstract) throw new Error(`No abstract exists for "${tenant}" — generate it first`)
+    // Audit the HUMAN-CORRECTED abstract: layer the reviewer's overrides
+    // (dotted-path → value) over the AI JSON so a corrected field is verified
+    // as corrected and stops getting re-flagged. Matches applyOverrides in the
+    // frontend (AbstractsPage.tsx) and migration 20240105's resolution model.
+    const auditAbstract = applyOverrides(row.abstract, row.overrides)
     const sourceIds: string[] = Array.isArray(row.source_doc_ids) ? row.source_doc_ids : []
     if (!sourceIds.length) throw new Error('Abstract has no recorded source documents — regenerate it before verifying')
 
@@ -290,8 +313,8 @@ ${QA_SCHEMA}
 ${leaseRowOut ? `\nMRI system-of-record values (a SEPARATE system, NOT one of the lease documents — use ONLY to populate mri_reconciliation; do not treat as document truth): ${JSON.stringify(leaseRowOut)}` : ''}
 ${mriOptions.length ? `\nMRI option data (RETAILRR-verified; system of record for option notice deadlines & exercise state): ${JSON.stringify(mriOptions)}` : ''}
 
-THE ABSTRACT UNDER REVIEW (produced by model "${row.model ?? 'unknown'}"):
-${JSON.stringify(row.abstract)}
+THE ABSTRACT UNDER REVIEW (produced by model "${row.model ?? 'unknown'}", with any human corrections applied):
+${JSON.stringify(auditAbstract)}
 
 SOURCE DOCUMENTS (raw text):
 ${parts.join('\n\n')}
