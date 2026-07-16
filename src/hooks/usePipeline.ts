@@ -341,6 +341,43 @@ export async function deleteBuyBox(id: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+export interface Broker {
+  id: string; name: string; firm: string | null; email: string | null; phone: string | null
+  markets: string[]; assetTypes: string[]; status: string; lastContactDate: string | null
+  notes: string | null; active: boolean
+}
+export type BrokerInput = Omit<Broker, 'id'>
+export function useBrokers() {
+  return useQuery<Broker[]>(async () => {
+    const { data, error } = await supabase.from('brokers').select('*').order('name').limit(1000)
+    if (error) throw new Error(error.message)
+    return ((data ?? []) as any[]).map(b => ({
+      id: b.id, name: b.name, firm: b.firm ?? null, email: b.email ?? null, phone: b.phone ?? null,
+      markets: b.markets ?? [], assetTypes: b.asset_types ?? [], status: b.status ?? 'active',
+      lastContactDate: b.last_contact_date ?? null, notes: b.notes ?? null, active: b.active ?? true,
+    })) as Broker[]
+  }, [])
+}
+function brokerRow(b: BrokerInput): Record<string, unknown> {
+  return {
+    name: b.name.trim(), firm: b.firm?.trim() || null, email: b.email?.trim() || null, phone: b.phone?.trim() || null,
+    markets: b.markets.map(m => m.trim()).filter(Boolean), asset_types: b.assetTypes,
+    status: b.status, last_contact_date: b.lastContactDate || null, notes: b.notes?.trim() || null, active: b.active,
+  }
+}
+export async function createBroker(b: BrokerInput): Promise<void> {
+  const { error } = await supabase.from('brokers').insert(brokerRow(b))
+  if (error) throw new Error(error.message)
+}
+export async function updateBroker(id: string, b: BrokerInput): Promise<void> {
+  const { error } = await supabase.from('brokers').update({ ...brokerRow(b), updated_at: new Date().toISOString() }).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+export async function deleteBroker(id: string): Promise<void> {
+  const { error } = await supabase.from('brokers').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
 export function useOmIntake() {
   return useQuery<OmRow[]>(async () => {
     const { data, error } = await supabase.from('om_intake')

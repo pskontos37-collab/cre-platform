@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   usePipeline, useCapitalPartners, useOmIntake,
   useBuyBoxes, createBuyBox, updateBuyBox, deleteBuyBox, type BuyBoxInput,
+  useBrokers, createBroker, updateBroker, deleteBroker, type Broker, type BrokerInput,
   createDeal, updateDeal, deleteDeal, closeDeal,
   addDealLp, updateDealLp, removeDealLp, updateOmRow, extractOm, createDealFromExtraction, uploadOmPdf, generateIcMemo,
   useDealDocuments, uploadDealDocument, removeDealDocument, DEAL_DOC_ROLES, dealDocRoleLabel, type DealDoc,
@@ -61,10 +62,12 @@ export function PipelinePage() {
   const teamQ = useDealTeamMembers()
   const omQ = useOmIntake()
   const buyBoxesQ = useBuyBoxes()
+  const brokersQ = useBrokers()
   const deals = data ?? []
   const buyBoxes = buyBoxesQ.data ?? []
+  const brokers = brokersQ.data ?? []
 
-  const [view, setView] = useState<'pipeline' | 'analytics' | 'om' | 'partners' | 'buybox'>('pipeline')
+  const [view, setView] = useState<'pipeline' | 'analytics' | 'om' | 'partners' | 'buybox' | 'brokers'>('pipeline')
   const [assetFilter, setAssetFilter] = useState<'' | AssetType>('')
   const [riskFilter, setRiskFilter] = useState<'' | RiskProfile>('')
   const [boardMode, setBoardMode] = useState<'board' | 'table'>('board')
@@ -105,7 +108,7 @@ export function PipelinePage() {
           </div>
 
           <div style={{ display: 'flex', gap: 3, borderBottom: '1px solid var(--border)', marginBottom: 16, flexWrap: 'wrap' }}>
-            {([['pipeline', 'Pipeline'], ['analytics', 'Analytics'], ['om', 'OM Intake'], ['partners', 'Partners'], ['buybox', 'Buy-Box']] as const).map(([k, lab]) => (
+            {([['pipeline', 'Pipeline'], ['analytics', 'Analytics'], ['om', 'OM Intake'], ['partners', 'Partners'], ['buybox', 'Buy-Box'], ['brokers', 'Brokers']] as const).map(([k, lab]) => (
               <button key={k} onClick={() => setView(k)}
                 style={{ ...navBtn, color: view === k ? 'var(--text)' : 'var(--text-faint)', borderBottomColor: view === k ? 'var(--accent, #466371)' : 'transparent' }}>
                 {lab}
@@ -124,6 +127,7 @@ export function PipelinePage() {
             onChanged={() => { omQ.refetch(); refetch() }} onOpen={setOpenId} />}
           {view === 'partners' && <PartnersView partners={partnersQ.data ?? []} onChanged={partnersQ.refetch} />}
           {view === 'buybox' && <BuyBoxView buyBoxes={buyBoxes} deals={visible} onChanged={buyBoxesQ.refetch} />}
+          {view === 'brokers' && <BrokersView brokers={brokers} deals={deals} onChanged={brokersQ.refetch} />}
         </>
       )}
 
@@ -1074,6 +1078,137 @@ function BuyBoxModal({ buyBox, onClose, onSaved }: { buyBox: BuyBox | null; onCl
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button style={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
             <button style={primaryBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : buyBox ? 'Save changes' : 'Add buy-box'}</button>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  )
+}
+
+// ── Brokers: deal-flow relationship book (Phase 3 sourcing) ──
+const brokerMatch = (dealBroker: string | null, b: Broker): boolean => {
+  if (!dealBroker) return false
+  const s = dealBroker.toLowerCase().trim()
+  if (!s) return false
+  const nm = b.name.toLowerCase(), fm = (b.firm ?? '').toLowerCase()
+  return s.includes(nm) || nm.includes(s) || (!!fm && s.includes(fm))
+}
+const BROKER_STATUS: { key: string; label: string; color: string }[] = [
+  { key: 'active', label: 'Active', color: '#2e8b57' },
+  { key: 'prospect', label: 'Prospect', color: RISK_COLOR.core_plus },
+  { key: 'dormant', label: 'Dormant', color: 'var(--text-faint)' },
+]
+const brokerStatus = (s: string) => BROKER_STATUS.find(x => x.key === s) ?? BROKER_STATUS[0]
+
+function BrokersView({ brokers, deals, onChanged }: { brokers: Broker[]; deals: Deal[]; onChanged: () => void }) {
+  const [editing, setEditing] = useState<Broker | 'new' | null>(null)
+  const active = deals.filter(d => !isTerminal(d.stage))
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '-4px 0 12px' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>The deal-sourcing relationship book. Deals attribute to a broker by matching the deal's broker field.</div>
+        <button style={{ ...primaryBtn, marginLeft: 'auto' }} onClick={() => setEditing('new')}>+ Add broker</button>
+      </div>
+      {brokers.length === 0 ? (
+        <EmptyState icon="🤝" title="No brokers yet." subtitle="Add the brokers who send you deals to track sourcing." />
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 13 }}>
+          {brokers.map(b => {
+            const ds = active.filter(d => brokerMatch(d.broker, b))
+            return <BrokerCard key={b.id} b={b} dealCount={ds.length} volume={ds.reduce((a, d) => a + (d.askPrice ?? 0), 0)} onEdit={() => setEditing(b)} />
+          })}
+        </div>
+      )}
+      {editing && <BrokerModal broker={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChanged() }} />}
+    </>
+  )
+}
+
+function BrokerCard({ b, dealCount, volume, onEdit }: { b: Broker; dealCount: number; volume: number; onEdit: () => void }) {
+  const st = brokerStatus(b.status)
+  const contact = [b.email, b.phone].filter(Boolean).join(' · ')
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--surface)', padding: '14px 15px', opacity: b.active ? 1 : 0.6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 4 }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{b.name}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', borderRadius: 999, padding: '2px 8px', color: st.color, background: st.color + '22' }}>{st.label}</span>
+        <button style={miniX} title={`Edit ${b.name}`} onClick={onEdit}>✎</button>
+      </div>
+      {b.firm && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>{b.firm}</div>}
+      <div style={{ display: 'flex', gap: 14, fontSize: 12, marginBottom: 8 }}>
+        <div><b style={{ color: 'var(--text)' }}>{dealCount}</b> <span style={{ color: 'var(--text-faint)' }}>active deals</span></div>
+        <div><b style={{ color: 'var(--text)' }}>{fmtM(volume)}</b> <span style={{ color: 'var(--text-faint)' }}>volume</span></div>
+      </div>
+      {(b.markets.length > 0 || b.assetTypes.length > 0) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+          {b.assetTypes.map(a => <span key={a} style={{ fontSize: 10.5, color: 'var(--text-muted)', background: 'var(--surface-2, rgba(0,0,0,.04))', borderRadius: 6, padding: '2px 8px' }}>{ASSET_LABEL[a as AssetType] ?? a}</span>)}
+          {b.markets.map((m, i) => <span key={`m${i}`} style={{ fontSize: 10.5, color: 'var(--text-muted)', background: 'var(--surface-2, rgba(0,0,0,.04))', borderRadius: 6, padding: '2px 8px' }}>{m}</span>)}
+        </div>
+      )}
+      {(contact || b.lastContactDate) && <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{contact}{contact && b.lastContactDate ? ' · ' : ''}{b.lastContactDate ? `Last contact ${b.lastContactDate}` : ''}</div>}
+      {b.notes && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>{b.notes}</div>}
+    </div>
+  )
+}
+
+function BrokerModal({ broker, onClose, onSaved }: { broker: Broker | null; onClose: () => void; onSaved: () => void }) {
+  const [f, setF] = useState<BrokerInput>(() => broker ? { ...broker } : {
+    name: '', firm: null, email: null, phone: null, markets: [], assetTypes: [], status: 'active', lastContactDate: null, notes: null, active: true,
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const set = (p: Partial<BrokerInput>) => setF(s => ({ ...s, ...p }))
+  const toggleAsset = (a: string) => set({ assetTypes: f.assetTypes.includes(a) ? f.assetTypes.filter(x => x !== a) : [...f.assetTypes, a] })
+  const save = async () => {
+    if (!f.name.trim()) { setErr('Broker needs a name.'); return }
+    setBusy(true); setErr(null)
+    try { if (broker) { await updateBroker(broker.id, f) } else { await createBroker(f) } onSaved() }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') } finally { setBusy(false) }
+  }
+  const remove = async () => {
+    if (!broker) return
+    if (!confirm(`Delete broker "${broker.name}"?`)) return
+    setBusy(true); setErr(null)
+    try { await deleteBroker(broker.id); onSaved() }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Delete failed') } finally { setBusy(false) }
+  }
+  return (
+    <Overlay onClose={busy ? () => {} : onClose}>
+      <div style={modal} onClick={e => e.stopPropagation()}>
+        <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>{broker ? `Edit ${broker.name}` : 'Add broker'}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Field label="Name *" flex><input autoFocus value={f.name} onChange={e => set({ name: e.target.value })} style={inputStyle} /></Field>
+            <Field label="Firm" flex><input value={f.firm ?? ''} onChange={e => set({ firm: e.target.value })} style={inputStyle} placeholder="CBRE / JLL / Eastdil" /></Field>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Field label="Email" flex><input value={f.email ?? ''} onChange={e => set({ email: e.target.value })} style={inputStyle} /></Field>
+            <Field label="Phone" flex><input value={f.phone ?? ''} onChange={e => set({ phone: e.target.value })} style={inputStyle} /></Field>
+            <Field label="Status" flex><select value={f.status} onChange={e => set({ status: e.target.value })} style={inputStyle}>{BROKER_STATUS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></Field>
+          </div>
+          <Field label="Asset focus">
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {(ASSET_ORDER.concat(['industrial'] as AssetType[])).map(a => {
+                const on = f.assetTypes.includes(a)
+                return <button key={a} type="button" onClick={() => toggleAsset(a)} style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 10px', borderRadius: 999, cursor: 'pointer', border: `1px solid ${on ? ASSET_COLOR[a] : 'var(--border-2)'}`, background: on ? ASSET_COLOR[a] : 'var(--surface)', color: on ? '#fff' : 'var(--text-muted)' }}>{ASSET_LABEL[a]}</button>
+              })}
+            </div>
+          </Field>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Field label="Markets (comma)" flex><input value={f.markets.join(', ')} onChange={e => set({ markets: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} style={inputStyle} placeholder="Charlotte, Raleigh, Atlanta" /></Field>
+            <Field label="Last contact" flex><input type="date" value={f.lastContactDate ?? ''} onChange={e => set({ lastContactDate: e.target.value || null })} style={inputStyle} /></Field>
+          </div>
+          <Field label="Notes"><input value={f.notes ?? ''} onChange={e => set({ notes: e.target.value })} style={inputStyle} /></Field>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={f.active} onChange={e => set({ active: e.target.checked })} /> Active
+          </label>
+        </div>
+        {err && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 8 }}>{err}</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          {broker && <button style={{ ...ghostBtn, color: 'var(--red)', borderColor: 'var(--red)' }} disabled={busy} onClick={remove}>Delete</button>}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button style={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
+            <button style={primaryBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : broker ? 'Save changes' : 'Add broker'}</button>
           </div>
         </div>
       </div>
