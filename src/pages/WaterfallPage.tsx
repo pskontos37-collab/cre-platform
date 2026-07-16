@@ -10,6 +10,8 @@ import {
 } from '../lib/waterfall'
 import { PdfDownloadButton } from '../reports/PdfDownloadButton'
 import type { WaterfallXlsxInput, WfClass } from '../reports/waterfallExcel'
+import { AgreementQaBadge, AgreementQaPanel } from '../components/AgreementQaPanel'
+import { AgreementAbstractPanel } from '../components/AgreementAbstractPanel'
 
 const usd = (n: number, dp = 0) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: dp })
@@ -313,6 +315,29 @@ export function WaterfallPage() {
               }}
             />
           </div>
+
+          {/* Governing operating agreements — the verified brief-synthesis
+              abstract behind each JV layer's modeled waterfall, plus the
+              independent verification verdict (agreement-abstract/verify
+              kind=jv). Backs the "tier terms verified against the executed
+              operating agreements" note below. */}
+          {(sel.l1.abstract || sel.l2?.abstract) && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 8 }}>
+                Governing operating agreements
+              </div>
+              {[sel.l1, sel.l2].filter((d): d is DealRow => !!d && !!d.abstract).map(d => (
+                <div key={d.id} style={{ marginBottom: 10, padding: '11px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{d.name}</span>
+                    <AgreementQaBadge status={d.qa_status} />
+                  </div>
+                  <AgreementAbstractPanel kind="jv" abstract={d.abstract} />
+                  {d.qa && <AgreementQaPanel qa={d.qa} qaStatus={d.qa_status} qaAt={d.qa_at} />}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Inputs */}
           <div style={{ display: 'flex', gap: 14, rowGap: 12, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 18 }}>

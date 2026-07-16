@@ -34,6 +34,11 @@ export interface ReaAgreement {
   amendments: string | null
   openItems: string | null
   sourceDocs: ReaSourceDoc[]
+  // abstractor-v2 REA phase (migration 20240104): verified abstract + QA verdict
+  abstract: any | null
+  qa: any | null
+  qaStatus: string | null
+  qaAt: string | null
 }
 
 export function useReaAgreements(propertyIds: string[], propertyNames: Record<string, string>) {
@@ -43,7 +48,7 @@ export function useReaAgreements(propertyIds: string[], propertyNames: Record<st
     const [reaRes, arRes] = await Promise.all([
       supabase
         .from('rea_agreements')
-        .select('id, property_id, name, agreement_date, term_summary, operator, members, cost_sharing, key_provisions, amendments, open_items, source_docs')
+        .select('id, property_id, name, agreement_date, term_summary, operator, members, cost_sharing, key_provisions, amendments, open_items, source_docs, abstract, qa, qa_status, qa_at')
         .in('property_id', propertyIds)
         .order('agreement_date', { ascending: true }),
       supabase
@@ -82,6 +87,10 @@ export function useReaAgreements(propertyIds: string[], propertyNames: Record<st
       amendments:    r.amendments,
       openItems:     r.open_items,
       sourceDocs:    (r.source_docs ?? []) as ReaSourceDoc[],
+      abstract:      r.abstract ?? null,
+      qa:            r.qa ?? null,
+      qaStatus:      r.qa_status ?? null,
+      qaAt:          r.qa_at ?? null,
     }))
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
 }

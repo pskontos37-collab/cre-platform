@@ -54,6 +54,12 @@ export interface DealRow {
   notes: string | null
   layer: 1 | 2 | null
   selltoday: SellTodayConfig | null
+  // abstractor-v2 JV phase (migration 20240105): verified operating-agreement
+  // abstract + QA verdict (agreement-abstract / agreement-verify kind=jv).
+  abstract: any | null
+  qa: any | null
+  qa_status: string | null
+  qa_at: string | null
   properties: { name: string; asset_type: string | null } | null
   waterfall_tiers: WaterfallTier[]
   preferred_equity_positions: DealPrefPosition[]

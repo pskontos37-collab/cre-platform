@@ -6,6 +6,8 @@ import { useReaAgreements, type ReaAgreement } from '../hooks/useRea'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ReaPdfButton } from '../reports/ReaPdfButton'
+import { AgreementQaBadge, AgreementQaPanel } from '../components/AgreementQaPanel'
+import { AgreementAbstractPanel } from '../components/AgreementAbstractPanel'
 
 // ── M&J Wilkow corporate palette (wilkow.com) — see ReceivablesPage ─────────
 const WILKOW      = '#466371'
@@ -80,7 +82,10 @@ function AgreementCard({ a }: { a: ReaAgreement }) {
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderLeft: `3px solid ${WILKOW}`, borderRadius: 12, padding: '16px 20px', boxShadow: 'var(--shadow, none)' }}>
       {/* title row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontFamily: SERIF, fontSize: 16.5, fontWeight: 600, color: 'var(--text)', letterSpacing: '0.015em' }}>{a.name}</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ fontFamily: SERIF, fontSize: 16.5, fontWeight: 600, color: 'var(--text)', letterSpacing: '0.015em' }}>{a.name}</div>
+          <AgreementQaBadge status={a.qaStatus} />
+        </div>
         <div style={{ fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
           {a.agreementDate ?? ''}{a.termSummary ? ` · ${a.termSummary}` : ''}
         </div>
@@ -120,6 +125,11 @@ function AgreementCard({ a }: { a: ReaAgreement }) {
       {a.costSharing && <Section label="Cost Sharing">{a.costSharing}</Section>}
       {a.keyProvisions && <Section label="Key Provisions">{a.keyProvisions}</Section>}
       {a.amendments && <Section label="Amendments & Consents">{a.amendments}</Section>}
+
+      {/* abstractor-v2: the verified brief-synthesis abstract + independent
+          verification verdict (agreement-abstract / agreement-verify kind=rea). */}
+      {a.abstract && <AgreementAbstractPanel kind="rea" abstract={a.abstract} />}
+      {a.qa && <AgreementQaPanel qa={a.qa} qaStatus={a.qaStatus} qaAt={a.qaAt} />}
 
       {a.openItems && (
         <div style={{ marginTop: 12, padding: '9px 12px', background: 'var(--amber-bg)', border: '1px solid var(--amber-border)', borderRadius: 8 }}>
