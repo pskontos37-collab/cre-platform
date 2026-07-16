@@ -253,8 +253,21 @@ serve(async (req) => {
       if (/control sheet/.test(both)) s -= 3
       return s
     }
+    // A tenant's folder also holds operational material that carries no lease
+    // terms: buildout/closeout under \Construction\, plus \Accounting\,
+    // \Insurance\, \Correspondence\. Matching the tenant name against file_path
+    // sweeps the whole subtree, so these otherwise land in the brief queue
+    // (Stage-1 AI cost), the abstract's stored source set (what the reviewer
+    // sees), and the audit inventory (false "missing"/"discrepancy" noise). Drop
+    // them unless the file is itself a typed lease instrument. The
+    // \Lease Documents\ and \Documents\ trees, and files sitting directly under
+    // the tenant folder, are unaffected.
+    const NON_LEASE_SUBFOLDER = /\\(construction|accounting|insurance|correspondence)\\/i
+    const isLeaseRelevant = (d: any) =>
+      d.doc_type === 'lease' || !NON_LEASE_SUBFOLDER.test(d.file_path ?? '')
     const docs = ((tdocs ?? []) as any[])
       .filter(d => wordRe.test(d.title ?? '') || wordRe.test(d.file_path ?? ''))
+      .filter(isLeaseRelevant)
       .map(d => ({ ...d, s: score(d) }))
       .sort((a, b) => b.s - a.s)
     if (!docs.length) throw new Error(`No documents found for "${tenant}" at this property`)
