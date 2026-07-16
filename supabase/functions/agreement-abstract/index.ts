@@ -74,6 +74,23 @@ const REA_SCHEMA = `{
  "open_items": [str]
 }`
 
+const JV_SCHEMA = `{
+ "entity": str, "agreement_name": str, "effective_date": "YYYY-MM-DD"|null,
+ "parties_members": [{"member": str, "role": "managing_member"|"investor_member"|"preferred"|str, "ownership_pct": num|null, "capital_commitment": str|null, "notes": str|null}],
+ "amendment_chain": [{"instrument": str, "date": "YYYY-MM-DD"|str|null, "effect": str}],
+ "capital": {"initial_contributions": str|null, "capital_calls": {"mechanics": str|null, "failure_remedy": str|null, "section": str|null}, "deferred_commitments": str|null},
+ "distributions_waterfall": [{"tier": num, "description": str, "split": str, "hurdle": str|null, "quote": str, "section": str}],
+ "preferred_return": {"rate": str|null, "compounding": str|null, "accrues_on": str|null, "section": str|null},
+ "promote": {"structure": str|null, "quote": str|null, "section": str|null},
+ "management_control": {"manager": str|null, "major_decisions": [str], "removal": str|null, "section": str|null},
+ "transfer_restrictions": {"rofr_rofo": str|null, "consent": str|null, "permitted_transfers": str|null, "section": str|null},
+ "exit": {"buy_sell": str|null, "forced_sale": str|null, "drag_tag": str|null, "section": str|null},
+ "fees_to_affiliates": [str],
+ "reporting_tax": str|null,
+ "critical_dates": [{"date": "YYYY-MM-DD", "event": str, "source": str}],
+ "open_items": [str]
+}`
+
 const PMA_SCHEMA = `{
  "manager": str, "sub_manager": str|null, "owner": str,
  "effective_date": "YYYY-MM-DD"|null,
@@ -102,7 +119,7 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const kind: string = body.kind ?? ''
     const id: string = body.id ?? ''
-    if (!['rea', 'pma'].includes(kind) || !id) throw new Error("kind ('rea'|'pma') and id are required")
+    if (!['rea', 'pma', 'jv'].includes(kind) || !id) throw new Error("kind ('rea'|'pma'|'jv') and id are required")
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')
@@ -116,6 +133,21 @@ serve(async (req) => {
       row = data
       docIds = ((row.source_docs ?? []) as any[]).map((d: any) => d.id).filter(Boolean)
       crossCheck = { name: row.name, agreement_date: row.agreement_date, operator: row.operator, members: row.members }
+    } else if (kind === 'jv') {
+      table = 'deals'
+      const { data, error } = await sb.from(table).select('*').eq('id', id).maybeSingle()
+      if (error || !data) throw new Error('deals row not found')
+      row = data
+      // The rollout script passes the entity-matched doc ids explicitly
+      // (entity discrimination is hand-curated per layer — Gateway L1's
+      // ML-MJW entities vs L2's M&J PC Investors must never conflate).
+      docIds = Array.isArray(body.doc_ids) && body.doc_ids.length
+        ? body.doc_ids
+        : (Array.isArray(row.abstract_source_doc_ids) ? row.abstract_source_doc_ids : [])
+      const { data: tiers } = await sb.from('waterfall_tiers')
+        .select('tier_order, tier_type, description, hurdle_irr, hurdle_em, lp_split_pct, gp_split_pct, pref_rate, is_cumulative, is_pik')
+        .eq('deal_id', id).order('tier_order')
+      crossCheck = { deal_name: row.name, layer: row.layer, modeled_waterfall_tiers: tiers ?? [] }
     } else {
       table = 'management_agreements'
       const { data, error } = await sb.from(table).select('*').eq('id', id).maybeSingle()
@@ -219,8 +251,9 @@ serve(async (req) => {
     }
 
     // ── 3. Synthesis prompt ──
-    const isRea = kind === 'rea'
-    const prompt = `You are a commercial real estate ${isRea ? 'REA/OEA/declaration' : 'property management agreement'} abstractor for M&J Wilkow, producing a verified abstract of "${isRea ? row.name : `${row.manager_name} PMA`}" per the firm's Abstraction Standard. Synthesize from the structured DOCUMENT BRIEFS (each extracted from 100% of that document's text), the raw text of unbriefed documents, and the attached PDFs.
+    const kindLabel = kind === 'rea' ? 'REA/OEA/declaration' : kind === 'jv' ? 'joint-venture / LLC operating agreement' : 'property management agreement'
+    const subject = kind === 'rea' ? row.name : kind === 'jv' ? row.name : `${row.manager_name} PMA`
+    const prompt = `You are a commercial real estate ${kindLabel} abstractor for M&J Wilkow, producing a verified abstract of "${subject}" per the firm's Abstraction Standard. Synthesize from the structured DOCUMENT BRIEFS (each extracted from 100% of that document's text), the raw text of unbriefed documents, and the attached PDFs.
 
 SOURCE FILE INVENTORY (a document listed here IS on file):
 ${inventory}
@@ -228,18 +261,22 @@ ${inventory}
 ABSTRACTION METHOD (binding):
 1. THE LATEST AMENDMENT CONTROLS. Establish the amendment chain and abstract CURRENT effective terms; record the chain in amendment_chain with each instrument's effect.
 2. DATE DISCIPLINE — every date field holds a bare ISO date (YYYY-MM-DD) or null; provenance in the companion basis/section field.
-3. QUOTE the operative language for ${isRea ? 'use restrictions, exclusives, and operating covenants (these drive leasing decisions — the beneficiary must be explicit)' : 'fee provisions, termination rights, and budget/variance authority'}; cite instrument + section on every entry.
-${isRea
+3. QUOTE the operative language for ${kind === 'rea' ? 'use restrictions, exclusives, and operating covenants (these drive leasing decisions — the beneficiary must be explicit)' : kind === 'jv' ? 'every distribution/waterfall tier, the preferred return, and the promote (these drive real money — quote the split percentages verbatim)' : 'fee provisions, termination rights, and budget/variance authority'}; cite instrument + section on every entry.
+${kind === 'rea'
   ? `4. PARTIES & PARCELS: map every party to its parcel/tract and role; where an original party has a known successor (e.g. the declarant's interest now held by the current owner entity), note it in current_successor without guessing.
 5. OPERATING COVENANTS vs USE RESTRICTIONS vs EXCLUSIVES are three different things: an operating covenant OBLIGES a party to operate; a use restriction LIMITS what parcels may be used for; an exclusive PROTECTS a named party's use against others. Never mix them.
 6. impact_on_landlord_leasing: a plain-English summary of what this instrument means for leasing decisions at the center (what uses are blocked, whose consent is needed, which anchor covenants feed co-tenancy math).`
+  : kind === 'jv'
+  ? `4. THIS DEAL LAYER ONLY: the cross-check names the layer ("${row.name}"). Abstract the operating agreement of THIS layer's entity — if documents for the other layer's entity are in the inventory, use them only for cross-references, never for this layer's waterfall/promote terms.
+5. distributions_waterfall: one entry per tier IN PAYMENT ORDER, each with a VERBATIM quote of the split language. The modeled waterfall tiers in the cross-check are the platform's current model — abstract the DOCUMENTED terms and flag every disagreement (rate, split, hurdle, ordering) as "DISCREPANCY: …" naming both values.
+6. CONTROL & EXIT: major-decision list (as enumerated), manager removal, transfer/ROFR/ROFO, buy-sell/forced-sale, and capital-call failure remedies (dilution formulas verbatim).`
   : `4. FEES: capture every fee with its percentage, base (e.g. gross receipts definition), minimums, and section — plus reimbursables and their exclusions. The structured cross-check payload below holds the tracker's current values; abstract the DOCUMENTED values and flag disagreements as "DISCREPANCY: …" open items.
 5. TERMINATION: who may terminate, on what notice, for what causes, on sale, and any termination fees.
 6. REPORTING & BUDGET: report due dates and the manager's spending/variance authority.`}
 7. GROUNDING — NO FABRICATION: every value traces to a brief, raw text, or attached PDF; silent items are null + open item ("MISSING FROM FILE:" only for instruments referenced but absent from the inventory; "CONFIRM:"/"DISCREPANCY:" as in the lease standard).
 
 Call submit_abstract with an object matching this schema exactly (all keys present; fields at the TOP LEVEL of the tool input, no wrapper key):
-${isRea ? REA_SCHEMA : PMA_SCHEMA}
+${kind === 'rea' ? REA_SCHEMA : kind === 'jv' ? JV_SCHEMA : PMA_SCHEMA}
 
 STRUCTURED CROSS-CHECK (current tracker values — flag disagreements, do not copy blindly):
 ${JSON.stringify(crossCheck)}
@@ -248,8 +285,10 @@ DOCUMENT BRIEFS:
 ${briefBlocks.join('\n\n')}
 ${rawParts.length ? `\nRAW TEXT OF UNBRIEFED DOCUMENTS:\n${rawParts.join('\n\n')}` : ''}`
 
-    const looksRight = isRea
+    const looksRight = kind === 'rea'
       ? (o: any) => o && typeof o === 'object' && !Array.isArray(o) && ('parties_parcels' in o || 'agreement_name' in o || 'use_restrictions' in o)
+      : kind === 'jv'
+      ? (o: any) => o && typeof o === 'object' && !Array.isArray(o) && ('distributions_waterfall' in o || 'parties_members' in o || 'entity' in o)
       : (o: any) => o && typeof o === 'object' && !Array.isArray(o) && ('fees' in o || 'manager' in o || 'termination' in o)
 
     const isCapError = (e: unknown) =>
@@ -272,13 +311,17 @@ ${rawParts.length ? `\nRAW TEXT OF UNBRIEFED DOCUMENTS:\n${rawParts.join('\n\n')
     if (flags.length) abstract.open_items = [...(Array.isArray(abstract?.open_items) ? abstract.open_items : []), ...flags]
 
     // ── 4. Save (fresh abstract invalidates any prior verification) ──
-    const { error: upErr } = await sb.from(table).update({
+    const patch: any = {
       abstract,
       abstract_model: MODEL,
       abstract_generated_at: new Date().toISOString(),
       qa: null, qa_status: null, qa_at: null, qa_model: null,
       updated_at: new Date().toISOString(),
-    }).eq('id', id)
+    }
+    // JV deals carry no doc linkage of their own — persist the entity-matched
+    // set so agreement-verify re-reads the SAME documents.
+    if (kind === 'jv') patch.abstract_source_doc_ids = docIds
+    const { error: upErr } = await sb.from(table).update(patch).eq('id', id)
     if (upErr) throw new Error('save failed: ' + upErr.message)
 
     return new Response(JSON.stringify({

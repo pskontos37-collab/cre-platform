@@ -71,12 +71,12 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const kind: string = body.kind ?? ''
     const id: string = body.id ?? ''
-    if (!['rea', 'pma'].includes(kind) || !id) throw new Error("kind ('rea'|'pma') and id are required")
+    if (!['rea', 'pma', 'jv'].includes(kind) || !id) throw new Error("kind ('rea'|'pma'|'jv') and id are required")
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')
 
-    const table = kind === 'rea' ? 'rea_agreements' : 'management_agreements'
+    const table = kind === 'rea' ? 'rea_agreements' : kind === 'jv' ? 'deals' : 'management_agreements'
     const { data: row, error } = await sb.from(table).select('*').eq('id', id).maybeSingle()
     if (error || !row) throw new Error(`${table} row not found`)
     if (row.property_id && !canReadProperty(caller, row.property_id)) throw new AuthError('No access', 403)
@@ -85,6 +85,7 @@ serve(async (req) => {
     // Source docs (same resolution as agreement-abstract)
     let docIds: string[] = []
     if (kind === 'rea') docIds = ((row.source_docs ?? []) as any[]).map((d: any) => d.id).filter(Boolean)
+    else if (kind === 'jv') docIds = Array.isArray(row.abstract_source_doc_ids) ? row.abstract_source_doc_ids : []
     else {
       const seen = new Set<string>()
       let cur: any = row
@@ -173,8 +174,17 @@ serve(async (req) => {
         .map((s: any) => ({ type: 'document', source: { type: 'url', url: s.signedUrl } }))
     }
 
-    const isRea = kind === 'rea'
-    const prompt = `You are an independent QA reviewer auditing a ${isRea ? 'reciprocal easement/operating agreement (REA/OEA/declaration)' : 'property management agreement (PMA)'} abstract for M&J Wilkow. ADVERSARIALLY VERIFY the abstract below against the source documents — assume it contains errors and try to prove each material value wrong.
+    // JV cross-check payload: the platform's modeled waterfall tiers.
+    let jvTiers: any[] = []
+    if (kind === 'jv') {
+      const { data: tiers } = await sb.from('waterfall_tiers')
+        .select('tier_order, tier_type, description, hurdle_irr, hurdle_em, lp_split_pct, gp_split_pct, pref_rate, is_cumulative, is_pik')
+        .eq('deal_id', id).order('tier_order')
+      jvTiers = tiers ?? []
+    }
+    const kindLabel = kind === 'rea' ? 'reciprocal easement/operating agreement (REA/OEA/declaration)'
+      : kind === 'jv' ? 'joint-venture / LLC operating agreement' : 'property management agreement (PMA)'
+    const prompt = `You are an independent QA reviewer auditing a ${kindLabel} abstract for M&J Wilkow. ADVERSARIALLY VERIFY the abstract below against the source documents — assume it contains errors and try to prove each material value wrong.
 
 SOURCE FILE INVENTORY (a document listed here EXISTS and was available to the abstractor):
 ${inventory}
@@ -182,8 +192,10 @@ ${inventory}
 EXISTENCE DISCIPLINE: NEVER claim an instrument "is not among the provided documents" or set amendment_currency.current=false on the ground that a document is absent when it IS in the inventory. Briefs are 100%-of-text extractions — full evidence of existence and contents. Only a value confirmable by NEITHER raw text NOR a brief NOR an attached PDF may be needs_source.
 
 Method:
-- Check every material field: ${isRea
+- Check every material field: ${kind === 'rea'
   ? 'parties/parcels and roles, amendment chain and currency, operating covenants (obligor + duration), use restrictions (verbatim + who benefits), exclusives (holder must be explicit — never attribute one party\'s protection to another), cost-sharing formulas, approval rights, term/expiration, critical dates.'
+  : kind === 'jv'
+  ? 'every waterfall tier (payment order, split percentages, hurdles — quote the split language verbatim), preferred return rate/compounding/base, promote structure, capital-call mechanics and failure remedies, major-decision list, removal rights, transfer/ROFR/buy-sell provisions, amendment currency. The abstract must reflect THIS layer\'s entity only — flag any term that actually belongs to the other layer\'s agreement.'
   : 'fee percentages and bases (management/construction/leasing), reimbursables and exclusions, termination rights and notice periods, budget/variance authority, reporting deadlines, term dates, amendment currency.'}
 - THE LATEST AMENDMENT CONTROLS — judge currency against the amendment chain in the sources.
 - source_quote MUST be verbatim; if you cannot find supporting text, verdict is unsupported or needs_source.
@@ -195,6 +207,8 @@ ${QA_SCHEMA}
 
 TRACKER VALUES (structured cross-check): ${JSON.stringify(kind === 'rea'
   ? { name: row.name, agreement_date: row.agreement_date, operator: row.operator, members: row.members }
+  : kind === 'jv'
+  ? { deal_name: row.name, layer: row.layer, modeled_waterfall_tiers: jvTiers }
   : { manager_name: row.manager_name, mgmt_fee_pct: row.mgmt_fee_pct, construction_fee_pct: row.construction_fee_pct, leasing_fee_pct: row.leasing_fee_pct, term_start: row.term_start, term_end: row.term_end, termination_notice_days: row.termination_notice_days, budget_variance_pct: row.budget_variance_pct, monthly_report_due_day: row.monthly_report_due_day })}
 
 THE ABSTRACT UNDER REVIEW:
