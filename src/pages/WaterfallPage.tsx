@@ -736,10 +736,31 @@ function Field({ label, caption, children }: { label: string; caption?: string; 
   )
 }
 function NumInput({ value, onChange, step, min, max, wide }: { value: number; onChange: (n: number) => void; step?: number; min?: number; max?: number; wide?: boolean }) {
+  // text input so we can show thousands separators; edit the raw number while focused, reformat on blur
+  const [focused, setFocused] = useState(false)
+  const [draft, setDraft] = useState('')
+  const clamp = (n: number) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n))
+  const display = focused
+    ? draft
+    : (Number.isFinite(value) ? value.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '')
   return (
     <input
-      type="number" value={value} step={step} min={min} max={max}
-      onChange={e => { const n = parseFloat(e.target.value); if (!isNaN(n)) onChange(n) }}
+      type="text" inputMode="decimal" value={display}
+      onFocus={() => { setDraft(Number.isFinite(value) ? String(value) : ''); setFocused(true) }}
+      onChange={e => {
+        const raw = e.target.value.replace(/,/g, '')
+        setDraft(raw)
+        if (raw === '' || raw === '-' || raw === '.' || raw === '-.') return
+        const n = parseFloat(raw)
+        if (!isNaN(n)) onChange(n)
+      }}
+      onBlur={() => { setFocused(false); const n = parseFloat(draft.replace(/,/g, '')); if (!isNaN(n)) onChange(clamp(n)) }}
+      onKeyDown={e => {
+        if (!step || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+        e.preventDefault()
+        const n = clamp((Number.isFinite(value) ? value : 0) + (e.key === 'ArrowUp' ? step : -step))
+        onChange(n); setDraft(String(n))
+      }}
       style={{ ...controlBase, width: wide ? CONTROL_W : 120 }}
     />
   )
