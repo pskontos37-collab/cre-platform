@@ -261,7 +261,7 @@ export function AbstractsExportBar({ properties, propertyId, propertyName, selec
       </select>
 
       <select value={output} onChange={e => setOutput(e.target.value as Output)} style={sel} title="Output file type">
-        <option value="pdf">Polished PDF</option>
+        <option value="pdf">PDF</option>
         <option value="excel">Excel (.xlsx)</option>
       </select>
 
