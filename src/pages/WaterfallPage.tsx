@@ -315,7 +315,7 @@ export function WaterfallPage() {
           </div>
 
           {/* Inputs */}
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 18 }}>
+          <div style={{ display: 'flex', gap: 14, rowGap: 12, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 18 }}>
             <Field label="Gross value ($)"><NumInput value={inputs.grossValue} step={1_000_000} onChange={v => setInputs({ ...inputs, grossValue: v })} wide /></Field>
             <Field label="Closing costs">
               <select
@@ -345,11 +345,14 @@ export function WaterfallPage() {
               </div>
             </Field>
             <Field label={inputs.payoffLabel + ' ($)'}><NumInput value={inputs.payoff} step={500_000} min={0} onChange={v => setInputs({ ...inputs, payoff: v })} wide /></Field>
-            {sel.l2 && <Field label="Entity cash ($)"><NumInput value={inputs.entityCash} step={10_000} onChange={v => setInputs({ ...inputs, entityCash: v })} /></Field>}
+            {sel.l2 && <Field label="Entity cash ($)"><NumInput value={inputs.entityCash} step={10_000} onChange={v => setInputs({ ...inputs, entityCash: v })} wide /></Field>}
             <Field label="As of">
               <input type="date" value={inputs.asOf} onChange={e => setInputs({ ...inputs, asOf: e.target.value })} style={dateStyle} />
             </Field>
-            <button onClick={() => { setInputs(defaultInputs(sel, glForSel?.nca ?? null)); setNcaTouched(false) }} style={resetStyle}>Reset defaults</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'transparent' }}>.</span>
+              <button onClick={() => { setInputs(defaultInputs(sel, glForSel?.nca ?? null)); setNcaTouched(false) }} style={resetStyle}>Reset defaults</button>
+            </div>
           </div>
 
           {result && (
@@ -710,17 +713,17 @@ function InvestorAccounts({ l2, l2Name, classAValue, classBValue, seniorClassVal
 const tblStyle: CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13 }
 const th: CSSProperties = { padding: '4px 8px', fontWeight: 600 }
 const td: CSSProperties = { padding: '6px 8px', color: 'var(--text)' }
-const dateStyle: CSSProperties = {
-  padding: '7px 8px', fontSize: 13, borderRadius: 6,
+// shared control base — one height, one border, box-sizing so every input lines up
+const controlBase: CSSProperties = {
+  height: 38, padding: '0 10px', fontSize: 13, borderRadius: 6, boxSizing: 'border-box',
   border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
 }
+const CONTROL_W = 150
+const dateStyle: CSSProperties = { ...controlBase, width: CONTROL_W }
+const selectStyle: CSSProperties = { ...controlBase, width: CONTROL_W }
 const resetStyle: CSSProperties = {
-  padding: '8px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
-  border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)',
-}
-const selectStyle: CSSProperties = {
-  padding: '7px 8px', fontSize: 13, borderRadius: 6,
-  border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
+  ...controlBase, width: 'auto', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center',
 }
 
 function Field({ label, caption, children }: { label: string; caption?: string; children: ReactNode }) {
@@ -737,7 +740,7 @@ function NumInput({ value, onChange, step, min, max, wide }: { value: number; on
     <input
       type="number" value={value} step={step} min={min} max={max}
       onChange={e => { const n = parseFloat(e.target.value); if (!isNaN(n)) onChange(n) }}
-      style={{ width: wide ? 150 : 110, padding: '7px 8px', fontSize: 13, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+      style={{ ...controlBase, width: wide ? CONTROL_W : 120 }}
     />
   )
 }
