@@ -96,6 +96,14 @@ foreach($d in $deals){
     $fin = & curl.exe -s "$BASE/rest/v1/pipeline_deal_documents?deal_id=eq.$($d.id)&role=eq.financials&select=documents(title,file_name,storage_path,file_size_bytes)" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
     $cand = @($fin | Where-Object { $_.documents.file_name -match '\.pdf$' -and $_.documents.storage_path -and ($_.documents.title + ' ' + $_.documents.file_name) -match '(?i)t-?12|trailing|operating\s*stmt|operating\s*statement|income\s*statement|profit.*loss|p&l|cash\s*flow' })
   }
+  if($cand.Count -eq 0){
+    # last resort: an operating-statement PDF mirrored as role 'other' (prior mirrors default to 'other').
+    # Strict name match so we don't grab OMs / sales reports / surveys.
+    $oth = & curl.exe -s "$BASE/rest/v1/pipeline_deal_documents?deal_id=eq.$($d.id)&role=eq.other&select=documents(title,file_name,storage_path,file_size_bytes)" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
+    $cand = @($oth | Where-Object { $_.documents.file_name -match '\.pdf$' -and $_.documents.storage_path `
+      -and ($_.documents.title + ' ' + $_.documents.file_name) -match '(?i)income\s*statement|p&l|profit.*loss|t-?12|trailing|operating\s*statement' `
+      -and ($_.documents.title + ' ' + $_.documents.file_name) -notmatch '(?i)offering|memorandum|\bom\b|sales|rent\s*roll|survey|warranty|easement|overview|guidance|site\s*plan' })
+  }
   $pick = @($cand | Sort-Object { [long]$_.documents.file_size_bytes } -Descending | Select-Object -First 1)
   if($pick.Count -eq 0){ Write-Output ("  {0}: no operating statement in storage" -f $d.name); $noStmt++; continue }
   $doc = $pick[0].documents
