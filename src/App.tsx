@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { FormsPage } from './pages/FormsPage'
 import { EmergencyManualsPage } from './pages/EmergencyManualsPage'
+import { MonthlyReportsPage } from './pages/MonthlyReportsPage'
 import { InspectionsPage } from './pages/InspectionsPage'
 import { InspectFieldPage } from './pages/InspectFieldPage'
 import { ContactsPage } from './pages/ContactsPage'
@@ -309,6 +310,18 @@ function AppRoutes() {
             <RequirePage pageKey="documents">
               <AppLayout>
                 <DocumentsPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/monthly-reports"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="reports">
+              <AppLayout>
+                <MonthlyReportsPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
