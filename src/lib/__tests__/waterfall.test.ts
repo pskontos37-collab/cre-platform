@@ -112,11 +112,30 @@ describe('computeWaterfall — return of capital', () => {
 // ── Preferred Return ───────────────────────────────────────────────────────
 
 describe('computeWaterfall — preferred return', () => {
-  it('pays 8% pref after ROC is satisfied', () => {
-    // 900k ROC + 72k pref = 972k; give 1_000_000 so there is cash for pref
+  // Ordering matters: ROC (tier 1) runs before the pref tier (tier 2) and pays
+  // down distributedToDate. A CUMULATIVE pref accrues on unreturned capital
+  // (initialContribution - distributedToDate), so once ROC fully returns capital
+  // in the same event there is nothing left to accrue on and pref is 0. A
+  // NON-CUMULATIVE pref accrues on the initial contribution regardless.
+  it('pays no cumulative pref once ROC has fully returned capital this event', () => {
+    // 900k ROC returns all LP capital, so the cumulative pref base is 0; the
+    // 100k remainder flows past the pref tier to the promote split.
     const result = computeWaterfall(baseInput(1_000_000))
-    const prefPayments = result.lineItems.filter(li => li.tierType === 'preferred_return')
-    const totalPref = prefPayments.reduce((s, li) => s + li.amount, 0)
+    const totalPref = result.lineItems
+      .filter(li => li.tierType === 'preferred_return')
+      .reduce((s, li) => s + li.amount, 0)
+    expect(totalPref).toBeCloseTo(0)
+  })
+
+  it('pays 8% pref on the initial contribution when the pref tier is non-cumulative', () => {
+    // Non-cumulative pref ignores the ROC already paid: 900k initial * 8% = 72k.
+    const nonCumulativeTiers = TIERS.map(t =>
+      t.tier_type === 'preferred_return' ? { ...t, is_cumulative: false } : t,
+    )
+    const result = computeWaterfall({ ...baseInput(1_000_000), tiers: nonCumulativeTiers })
+    const totalPref = result.lineItems
+      .filter(li => li.tierType === 'preferred_return')
+      .reduce((s, li) => s + li.amount, 0)
     expect(totalPref).toBeCloseTo(72_000)
   })
 
@@ -129,9 +148,10 @@ describe('computeWaterfall — preferred return', () => {
 // ── Promote Split ──────────────────────────────────────────────────────────
 
 describe('computeWaterfall — promote split', () => {
-  it('splits remaining 80/20 after ROC and pref', () => {
-    // 900k ROC + 72k pref = 972k; give 1_072_000 → 100k for promote
-    const result = computeWaterfall(baseInput(1_072_000))
+  it('splits the post-ROC remainder 80/20', () => {
+    // 900k ROC returns all LP capital (cumulative pref base -> 0), leaving 100k
+    // of the 1_000_000 to split 80/20 between LP and GP.
+    const result = computeWaterfall(baseInput(1_000_000))
     const split = result.lineItems.filter(li => li.tierType === 'promote_split')
     const lpSplit = split.find(li => li.investorType === 'lp')
     const gpSplit = split.find(li => li.investorType === 'gp')
