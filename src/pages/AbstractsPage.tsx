@@ -1117,22 +1117,49 @@ async function openDocPdf(storagePath: string | null) {
   const { data } = await supabase.storage.from('documents').createSignedUrl(storagePath, 3600)
   if (data?.signedUrl) window.open(data.signedUrl, '_blank')
 }
-interface DocMeta { id: string; title: string | null; file_name: string | null; storage_path: string | null }
+interface DocMeta { id: string; title: string | null; file_name: string | null; storage_path: string | null; file_mtime?: string | null; notes?: string | null }
+// The document's real date, for ordering the list. The abstraction (in notes)
+// extracts the instrument's own date — effective/execution/etc. — which beats
+// file_mtime (only the scan date: an old lease scanned in 2018 sorts as 2018).
+// Falls back to file_mtime, then undated (sinks to the bottom).
+const DATE_KEYS = ['effective_date', 'document_date', 'execution_date', 'agreement_date', 'commencement_date', 'lease_date', 'dated']
+function docDate(d: DocMeta): string | null {
+  const n = d.notes ?? ''
+  for (const k of DATE_KEYS) {
+    const m = new RegExp(`"${k}"\\s*:\\s*"(\\d{4}-\\d{2}-\\d{2})"`).exec(n)
+    if (m) return m[1]
+  }
+  const any = /"[a-z_]*date[a-z_]*"\s*:\s*"(\d{4}-\d{2}-\d{2})"/i.exec(n)
+  if (any) return any[1]
+  return d.file_mtime ? d.file_mtime.slice(0, 10) : null
+}
+// Newest first; undated rows fall to the end. Filename breaks ties.
+function byDocDateDesc(a: DocMeta, b: DocMeta): number {
+  const da = docDate(a) ?? '', db = docDate(b) ?? ''
+  return da === db ? (a.file_name ?? '').localeCompare(b.file_name ?? '') : db.localeCompare(da)
+}
 function DocRow({ d, used }: { d: DocMeta; used?: boolean }) {
+  // Prefer the concise filename as the link label — documents.title holds an
+  // AI-generated summary sentence, too long to read as a document reference.
+  const label = d.file_name ?? d.title ?? 'Untitled document'
+  const summary = d.title && d.title !== d.file_name ? d.title : null
+  const date = docDate(d)
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 6px', borderRadius: 6 }}>
+    <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', padding: '2px 4px', borderRadius: 5, minWidth: 0 }}>
       {used !== undefined && (
-        <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap',
+        <span style={{ fontSize: 9, fontWeight: 700, padding: '0 5px', borderRadius: 7, whiteSpace: 'nowrap', flexShrink: 0,
           color: used ? 'var(--accent)' : 'var(--text-faint)', background: used ? 'var(--accent-dim)' : 'var(--surface-2)' }}>
           {used ? 'used' : 'not used'}
         </span>
       )}
-      <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-        title={d.title ?? d.file_name ?? ''}>{d.title ?? d.file_name ?? 'Untitled document'}</span>
+      {date && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>{date}</span>}
       <button onClick={() => void openDocPdf(d.storage_path)} disabled={!d.storage_path}
-        title={d.storage_path ? 'Open the source PDF' : 'No stored file for this document'}
-        style={{ fontSize: 10, fontWeight: 600, padding: '2px 10px', borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: d.storage_path ? 'var(--accent)' : 'var(--text-faint)', cursor: d.storage_path ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>
-        Open PDF ↗
+        title={summary ? `${label}\n\n${summary}` : (d.storage_path ? 'Open the source PDF' : 'No stored file for this document')}
+        style={{ display: 'flex', alignItems: 'baseline', gap: 3, flex: 1, minWidth: 0, textAlign: 'left', fontSize: 11,
+          fontWeight: 500, color: d.storage_path ? 'var(--accent)' : 'var(--text-faint)', background: 'none', border: 'none',
+          padding: 0, cursor: d.storage_path ? 'pointer' : 'default' }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: d.storage_path ? 'underline' : 'none' }}>{label}</span>
+        {d.storage_path && <span style={{ flexShrink: 0 }}>↗</span>}
       </button>
     </div>
   )
@@ -1166,7 +1193,7 @@ function SourceDocsPanel({ docIds, tenant, propertyId }: { docIds: string[]; ten
   const sources = useQuery<DocMeta[]>(async () => {
     if (!docIds.length) return []
     const { data, error } = await supabase.from('documents')
-      .select('id, title, file_name, storage_path').in('id', docIds)
+      .select('id, title, file_name, storage_path, file_mtime, notes').in('id', docIds)
     if (error) throw new Error(error.message)
     return (data ?? []) as DocMeta[]
   }, [docIds.join(',')])
@@ -1178,10 +1205,10 @@ function SourceDocsPanel({ docIds, tenant, propertyId }: { docIds: string[]; ten
     if (!matched.length) return []
     const briefBy = new Map(matched.map(m => [m.id, m.brief_status]))
     const { data } = await supabase.from('documents')
-      .select('id, title, file_name, storage_path').in('id', matched.map(m => m.id))
+      .select('id, title, file_name, storage_path, file_mtime, notes').in('id', matched.map(m => m.id))
     return ((data ?? []) as DocMeta[])
       .map(d => ({ ...d, brief_status: briefBy.get(d.id) }))
-      .sort((a, b) => (a.title ?? a.file_name ?? '').localeCompare(b.title ?? b.file_name ?? ''))
+      .sort(byDocDateDesc)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAll, canBrowse, tenant, propertyId])
   if (!docIds.length) return null

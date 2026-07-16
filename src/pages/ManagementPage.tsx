@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DocAbstractsButton, type AbstractDocRef } from '../components/DocAbstractsButton'
+import { AgreementQaBadge, AgreementQaPanel } from '../components/AgreementQaPanel'
 
 // Discrete, queryable columns (each is a prompt).
 const NUM_FIELDS: { key: keyof MgmtAgreement; label: string; suffix?: string; pct?: boolean }[] = [
@@ -191,10 +192,16 @@ function AgreementEditor({ agreement, effective, onSaved }: {
         </span>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {msg && <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{msg}</span>}
+          <AgreementQaBadge status={agreement.qa_status} />
           {agreement.document_id && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>source doc linked</span>}
           <button onClick={save} disabled={saving} style={btn}>{saving ? 'Saving…' : 'Save terms'}</button>
         </div>
       </div>
+
+      {/* Document-verification verdict (agreement-verify kind=pma): the
+          abstracted PMA terms audited against the executed agreement, with
+          tracker reconciliation where this page's values disagree. */}
+      {agreement.qa && <AgreementQaPanel qa={agreement.qa} qaStatus={agreement.qa_status} qaAt={agreement.qa_at} />}
 
       <Widget title="Key terms" chip="prompted fields · gray = inherited from earlier document">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>

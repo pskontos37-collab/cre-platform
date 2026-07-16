@@ -9,6 +9,7 @@ import {
 } from '../hooks/useServiceAgreements'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
+import { AgreementQaBadge, AgreementQaPanel } from '../components/AgreementQaPanel'
 import { PdfDownloadButton } from '../reports/PdfDownloadButton'
 import type { SaReportGroup } from '../reports/ServiceAgreementsReport'
 
@@ -372,6 +373,7 @@ function VendorCard({ g, todayIso, onChanged }: { g: VendorGroup; todayIso: stri
         )}
         <span style={{ flex: 1 }} />
         <ExpiryBlurb a={a} lifecycle={g.lifecycle} todayIso={todayIso} />
+        <AgreementQaBadge status={a.qaStatus} />
         <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 10px', borderRadius: 99, background: lc.bg, color: lc.color, border: `1px solid ${lc.border}`, whiteSpace: 'nowrap' }}>
           {lc.label}
         </span>
@@ -398,6 +400,10 @@ function VendorCard({ g, todayIso, onChanged }: { g: VendorGroup; todayIso: stri
           {a.notes}
         </div>
       )}
+
+      {/* Document-verification verdict (agreement-verify kind=svc): the
+          tracker's extracted fields checked against the contract itself. */}
+      {a.qa && <AgreementQaPanel qa={a.qa} qaStatus={a.qaStatus} qaAt={a.qaAt} />}
 
       {a.resolution && a.resolvedAt && (
         <div style={{ marginTop: 9, padding: '7px 11px', background: 'var(--surface-2)', border: '1px dashed var(--border-2)', borderRadius: 8, fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>

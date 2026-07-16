@@ -45,6 +45,9 @@ export interface ServiceAgreement {
   docId: string | null
   docTitle: string | null
   filePath: string | null
+  qa: any | null
+  qaStatus: string | null
+  qaAt: string | null
 }
 
 export const EXPIRING_WINDOW_DAYS = 90
@@ -70,7 +73,7 @@ export function useServiceAgreements(propertyIds: string[], propertyNames: Recor
 
     const { data, error } = await supabase
       .from('service_agreements')
-      .select('id, property_id, vendor, service_category, description, agreement_date, start_date, end_date, term_summary, auto_renews, cancel_notice_days, annual_value, pricing_summary, status, notes, resolution, resolved_at, resolved_by_name, resolution_reason, document_id, file_path, documents(title, file_path)')
+      .select('id, property_id, vendor, service_category, description, agreement_date, start_date, end_date, term_summary, auto_renews, cancel_notice_days, annual_value, pricing_summary, status, notes, resolution, resolved_at, resolved_by_name, resolution_reason, document_id, file_path, qa, qa_status, qa_at, documents(title, file_path)')
       .in('property_id', propertyIds)
       .order('vendor', { ascending: true })
     if (error) throw new Error(error.message)
@@ -99,6 +102,9 @@ export function useServiceAgreements(propertyIds: string[], propertyNames: Recor
       docId:            r.document_id,
       docTitle:         r.documents?.title ?? null,
       filePath:         r.file_path ?? r.documents?.file_path ?? null,
+      qa:               r.qa ?? null,
+      qaStatus:         r.qa_status ?? null,
+      qaAt:             r.qa_at ?? null,
     }))
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
 }

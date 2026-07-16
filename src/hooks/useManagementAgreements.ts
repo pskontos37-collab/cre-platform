@@ -34,6 +34,11 @@ export interface MgmtAgreement {
   terms: Record<string, unknown>
   is_current: boolean
   notes: string | null
+  // abstractor-v2 PMA phase (migration 20240104): verified abstract + QA verdict
+  abstract?: any | null
+  qa?: any | null
+  qa_status?: string | null
+  qa_at?: string | null
   properties?: { name: string } | null
   management_agreement_deadlines?: MgmtDeadline[]
 }
