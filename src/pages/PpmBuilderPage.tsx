@@ -14,7 +14,7 @@ import {
   type PpmDraft, type PpmSectionState,
 } from '../hooks/usePpmDrafts'
 import {
-  PPM_SECTIONS, blankDataSheet, verifyNumbers,
+  PPM_SECTIONS, blankDataSheet, verifyNumbers, sectionTitle,
   type PpmDataSheet,
 } from '../lib/ppm/template'
 import { useQuery } from '../hooks/useQuery'
@@ -834,7 +834,7 @@ function SectionsTab({ draft, mutate, setMsg }: {
         if (def.mode === 'template') {
           const rendered = def.render ? def.render(draft.data_sheet) : ''
           return (
-            <Card key={def.key} title={`${def.title} · auto-generated`}>
+            <Card key={def.key} title={`${sectionTitle(def, draft.data_sheet)} · auto-generated`}>
               <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', color: 'var(--text-2)', maxHeight: 260, overflowY: 'auto', lineHeight: 1.55 }}>
                 {rendered || '(fills from the data sheet)'}
               </div>
