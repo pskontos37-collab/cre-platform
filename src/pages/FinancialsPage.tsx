@@ -843,7 +843,7 @@ function InvoiceTable({ rows }: { rows: AccountInvoice[] }) {
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
       <thead>
         <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
-          {['Vendor', 'Invoice #', 'Posted', 'Amount', 'Source'].map(h => <Th key={h}>{h}</Th>)}
+          {['Vendor', 'Invoice #', 'Posted', 'Amount', 'Source'].map(h => <Th key={h} right={h === 'Amount'}>{h}</Th>)}
         </tr>
       </thead>
       <tbody>
@@ -871,7 +871,7 @@ function GlTable({ rows }: { rows: GlTxn[] }) {
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
       <thead>
         <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
-          {['Date', 'Ref', 'Description', 'Debit', 'Credit'].map(h => <Th key={h}>{h}</Th>)}
+          {['Date', 'Ref', 'Description', 'Debit', 'Credit'].map(h => <Th key={h} right={h === 'Debit' || h === 'Credit'}>{h}</Th>)}
         </tr>
       </thead>
       <tbody>
@@ -889,9 +889,9 @@ function GlTable({ rows }: { rows: GlTxn[] }) {
   )
 }
 
-function Th({ children }: { children: ReactNode }) {
+function Th({ children, right }: { children: ReactNode; right?: boolean }) {
   return (
-    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 500, fontSize: 10,
+    <th style={{ padding: '8px 12px', textAlign: right ? 'right' : 'left', fontWeight: 500, fontSize: 10,
       color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
       {children}
     </th>
