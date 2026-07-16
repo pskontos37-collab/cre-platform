@@ -622,11 +622,21 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
         </div>
       </div>
 
-      <ResolutionWorklist row={row} worklist={worklist} resByKey={resByKey} reviewerId={reviewerId} propertyId={propertyId ?? null} onSaved={onSaved} />
+      <ResolutionWorklist row={row} worklist={worklist} resByKey={resByKey} reviewerId={reviewerId} propertyId={propertyId ?? null} onSaved={onSaved} sourceDocIds={srcIds} />
 
       <ReviewPanel row={row} onSaved={onSaved} reviewerId={reviewerId} unresolvedRedCount={unresolvedRedCount} />
 
-      {row.qa && <div id="abstract-verification"><QaPanel qa={row.qa} status={row.qa_status} at={row.qa_at} sourceDocIds={row.source_doc_ids ?? []} resByKey={resByKey} /></div>}
+      {(row.qa || openItems.length > 0) && (
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '6px 2px' }}>
+            Verification &amp; open items — detail{row.qa_status ? ` · ${QA_META[row.qa_status]?.label ?? row.qa_status}` : ''}{openItems.length ? ` · ${openItems.length} open` : ''}
+          </summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+            {row.qa && <div id="abstract-verification"><QaPanel qa={row.qa} status={row.qa_status} at={row.qa_at} sourceDocIds={row.source_doc_ids ?? []} resByKey={resByKey} /></div>}
+            {openItems.length > 0 && <OpenItemsPanel items={openItems} sourceDocIds={srcIds} resByKey={resByKey} />}
+          </div>
+        </details>
+      )}
 
       <div id="abstract-source-docs"><SourceDocsPanel docIds={srcIds} /></div>
 
@@ -783,7 +793,6 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
         </Widget>
       )}
 
-      {openItems.length > 0 && <OpenItemsPanel items={openItems} sourceDocIds={srcIds} resByKey={resByKey} />}
     </div>
   )
 }
@@ -849,15 +858,22 @@ function quotedFragment(text: string): string | null {
   const m = /["“]([^"”]{25,})["”]/.exec(text)
   return m ? m[1] : null
 }
-// Smooth-scroll + brief flash to an anchor id (footnote / triage jump targets).
+// Smooth-scroll + brief flash to an anchor id (footnote / worklist jump targets).
+// Opens any collapsed <details> ancestor first so folded panels reveal their
+// target (the Verification / Open-items detail lives inside a <details>).
 function scrollToId(e: React.MouseEvent, id: string) {
   const el = document.getElementById(id)
   if (!el) return
   e.preventDefault()
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  const prev = el.style.boxShadow
-  el.style.boxShadow = '0 0 0 2px var(--amber)'
-  setTimeout(() => { el.style.boxShadow = prev }, 1200)
+  let p: HTMLElement | null = el.parentElement
+  while (p) { if (p.tagName === 'DETAILS') (p as HTMLDetailsElement).open = true; p = p.parentElement }
+  // Let the details expand before measuring scroll position.
+  setTimeout(() => {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const prev = el.style.boxShadow
+    el.style.boxShadow = '0 0 0 2px var(--amber)'
+    setTimeout(() => { el.style.boxShadow = prev }, 1200)
+  }, 0)
 }
 // Superscript footnote link(s) that jump to the matching open item(s) below.
 function Footnote({ nums }: { nums: number[] }) {
@@ -936,6 +952,37 @@ async function createDocTask(title: string, details: string | null, propertyId: 
   }).select('id').single()
   if (error) throw new Error(error.message)
   return data?.id ?? null
+}
+
+// Open the lease document most relevant to the item being reconciled: the
+// best-cited source doc (via the citation-aware ranker) or, failing a citation,
+// the primary lease instrument (title says "lease", not an ancillary doc).
+async function openBestSourceDoc(citation: string, sourceDocIds: string[]) {
+  if (!sourceDocIds.length) return
+  const { data } = await supabase.from('documents')
+    .select('id, title, file_name, storage_path').in('id', sourceDocIds)
+  const docs = (data ?? []) as Array<{ id: string; title: string | null; file_name: string | null; storage_path: string | null }>
+  if (!docs.length) return
+  let pick = citation && citation.trim() ? rankDocsByCitation(docs, citation)[0] : undefined
+  if (!pick) {
+    pick = docs.find(d => {
+      const t = `${d.title ?? ''} ${d.file_name ?? ''}`.toLowerCase()
+      return /lease/.test(t) && !/(amend|estoppel|guaranty|snda|subordinat|option|notice|assignment|memorandum|commencement)/.test(t)
+    }) ?? docs[0]
+  }
+  await openDocPdf(pick?.storage_path ?? null)
+}
+// One-click into the lease PDF from a reconciliation row (worklist / verify check).
+function LeaseFileLink({ citation, sourceDocIds, label = 'open lease ↗' }: { citation?: string | null; sourceDocIds: string[]; label?: string }) {
+  const [busy, setBusy] = useState(false)
+  if (!sourceDocIds.length) return null
+  return (
+    <button onClick={async () => { setBusy(true); try { await openBestSourceDoc(citation ?? '', sourceDocIds) } finally { setBusy(false) } }}
+      disabled={busy} title="Open the most relevant lease document for this item"
+      style={{ fontSize: 10, fontWeight: 600, padding: '1px 8px', marginLeft: 6, borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+      {busy ? 'opening…' : label}
+    </button>
+  )
 }
 
 // Open a document's signed PDF in a new tab.
@@ -1077,6 +1124,7 @@ interface WorkItem {
   severity: OpenSeverity
   correctable: boolean       // field points at a scalar we can override inline
   currentValue: string
+  citation: string | null    // best hint for the "open lease" link
   sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith'; text: string; jumpId: string }>
 }
 const ORIGIN_LABEL: Record<string, string> = { open: 'Open item', verify: 'Verify', mri: 'MRI', arith: 'Arithmetic' }
@@ -1089,7 +1137,7 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any): Wo
       const v = field ? getPath(effective, field) : undefined
       w = { key, resolvable: true, kind, field, red, severity,
         correctable: !!field && (v == null || typeof v !== 'object'),
-        currentValue: v == null ? '' : String(v), sources: [] }
+        currentValue: v == null ? '' : String(v), citation: null, sources: [] }
       map.set(key, w)
     } else {
       if (red) w.red = true
@@ -1103,8 +1151,9 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any): Wo
   }
   for (const c of (Array.isArray(qa?.field_checks) ? qa.field_checks : [])) {
     if (!c?.verdict || c.verdict === 'confirmed' || !c.field) continue
-    ensure(keyForField(c.field), c.field, 'qa_check', 'discrepancy', true)
-      .sources.push({ origin: 'verify', text: `${VERDICT_META[c.verdict]?.label ?? c.verdict}: ${c.field}${c.note ? ` — ${c.note}` : ''}`, jumpId: 'abstract-verification' })
+    const w = ensure(keyForField(c.field), c.field, 'qa_check', 'discrepancy', true)
+    if (!w.citation && c.citation) w.citation = c.citation
+    w.sources.push({ origin: 'verify', text: `${VERDICT_META[c.verdict]?.label ?? c.verdict}: ${c.field}${c.note ? ` — ${c.note}` : ''}`, jumpId: 'abstract-verification' })
   }
   for (const m of (Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : [])) {
     if (!m?.field) continue
@@ -1124,9 +1173,9 @@ const RES_INPUT: React.CSSProperties = { width: '100%', fontSize: 12, padding: '
 
 // One worklist row: either the resolved view (status + note + undo) or the
 // source line(s) + the four resolution verbs with an inline form.
-function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved }: {
+function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sourceDocIds }: {
   row: AbstractRow; w: WorkItem; resolution?: Resolution
-  reviewerId?: string; propertyId: string | null; onSaved: () => void
+  reviewerId?: string; propertyId: string | null; onSaved: () => void; sourceDocIds: string[]
 }) {
   const [mode, setMode] = useState<null | ResStatus>(null)
   const [note, setNote] = useState('')
@@ -1183,6 +1232,7 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved }: {
             {s.text} <span style={{ color: 'var(--text-faint)' }}>→</span>
           </a>
         ))}
+        <div><LeaseFileLink citation={w.citation} sourceDocIds={sourceDocIds} label="open lease ↗" /></div>
       </div>
       {w.resolvable ? (
         mode === null ? (
@@ -1218,9 +1268,9 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved }: {
 // The single passthrough: one always-open box consolidating everything a
 // reviewer must resolve. Red (discrepancy/confirm/verify/MRI) leads and gates
 // locking; missing-document / note items follow; resolved items fold away.
-function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, onSaved }: {
+function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, onSaved, sourceDocIds }: {
   row: AbstractRow; worklist: WorkItem[]; resByKey: Map<string, Resolution>
-  reviewerId?: string; propertyId: string | null; onSaved: () => void
+  reviewerId?: string; propertyId: string | null; onSaved: () => void; sourceDocIds: string[]
 }) {
   const [showResolved, setShowResolved] = useState(false)
   if (!worklist.length) return null
@@ -1237,11 +1287,11 @@ function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, o
       {red.length === 0 && info.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--green, #22c55e)', fontWeight: 600 }}>✓ All items resolved.</div>
       )}
-      {red.map(w => <WorklistRow key={w.key} row={row} w={w} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} />)}
+      {red.map(w => <WorklistRow key={w.key} row={row} w={w} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} sourceDocIds={sourceDocIds} />)}
       {info.length > 0 && (
         <div style={{ marginTop: red.length ? 8 : 0 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Missing documents / notes</div>
-          {info.map(w => <WorklistRow key={w.key} row={row} w={w} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} />)}
+          {info.map(w => <WorklistRow key={w.key} row={row} w={w} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} sourceDocIds={sourceDocIds} />)}
         </div>
       )}
       {resolved.length > 0 && (
@@ -1250,7 +1300,7 @@ function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, o
             style={{ fontSize: 11, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
             {showResolved ? '▾' : '▸'} {resolved.length} resolved
           </button>
-          {showResolved && resolved.map(w => <WorklistRow key={w.key} row={row} w={w} resolution={resByKey.get(w.key)} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} />)}
+          {showResolved && resolved.map(w => <WorklistRow key={w.key} row={row} w={w} resolution={resByKey.get(w.key)} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} sourceDocIds={sourceDocIds} />)}
         </div>
       )}
     </div>
@@ -1453,6 +1503,7 @@ function QaPanel({ qa, status, at, sourceDocIds, resByKey }: { qa: any; status: 
           <span style={{ fontSize: 10, fontWeight: 700, color: vm.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{vm.label}</span>
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', textDecoration: res ? 'line-through' : 'none' }}>{c.field}</span>
           {c.severity && c.verdict !== 'confirmed' && <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>({c.severity})</span>}
+          <LeaseFileLink citation={c.citation} sourceDocIds={sourceDocIds} />
           {res && <span style={{ fontSize: 9, fontWeight: 700, color: RES_META[res.status].color, whiteSpace: 'nowrap' }}>· {RES_META[res.status].label}</span>}
         </div>
         {c.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.45 }}>{c.note}</div>}
