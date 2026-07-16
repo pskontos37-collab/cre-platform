@@ -43,6 +43,7 @@ export interface RolloverAssumptions {
   lcNewPsf: number              // leasing commission, new deal, $/SF
   lcRenewPsf: number            // LC on renewal, $/SF
   freeRentMonthsNew: number     // free rent on a new deal
+  releaseTermYears?: number     // new-lease term; the space re-rolls every N years (default 7)
 }
 
 export interface OpexAssumptions {
@@ -85,8 +86,10 @@ function leaseYear(l: LeaseLine, roll: RolloverAssumptions, t: number): TenantYe
     return { rent: l.baseRentPsf * Math.pow(1 + l.annualBumpPct, t - 1) * l.sf, capital: 0, occupiedSf: l.sf, isNnn }
   }
 
-  // rolled: blend renew vs new. TI/LC/downtime/free-rent hit the FIRST rolled year.
-  const first = t === rollYear + 1
+  // rolled: blend renew vs new. The space re-rolls every `releaseTermYears`;
+  // TI/LC/downtime/free-rent hit each rollover (lease-start) year.
+  const releaseTerm = Math.max(1, Math.round(roll.releaseTermYears ?? 7))
+  const first = ((t - rollYear - 1) % releaseTerm) === 0   // rollover-event years: rollYear+1, +releaseTerm, ...
   const p = Math.min(1, Math.max(0, roll.renewalProbPct))
   const dt = first ? Math.min(1, roll.downtimeMonths / 12) : 0
   const frNew = first ? Math.min(1, roll.freeRentMonthsNew / 12) : 0

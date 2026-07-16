@@ -119,7 +119,7 @@ export interface UnderwritingModel {
   opex?: UwOpex
 }
 export interface UwLeaseLine { name: string; sf: number; baseRentPsf: number; annualBumpPct: number; termRemainingYears: number; recovery: 'nnn' | 'gross' | 'base_year'; proRataSharePct?: number }
-export interface UwRollover { renewalProbPct: number; marketRentPsf: number; marketRentGrowthPct: number; downtimeMonths: number; tiNewPsf: number; tiRenewPsf: number; lcNewPsf: number; lcRenewPsf: number; freeRentMonthsNew: number }
+export interface UwRollover { renewalProbPct: number; marketRentPsf: number; marketRentGrowthPct: number; downtimeMonths: number; tiNewPsf: number; tiRenewPsf: number; lcNewPsf: number; lcRenewPsf: number; freeRentMonthsNew: number; releaseTermYears?: number }
 export interface UwOpex { recoverableOpexPsf: number; nonRecoverableOpexPsf: number; opexGrowthPct: number; generalVacancyPct: number; creditLossPct: number; capitalReservePsf: number; otherIncomePsf?: number }
 
 export interface Deal {

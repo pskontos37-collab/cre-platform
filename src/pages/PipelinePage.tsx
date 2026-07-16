@@ -1006,15 +1006,34 @@ const gridInput: CSSProperties = { fontSize: 11.5, padding: '4px 6px', borderRad
 
 function UwReturns({ r }: { r: AcqResult }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))', gap: 8 }}>
       <Fact label="Levered IRR" value={pct(r.leveredIrr)} tint={uwIrrColor(r.leveredIrr)} />
       <Fact label="Equity multiple" value={r.equityMultiple ? `${r.equityMultiple.toFixed(2)}x` : '—'} />
+      <Fact label="Profit" value={fmtM(r.profit)} />
       <Fact label="Avg cash-on-cash" value={pct(r.avgCashOnCash)} />
       <Fact label="Unlevered IRR" value={pct(r.unleveredIrr)} />
       <Fact label="Equity" value={fmtM(r.equity)} />
+      <Fact label="Going-in yield" value={pct(r.goingInYieldOnCostPct)} />
       <Fact label="Yield-on-cost (exit)" value={pct(r.stabilizedYieldOnCostPct)} />
+      <Fact label="Value-add spread" value={pct(r.valueAddSpreadPct)} tint={r.valueAddSpreadPct >= 0.01 ? '#2e8b57' : r.valueAddSpreadPct < 0 ? '#c0654e' : 'var(--text)'} />
       <Fact label="DSCR (yr 1)" value={r.yearOneDscr != null ? `${r.yearOneDscr.toFixed(2)}x` : '—'} />
       <Fact label="Debt yield (yr 1)" value={pct(r.yearOneDebtYield)} />
+    </div>
+  )
+}
+// Reconcile the model's year-1 NOI against the OM's implied NOI (price x going-in
+// cap). A large gap usually means missing recoverable OpEx / tenants / other income.
+function UwReconciliation({ deal, modelNoi }: { deal: Deal; modelNoi: number }) {
+  if (deal.askPrice == null || deal.goingInCap == null || deal.goingInCap <= 0) return null
+  const omNoi = deal.askPrice * deal.goingInCap
+  if (omNoi <= 0) return null
+  const delta = (modelNoi - omNoi) / omNoi
+  const off = Math.abs(delta) > 0.1
+  return (
+    <div style={{ border: `1px solid ${off ? '#c0654e' : 'var(--border)'}`, borderRadius: 8, background: off ? 'rgba(192,101,78,0.06)' : 'var(--surface-2, rgba(0,0,0,.03))', padding: '8px 11px', fontSize: 11.5 }}>
+      <span style={{ fontWeight: 700, color: off ? '#c0654e' : 'var(--text-muted)' }}>{off ? '⚠ NOI reconciliation' : '✓ NOI reconciliation'}</span>{'  '}
+      Model Yr-1 NOI <b>{fmtM(modelNoi)}</b> vs OM-implied <b>{fmtM(omNoi)}</b> ({deal.askPrice != null ? fmtM(deal.askPrice) : '—'} × {pct(deal.goingInCap)}) — Δ <b style={{ color: off ? '#c0654e' : 'var(--text)' }}>{(delta * 100).toFixed(0)}%</b>.
+      {off ? ' Check recoverable OpEx, missing tenants, or other income before relying.' : ''}
     </div>
   )
 }
@@ -1080,6 +1099,7 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
         First-pass levered underwrite. Edit the assumptions; returns recompute live. <b>Save</b> writes them to the deal. {deal.underwritingModel ? '' : 'Seeded from the OM guidance / cap; tune before relying.'}
       </div>
       <UwReturns r={r} />
+      <UwReconciliation deal={deal} modelNoi={r.yearlyNoi[0] ?? 0} />
       <div>
         <SectionLabel2>Assumptions</SectionLabel2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
@@ -1105,7 +1125,7 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
   )
 }
 
-const D_ROLL: UwRollover = { renewalProbPct: 0.7, marketRentPsf: 0, marketRentGrowthPct: 0.03, downtimeMonths: 6, tiNewPsf: 30, tiRenewPsf: 10, lcNewPsf: 15, lcRenewPsf: 5, freeRentMonthsNew: 3 }
+const D_ROLL: UwRollover = { renewalProbPct: 0.7, marketRentPsf: 0, marketRentGrowthPct: 0.03, downtimeMonths: 6, tiNewPsf: 30, tiRenewPsf: 10, lcNewPsf: 15, lcRenewPsf: 5, freeRentMonthsNew: 3, releaseTermYears: 7 }
 const D_OPEX: UwOpex = { recoverableOpexPsf: 0, nonRecoverableOpexPsf: 0, opexGrowthPct: 0.03, generalVacancyPct: 0, creditLossPct: 0.005, capitalReservePsf: 0.25, otherIncomePsf: 0 }
 
 function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean; onSaveModel: (m: UnderwritingModel, c: UwComputed) => void }) {
@@ -1157,6 +1177,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
         Bottoms-up lease-by-lease underwrite (NNN recoveries, blended rollover, TI/LC, forward-NOI exit). {leases.length ? '' : 'No rent roll yet — run enrich_deal.ps1 -Deal "' + deal.name + '" to auto-populate from the rent roll, or add tenants below.'}
       </div>
       <UwReturns r={r} />
+      <UwReconciliation deal={deal} modelNoi={r.yearlyNoi[0] ?? 0} />
 
       {/* rent roll */}
       <div>
@@ -1188,7 +1209,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
         <SectionLabel2>NOI by year</SectionLabel2>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 11.5 }}>
-            <thead><tr>{['Year', 'Base rent', 'Recoveries', 'OpEx', 'Vac/credit', 'NOI', 'Capital'].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Year', 'Base rent', 'Recoveries', 'OpEx', 'Vac/credit', 'NOI', 'Capital', 'DSCR', 'Debt yld'].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
             <tbody>
               {r.breakdown.map(b => (
                 <tr key={b.year}>
@@ -1199,6 +1220,8 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
                   <td style={recCell}>{fmtM(-b.vacancyCredit)}</td>
                   <td style={{ ...sgCell, textAlign: 'right', fontWeight: 700, color: 'var(--text)' }}>{fmtM(b.noi)}</td>
                   <td style={recCell}>{b.capital ? fmtM(-b.capital) : '—'}</td>
+                  <td style={recCell}>{r.dscrByYear[b.year - 1] != null ? r.dscrByYear[b.year - 1]!.toFixed(2) + 'x' : '—'}</td>
+                  <td style={recCell}>{pct(r.debtYieldByYear[b.year - 1])}</td>
                 </tr>
               ))}
             </tbody>
@@ -1219,6 +1242,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
           <MInput label="LC new $/SF" kind="usd" value={roll.lcNewPsf} onChange={setRoll('lcNewPsf')} disabled={busy} />
           <MInput label="LC renew $/SF" kind="usd" value={roll.lcRenewPsf} onChange={setRoll('lcRenewPsf')} disabled={busy} />
           <MInput label="Free rent (mo)" kind="yr" value={roll.freeRentMonthsNew} onChange={setRoll('freeRentMonthsNew')} disabled={busy} />
+          <MInput label="Re-lease term (yrs)" kind="yr" value={roll.releaseTermYears ?? 7} onChange={setRoll('releaseTermYears')} disabled={busy} />
         </div>
       </div>
 

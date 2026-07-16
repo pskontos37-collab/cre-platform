@@ -47,6 +47,12 @@ export interface AcqResult {
   yearOneDscr: number | null
   yearOneDebtYield: number | null
   stabilizedYieldOnCostPct: number // exit-year NOI / total basis
+  // — IC-grade metrics —
+  profit: number                   // total cash to equity minus equity invested
+  goingInYieldOnCostPct: number    // year-1 NOI / total basis
+  valueAddSpreadPct: number        // stabilized yield-on-cost minus exit cap (development spread)
+  dscrByYear: (number | null)[]    // NOI_t / debt service
+  debtYieldByYear: (number | null)[] // NOI_t / loan balance_t
 }
 
 export interface ReturnsInput {
@@ -115,6 +121,16 @@ export function computeReturns(inp: ReturnsInput): AcqResult {
   const equityMultiple = invested > 0 ? returned / invested : 0
   const avgCashOnCash = equity > 0 ? yearlyOperatingCf.reduce((s, c) => s + c, 0) / hold / equity : 0
 
+  // per-year DSCR + debt yield (debt yield on the amortized balance)
+  const dscrByYear: (number | null)[] = []
+  const debtYieldByYear: (number | null)[] = []
+  for (let t = 1; t <= hold; t++) {
+    dscrByYear.push(annualDs > 0 ? inp.noiByYear[t - 1] / annualDs : null)
+    const bal = loanAmount > 0 ? (io ? loanAmount : balanceAfter(loanAmount, inp.loanRatePct, inp.amortYears, t)) : 0
+    debtYieldByYear.push(bal > 0 ? inp.noiByYear[t - 1] / bal : null)
+  }
+  const stabilizedYieldOnCostPct = totalBasis > 0 ? inp.exitYearNoi / totalBasis : 0
+
   return {
     totalBasis, loanAmount, equity,
     goingInCapPct: inp.purchasePrice > 0 ? inp.noiByYear[0] / inp.purchasePrice : 0,
@@ -122,9 +138,12 @@ export function computeReturns(inp: ReturnsInput): AcqResult {
     exitYearNoi: inp.exitYearNoi, exitValue, loanPayoff, netSaleProceeds,
     leveredIrr: xirr(lev), unleveredIrr: xirr(unlev),
     equityMultiple, avgCashOnCash,
-    yearOneDscr: annualDs > 0 ? inp.noiByYear[0] / annualDs : null,
-    yearOneDebtYield: loanAmount > 0 ? inp.noiByYear[0] / loanAmount : null,
-    stabilizedYieldOnCostPct: totalBasis > 0 ? inp.exitYearNoi / totalBasis : 0,
+    yearOneDscr: dscrByYear[0], yearOneDebtYield: debtYieldByYear[0],
+    stabilizedYieldOnCostPct,
+    profit: returned - invested,
+    goingInYieldOnCostPct: totalBasis > 0 ? inp.noiByYear[0] / totalBasis : 0,
+    valueAddSpreadPct: stabilizedYieldOnCostPct - inp.exitCapPct,
+    dscrByYear, debtYieldByYear,
   }
 }
 
