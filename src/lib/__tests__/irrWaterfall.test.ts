@@ -306,12 +306,15 @@ describe('computeSellToday — Magnolia (PS Samples 12/31/25)', () => {
         tiers: MAG_L2_TIERS,
       },
     })
-    expect(r.ladderPool).toBeCloseTo(43763989.05, 1)
-    expect(r.l1LpTotal).toBeCloseTo(39387590.145, 0)
-    expect(r.l1GpTotal).toBeCloseTo(4376398.905, 0)
-    // L2: pool 5,240,678.77 — all to Class A (10% hurdle needs $21.1M); B units zero today
-    expect(r.l2!.pool).toBeCloseTo(5240678.765, 1)
-    expect(r.l2!.classAValue).toBeCloseTo(5240678.765, 0)
+    // pool = 116,000,000 × 0.985 − 69,500,000 (MetLife pref payoff) − 981,010.95 = 43,778,989.05
+    expect(r.ladderPool).toBeCloseTo(43778989.05, 1)
+    // Actual XIRR below the 10% tier-1 hurdle, so the whole pool splits 90/10
+    expect(r.l1LpTotal).toBeCloseTo(39401090.145, 0)   // pool × 0.9
+    expect(r.l1GpTotal).toBeCloseTo(4377898.905, 0)    // pool × 0.1
+    // L2: pool = l1 GP take + entity cash 864,279.86 = 5,242,178.765 — all to Class A
+    // (10% hurdle needs $21.1M); B units zero today
+    expect(r.l2!.pool).toBeCloseTo(5242178.765, 1)
+    expect(r.l2!.classAValue).toBeCloseTo(5242178.765, 0)
     expect(r.l2!.classBValue).toBeCloseTo(0, 0)
   })
 })

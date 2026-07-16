@@ -16,9 +16,17 @@ describe('acqPromote', () => {
   it('builds a pari-passu pref tier plus the promote tiers', () => {
     const tiers = buildPromoteTiers(STD)
     expect(tiers).toHaveLength(3)
-    expect(tiers[0]).toMatchObject({ tier_type: 'promote_split', hurdle_irr: 0.08, lp_split_pct: 0.9, gp_split_pct: 0.1 })
-    expect(tiers[1]).toMatchObject({ hurdle_irr: 0.15, lp_split_pct: 0.8, gp_split_pct: 0.2 })
-    expect(tiers[2]).toMatchObject({ hurdle_irr: null, lp_split_pct: 0.7, gp_split_pct: 0.3 })
+    // gp/lp splits derived by subtraction (e.g. 1 - 0.9) carry IEEE-754 error,
+    // so match the exact literals with toMatchObject and the derived side with
+    // toBeCloseTo. tier 1 = pari-passu to the 8% pref, 90/10.
+    expect(tiers[0]).toMatchObject({ tier_type: 'promote_split', hurdle_irr: 0.08, lp_split_pct: 0.9 })
+    expect(tiers[0].gp_split_pct).toBeCloseTo(0.1, 10)
+    // tier 2 = 15% hurdle, 80/20
+    expect(tiers[1]).toMatchObject({ hurdle_irr: 0.15, gp_split_pct: 0.2 })
+    expect(tiers[1].lp_split_pct).toBeCloseTo(0.8, 10)
+    // tier 3 = residual, 70/30
+    expect(tiers[2]).toMatchObject({ hurdle_irr: null, gp_split_pct: 0.3 })
+    expect(tiers[2].lp_split_pct).toBeCloseTo(0.7, 10)
   })
 
   it('routes all cash to the LP when the GP takes no equity and no promote', () => {
