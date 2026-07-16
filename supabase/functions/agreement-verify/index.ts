@@ -44,6 +44,52 @@ async function anthropicJson(key: string, model: string, content: any[], maxToke
   return out
 }
 
+// OpenAI verdict via the Responses API (JSON mode) — fallback when Anthropic is
+// overloaded. Same content translation + envelope-unwrap as anthropicJson.
+const QA_OPENAI_MODEL = Deno.env.get('QA_OPENAI_MODEL') ?? 'gpt-4.1'
+async function openaiVerifyJson(key: string, content: any[], maxTokens: number): Promise<any> {
+  const oai: any[] = []
+  for (const c of content) {
+    if (c.type === 'text') oai.push({ type: 'input_text', text: c.text })
+    else if (c.type === 'document' && c.source?.type === 'base64') {
+      oai.push({ type: 'input_file', filename: 'document.pdf', file_data: `data:${c.source.media_type};base64,${c.source.data}` })
+    }
+  }
+  oai.push({ type: 'input_text', text: 'Return ONLY a single valid JSON object for the submit_qa verdict described above — no markdown, no commentary.' })
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: QA_OPENAI_MODEL, max_output_tokens: maxTokens,
+      text: { format: { type: 'json_object' } },
+      input: [{ role: 'user', content: oai }],
+    }),
+  })
+  const d = await r.json()
+  if (!r.ok) throw new Error('OpenAI API error: ' + JSON.stringify(d))
+  if (d.status === 'incomplete') throw new Error('Verdict truncated at max_output_tokens — retry')
+  let raw = typeof d.output_text === 'string' ? d.output_text : ''
+  if (!raw) for (const item of (d.output ?? [])) for (const cc of (item.content ?? [])) if (cc.type === 'output_text') raw += cc.text ?? ''
+  const looksRight = (o: any) => o && typeof o === 'object' && !Array.isArray(o) && ('field_checks' in o || 'summary' in o || 'confidence' in o)
+  let out = JSON.parse(raw)
+  if (!looksRight(out)) { const kids = Object.values(out).filter(looksRight); if (kids.length === 1) out = kids[0] }
+  if (!looksRight(out)) throw new Error('OpenAI returned a malformed verdict envelope — retry')
+  return out
+}
+// Fall back to OpenAI whenever the Anthropic API is UNUSABLE — transient
+// overload/rate-limit, or a hard credit/billing block.
+function isOverloaded(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e)
+  return /overloaded_error|"Overloaded"|\b529\b|rate_limit|too many requests|credit balance|Plans & Billing|insufficient|billing/i.test(m)
+}
+async function verifyJson(aKey: string, oKey: string, model: string, content: any[], maxTokens: number): Promise<any> {
+  try { return await anthropicJson(aKey, model, content, maxTokens) }
+  catch (e) {
+    if (oKey && isOverloaded(e)) return await openaiVerifyJson(oKey, content, maxTokens)
+    throw e
+  }
+}
+
 const QA_SCHEMA = `{
  "confidence": "high"|"medium"|"low",
  "summary": str,
@@ -75,6 +121,7 @@ serve(async (req) => {
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')
+    const openaiKey = Deno.env.get('OPENAI_API_KEY') ?? ''   // fallback provider when Anthropic is overloaded
 
     const table = kind === 'rea' ? 'rea_agreements' : kind === 'jv' ? 'deals' : kind === 'svc' ? 'service_agreements' : 'management_agreements'
     const { data: row, error } = await sb.from(table).select('*').eq('id', id).maybeSingle()
@@ -240,10 +287,10 @@ ${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs):\n${briefParts.joi
       /page|too long|too large|exceed|prompt is too long/i.test(e instanceof Error ? e.message : String(e))
     let qa: any
     try {
-      qa = await anthropicJson(anthropicKey, callModel, [...attachments, { type: 'text', text: prompt }], 12000)
+      qa = await verifyJson(anthropicKey, openaiKey, callModel,[...attachments, { type: 'text', text: prompt }], 12000)
     } catch (e) {
       if (!attachments.length || !isCapError(e)) throw e
-      qa = await anthropicJson(anthropicKey, callModel, [{ type: 'text', text: prompt }], 12000)
+      qa = await verifyJson(anthropicKey, openaiKey, callModel,[{ type: 'text', text: prompt }], 12000)
       attachments = []
     }
 
