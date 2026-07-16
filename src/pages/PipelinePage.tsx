@@ -71,12 +71,20 @@ export function PipelinePage() {
   const [view, setView] = useState<'pipeline' | 'analytics' | 'om' | 'partners' | 'buybox' | 'brokers'>('pipeline')
   const [assetFilter, setAssetFilter] = useState<'' | AssetType>('')
   const [riskFilter, setRiskFilter] = useState<'' | RiskProfile>('')
+  const [search, setSearch] = useState('')
+  const [fitFilter, setFitFilter] = useState<'' | FitCategory>('')
   const [boardMode, setBoardMode] = useState<'board' | 'table'>('board')
   const [openId, setOpenId] = useState<string | null>(null)
   const [composerOpen, setComposerOpen] = useState(false)
 
-  const visible = deals.filter(d =>
-    (!assetFilter || d.assetType === assetFilter) && (!riskFilter || d.riskProfile === riskFilter))
+  const hasBuyBox = buyBoxes.some(b => b.active)
+  const visible = deals.filter(d => {
+    if (assetFilter && d.assetType !== assetFilter) return false
+    if (riskFilter && d.riskProfile !== riskFilter) return false
+    if (search.trim() && !`${d.name} ${d.city ?? ''} ${d.state ?? ''}`.toLowerCase().includes(search.toLowerCase().trim())) return false
+    if (fitFilter && hasBuyBox && fitCategory(bestFit(dealToFit(d), buyBoxes)) !== fitFilter) return false
+    return true
+  })
   const metrics = useMemo(() => pipelineMetrics(visible), [visible])
   const openDeal = deals.find(d => d.id === openId) ?? null
 
@@ -91,7 +99,7 @@ export function PipelinePage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <MeetingDeckButton deals={deals} preparedBy={appUser?.full_name || appUser?.email || 'M&J Wilkow'} />
+          <MeetingDeckButton deals={deals} buyBoxes={buyBoxes} partners={partnersQ.data ?? []} preparedBy={appUser?.full_name || appUser?.email || 'M&J Wilkow'} />
           <button style={primaryBtn} onClick={() => setComposerOpen(true)}>+ New deal</button>
         </div>
       </div>
@@ -121,12 +129,13 @@ export function PipelinePage() {
             <PipelineView deals={visible} totalCount={deals.length} buyBoxes={buyBoxes}
               boardMode={boardMode} setBoardMode={setBoardMode}
               assetFilter={assetFilter} setAssetFilter={setAssetFilter}
-              riskFilter={riskFilter} setRiskFilter={setRiskFilter} onOpen={setOpenId} />
+              riskFilter={riskFilter} setRiskFilter={setRiskFilter}
+              search={search} setSearch={setSearch} fitFilter={fitFilter} setFitFilter={setFitFilter} onOpen={setOpenId} />
           )}
           {view === 'analytics' && <AnalyticsView deals={visible} buyBoxes={buyBoxes} />}
           {view === 'om' && <OmView rows={omQ.data ?? []} createdBy={appUser?.id ?? null} buyBoxes={buyBoxes}
             onChanged={() => { omQ.refetch(); refetch() }} onOpen={setOpenId} />}
-          {view === 'partners' && <PartnersView partners={partnersQ.data ?? []} onChanged={partnersQ.refetch} />}
+          {view === 'partners' && <PartnersView partners={partnersQ.data ?? []} deals={deals} onOpen={setOpenId} onChanged={partnersQ.refetch} />}
           {view === 'buybox' && <BuyBoxView buyBoxes={buyBoxes} deals={visible} onChanged={buyBoxesQ.refetch} />}
           {view === 'brokers' && <BrokersView brokers={brokers} deals={deals} onChanged={brokersQ.refetch} />}
         </>
@@ -158,8 +167,11 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
 function PipelineView(p: {
   deals: Deal[]; totalCount: number; buyBoxes: BuyBox[]; boardMode: 'board' | 'table'; setBoardMode: (m: 'board' | 'table') => void
   assetFilter: '' | AssetType; setAssetFilter: (a: '' | AssetType) => void
-  riskFilter: '' | RiskProfile; setRiskFilter: (r: '' | RiskProfile) => void; onOpen: (id: string) => void
+  riskFilter: '' | RiskProfile; setRiskFilter: (r: '' | RiskProfile) => void
+  search: string; setSearch: (s: string) => void; fitFilter: '' | FitCategory; setFitFilter: (f: '' | FitCategory) => void
+  onOpen: (id: string) => void
 }) {
+  const hasBuyBox = p.buyBoxes.some(b => b.active)
   return (
     <>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
@@ -179,6 +191,17 @@ function PipelineView(p: {
           <option value="">All profiles</option>
           {RISK_ORDER.map(r => <option key={r} value={r}>{RISK_LABEL[r]}</option>)}
         </select>
+        {hasBuyBox && (
+          <select value={p.fitFilter} onChange={e => p.setFitFilter(e.target.value as any)} style={selectStyle}>
+            <option value="">All fit</option>
+            <option value="on">On-strategy</option>
+            <option value="partial">Partial fit</option>
+            <option value="off">Off-strategy</option>
+          </select>
+        )}
+        <input value={p.search} onChange={e => p.setSearch(e.target.value)} placeholder="Search deals…"
+          style={{ ...selectStyle, minWidth: 150 }} />
+        {p.search && <button style={miniX} title="Clear search" onClick={() => p.setSearch('')}>✕</button>}
         <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-faint)' }}>{p.deals.length} deals</span>
       </div>
 
@@ -818,7 +841,45 @@ function ExtractResult({ ex, buyBoxes, onCreate, creating }: { ex: OmExtraction;
 }
 
 // ── PARTNERS VIEW ─────────────────────────────────────────────────────────────
-function PartnersView({ partners, onChanged }: { partners: CapitalPartner[]; onChanged: () => void }) {
+// Firm-wide raise view: each active deal's top mandate-fit partners.
+function PortfolioLpMatch({ deals, partners, onOpen }: { deals: Deal[]; partners: CapitalPartner[]; onOpen: (id: string) => void }) {
+  const mps: MatchPartner[] = partners.map(p => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active }))
+  if (!partners.some(p => p.active)) return null
+  const rows = deals
+    .filter(d => !isTerminal(d.stage) && d.stage !== 'closed')
+    .map(d => {
+      const onDeal = new Set(d.lps.map(l => l.partnerId))
+      const md: MatchDeal = { assetType: d.assetType, state: d.state, market: d.market, submarket: d.submarket, askPrice: d.askPrice, projIrr: d.projIrr }
+      const top = rankPartners(md, mps, onDeal).filter(m => m.score > 0).slice(0, 3)
+      const raised = d.lps.reduce((a, l) => a + (l.committedAmount ?? 0) + (l.softAmount ?? 0), 0)
+      const gap = d.equityRequired != null ? Math.max(0, d.equityRequired - raised) : null
+      return { d, top, gap }
+    })
+    .filter(r => r.top.length > 0)
+    .sort((a, b) => (b.gap ?? 0) - (a.gap ?? 0))
+  if (!rows.length) return null
+  return (
+    <div style={{ border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: 12, padding: '15px 16px', marginBottom: 16 }}>
+      <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Deal &harr; LP matching</div>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', margin: '2px 0 12px' }}>Top mandate-fit partners for each active deal (open equity gap first). Click a deal to open its Capital tab.</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {rows.map(({ d, top, gap }) => (
+          <div key={d.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 1.4fr) auto 2fr', gap: 10, alignItems: 'center', padding: '7px 0', borderTop: '1px solid var(--border)', fontSize: 12 }}>
+            <button onClick={() => onOpen(d.id)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontWeight: 700, color: 'var(--text)' }}>{d.name}</button>
+            <span style={{ color: 'var(--text-faint)', fontSize: 11, whiteSpace: 'nowrap' }}>{gap != null ? `${fmtM(gap)} gap` : '—'}</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {top.map(m => {
+                const c = m.partner.tier === 'current' ? '#2e8b57' : m.partner.tier === 'tier1_prospect' ? RISK_COLOR.core_plus : 'var(--text-faint)'
+                return <span key={m.partner.id} title={`${PARTNER_TIER_LABEL[m.partner.tier]} · ${m.signals.filter(s => s.status === 'hit').map(s => s.label).join(', ') || 'agnostic'}`} style={{ fontSize: 10.5, color: c, border: `1px solid ${c}55`, borderRadius: 999, padding: '1px 8px' }}>{m.partner.name}</span>
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+function PartnersView({ partners, deals, onOpen, onChanged }: { partners: CapitalPartner[]; deals: Deal[]; onOpen: (id: string) => void; onChanged: () => void }) {
   const [editing, setEditing] = useState<CapitalPartner | 'new' | null>(null)
   const groups: [string, CapitalPartner[]][] = [
     ['Current partners', partners.filter(p => p.tier === 'current')],
@@ -827,6 +888,7 @@ function PartnersView({ partners, onChanged }: { partners: CapitalPartner[]; onC
   ]
   return (
     <>
+      <PortfolioLpMatch deals={deals} partners={partners} onOpen={onOpen} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '-4px 0 12px' }}>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>The LP mandate book from Partner Tracking — used to match live deals to the right capital.</div>
         <button style={{ ...primaryBtn, marginLeft: 'auto' }} onClick={() => setEditing('new')}>+ Add partner</button>
@@ -1302,7 +1364,7 @@ function DealDrawer({ deal, partners, team, buyBoxes, onClose, onChanged }: { de
                 🗺 Site plan
               </a>
             )}
-            <InvestmentSummaryButtons deal={deal} preparedBy={appUser?.full_name || appUser?.email || 'M&J Wilkow'} />
+            <InvestmentSummaryButtons deal={deal} buyBoxes={buyBoxes} partners={partners} preparedBy={appUser?.full_name || appUser?.email || 'M&J Wilkow'} />
             {deal.stage !== 'closed'
               ? <button style={primaryBtn} disabled={busy} onClick={() => setCloseOpen(true)}>Close &amp; hand off →</button>
               : deal.propertyId && <a href={`/properties/${deal.propertyId}`} style={linkBtn}>View asset: {deal.propertyName ?? 'property'} ↗</a>}
@@ -1333,7 +1395,7 @@ function DealDrawer({ deal, partners, team, buyBoxes, onClose, onChanged }: { de
 // (cover · snapshot · summary table · a discussion slide per deal · watchlist),
 // built entirely from the structured tracker (no per-deal AI call, so it's fast
 // and complete). Distinct from the per-deal AI Investment Summary below.
-function MeetingDeckButton({ deals, preparedBy }: { deals: Deal[]; preparedBy: string }) {
+function MeetingDeckButton({ deals, buyBoxes, partners, preparedBy }: { deals: Deal[]; buyBoxes: BuyBox[]; partners: CapitalPartner[]; preparedBy: string }) {
   const today = new Date()
   const meetingDate = today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
   return (
@@ -1363,13 +1425,26 @@ function MeetingDeckButton({ deals, preparedBy }: { deals: Deal[]; preparedBy: s
           } catch (e) { console.warn('[meeting-deck] site-plan image failed:', sp.title ?? sp.dealId, e) }
         }))
         console.log(`[meeting-deck] site plans embedded ${Object.keys(sitePlanImgs).length}/${extrasData.sitePlans.length}`)
+        // buy-box fit + top LP per deal (Phase 4 polish)
+        const fit: Record<string, string> = {}
+        if (buyBoxes.some(b => b.active) || partners.some(p => p.active)) {
+          const mps: MatchPartner[] = partners.map(p => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active }))
+          for (const d of deals) {
+            const parts: string[] = []
+            if (buyBoxes.some(b => b.active)) { const bf = bestFit(dealToFit(d), buyBoxes); if (bf) parts.push(FIT_LABEL[fitCategory(bf)]) }
+            const md: MatchDeal = { assetType: d.assetType, state: d.state, market: d.market, submarket: d.submarket, askPrice: d.askPrice, projIrr: d.projIrr }
+            const top = rankPartners(md, mps, new Set(d.lps.map(l => l.partnerId))).filter(m => m.score > 0).slice(0, 2).map(m => m.partner.name)
+            if (top.length) parts.push('LPs: ' + top.join(', '))
+            if (parts.length) fit[d.id] = parts.join('  ·  ')
+          }
+        }
         return buildPipelineMeetingDeck({
           deals,
           metrics: pipelineMetrics(deals),
           preparedBy,
           meetingDate,
           generatedAt: today.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }),
-          extras: { sitePlanImgs, tenants: extrasData.tenants, occupancy: extrasData.occupancy },
+          extras: { sitePlanImgs, tenants: extrasData.tenants, occupancy: extrasData.occupancy, fit },
         })
       }}
     />
@@ -1409,11 +1484,17 @@ function promoteForMemo(um: UnderwritingModel | null | undefined) {
 }
 
 // AI-narrative fetch shape (ic-memo fn).
-function InvestmentSummaryButtons({ deal, preparedBy }: { deal: Deal; preparedBy: string }) {
+function InvestmentSummaryButtons({ deal, buyBoxes, partners, preparedBy }: { deal: Deal; buyBoxes: BuyBox[]; partners: CapitalPartner[]; preparedBy: string }) {
   const buildInput = async () => {
     const memo = await generateIcMemo(deal.id)
+    const best = buyBoxes.some(b => b.active) ? bestFit(dealToFit(deal), buyBoxes) : null
+    const md: MatchDeal = { assetType: deal.assetType, state: deal.state, market: deal.market, submarket: deal.submarket, askPrice: deal.askPrice, projIrr: deal.projIrr }
+    const mps: MatchPartner[] = partners.map(p => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active }))
+    const topLps = rankPartners(md, mps, new Set(deal.lps.map(l => l.partnerId))).filter(m => m.score > 0).slice(0, 4).map(m => m.partner.name)
     return {
       promote: promoteForMemo(deal.underwritingModel),
+      strategyFit: best ? { category: FIT_LABEL[fitCategory(best)], buyBox: best.bb.name, score: Math.round(best.fit.score * 100) } : null,
+      topLps,
       deal: {
         name: deal.name, assetType: deal.assetType, riskProfile: deal.riskProfile, subType: deal.subType,
         submarket: deal.submarket, city: deal.city, state: deal.state, glaSf: deal.glaSf, yearBuilt: deal.yearBuilt,

@@ -43,6 +43,8 @@ export interface IcMemoInput {
     gpIrr: number | null; gpEm: number | null
     gpPromote: number; gpPromotePctOfProfit: number
   } | null
+  strategyFit?: { category: string; buyBox: string; score: number } | null
+  topLps?: string[]
   memo: {
     headline?: string
     executive_summary?: string
@@ -84,7 +86,7 @@ function Para({ children }: { children: string }) {
 }
 function Divider() { return <View style={{ borderTopWidth: 0.75, borderTopColor: RULE, marginVertical: 12 }} /> }
 
-function IcMemoDoc({ deal, memo, preparedBy, generatedAt, promote }: IcMemoInput) {
+function IcMemoDoc({ deal, memo, preparedBy, generatedAt, promote, strategyFit, topLps }: IcMemoInput) {
   const profile = `${RISK_LABEL[deal.riskProfile] ?? deal.riskProfile} ${ASSET_LABEL[deal.assetType] ?? deal.assetType}`
   const loc = [deal.city, deal.state].filter(Boolean).join(', ')
   const committed = deal.lps.reduce((a, l) => a + (l.committed ?? 0), 0)
@@ -183,6 +185,12 @@ function IcMemoDoc({ deal, memo, preparedBy, generatedAt, promote }: IcMemoInput
               <Metric label="GP promote" value={fmt(promote.gpPromote)} />
             </View>
           </>
+        ) : null}
+        {(strategyFit || (topLps && topLps.length > 0)) ? (
+          <View style={{ marginBottom: 6 }}>
+            {strategyFit ? <Text style={{ fontSize: 8.5, color: TEXT_MUTED }}>{`Strategy fit: ${strategyFit.category} — ${safe(strategyFit.buyBox)} (${strategyFit.score}%)`}</Text> : null}
+            {topLps && topLps.length > 0 ? <Text style={{ fontSize: 8.5, color: TEXT_MUTED, marginTop: 2 }}>{`Suggested LPs (mandate fit): ${topLps.map(safe).join(', ')}`}</Text> : null}
+          </View>
         ) : null}
         {deal.lps.length > 0 ? (
           <>

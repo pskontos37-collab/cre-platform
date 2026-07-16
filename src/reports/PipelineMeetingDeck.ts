@@ -25,6 +25,7 @@ export interface MeetingDeckInput {
     sitePlanImgs?: Record<string, { data: string; w: number; h: number }>
     tenants?: Record<string, DeckTenant[]>
     occupancy?: Record<string, number | null>
+    fit?: Record<string, string>   // buy-box fit + top LP matches, per deal (Phase 4)
   }
 }
 
@@ -264,7 +265,7 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
     // header: name + location/profile subtitle + stage chip
     s.addText(d.name, { x: 0.45, y: 0.26, w: 7.6, h: 0.5, fontFace: SERIF, fontSize: 24, bold: true, color: STEEL, underline: true, fit: 'shrink', wrap: false } as any)
     s.addText(
-      [loc(d), profileLabel(d) + (d.subType ? ` · ${d.subType}` : ''), d.submarket].filter(Boolean).join('   ·   ') || '—',
+      [loc(d), profileLabel(d) + (d.subType ? ` · ${d.subType}` : ''), d.submarket, input.extras?.fit?.[d.id]].filter(Boolean).join('   ·   ') || '—',
       { x: 0.47, y: 0.82, w: 7.6, h: 0.3, fontFace: SERIF, fontSize: 13, color: MUTED, fit: 'shrink', wrap: false } as any)
     // stage chip (top-right)
     const chip = STAGE_CHIP[d.stage] ?? STEEL
