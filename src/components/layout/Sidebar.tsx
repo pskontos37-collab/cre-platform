@@ -5,18 +5,16 @@ import { BrandMark, BrandWordmark } from '../ui/BrandMark'
 import { visiblePages, visiblePagesByGroup } from '../../lib/pages'
 import { useAssignedTaskCount } from '../../hooks/useTasks'
 
-const COLLAPSE_KEY = 'cre-sidebar-collapsed'
 const GROUPS_KEY   = 'cre-sidebar-groups'
+const RAIL_WIDTH   = 56
+const OPEN_WIDTH    = 220
 
 export function Sidebar() {
   const { appUser } = useAuth()
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    const saved = localStorage.getItem(COLLAPSE_KEY)
-    if (saved != null) return saved === '1'
-    // No saved preference: default to collapsed on phone-width screens so the
-    // rail doesn't eat a narrow viewport (inspections are done on phones).
-    return typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
-  })
+  // Collapsed to a narrow icon rail by default; expands on hover. No manual
+  // toggle — the expanded panel floats over the page so content never reflows.
+  const [hovered, setHovered] = useState(false)
+  const collapsed = !hovered
   const groups   = visiblePagesByGroup(appUser)
   const adminNav = visiblePages(appUser).filter(p => p.key === 'admin')
   const { data: taskAlerts } = useAssignedTaskCount(appUser?.id ?? '')
@@ -44,26 +42,35 @@ export function Sidebar() {
     return next
   })
 
-  function toggle() {
-    setCollapsed(c => {
-      localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
-      return !c
-    })
-  }
-
   return (
     <aside
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        width:      collapsed ? 56 : 220,
+        // The rail always occupies RAIL_WIDTH in the flex flow; the inner panel
+        // grows over the page content on hover so nothing reflows.
+        width:      RAIL_WIDTH,
         flexShrink: 0,
+        height:     '100vh',
+        position:   'sticky',
+        top:        0,
+        zIndex:     40,
+      }}
+    >
+      <div
+      style={{
+        width:      collapsed ? RAIL_WIDTH : OPEN_WIDTH,
         background: 'var(--surface)',
         borderRight:'1px solid var(--border)',
         display:    'flex',
         flexDirection:'column',
         height:     '100vh',
-        position:   'sticky',
+        position:   'absolute',
         top:        0,
-        transition: 'width 0.15s ease',
+        left:       0,
+        overflow:   'hidden',
+        boxShadow:  collapsed ? 'none' : '4px 0 24px rgba(0,0,0,0.18)',
+        transition: 'width 0.15s ease, box-shadow 0.15s ease',
       }}
     >
       <div
@@ -128,24 +135,6 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Collapse / expand */}
-      <button
-        onClick={toggle}
-        title={collapsed ? 'Expand menu' : 'Collapse menu'}
-        style={{
-          margin:       '0 8px 8px',
-          padding:      '6px 0',
-          borderRadius: 6,
-          border:       '1px solid var(--border-2)',
-          background:   'var(--surface-2)',
-          color:        'var(--text-muted)',
-          fontSize:     12,
-          cursor:       'pointer',
-        }}
-      >
-        {collapsed ? '»' : '« Collapse'}
-      </button>
-
       <div
         style={{
           padding:    collapsed ? '12px 6px' : '12px 16px',
@@ -167,6 +156,7 @@ export function Sidebar() {
             {appUser?.role?.replace('_', ' ')}
           </div>
         )}
+      </div>
       </div>
     </aside>
   )
