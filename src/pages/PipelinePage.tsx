@@ -28,6 +28,7 @@ import { underwriteTenant } from '../lib/tenantUnderwriting'
 import { computePromote, DEFAULT_PROMOTE } from '../lib/acqPromote'
 import { computeAcqAlerts, type AlertItem } from '../lib/acqAlerts'
 import { bestFit, fitCategory, FIT_LABEL, type BuyBox, type FitDeal, type FitCategory } from '../lib/buyBox'
+import { rankPartners, type MatchPartner, type MatchDeal } from '../lib/partnerMatch'
 import type { UwLeaseLine, UwRollover, UwOpex, UwRefi, UwPromote, UwPromoteTier } from '../hooks/usePipeline'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
@@ -1958,7 +1959,9 @@ function CapitalTab({ deal, partners, onChanged, onDiscuss }: { deal: Deal; part
   const committed = deal.lps.reduce((a, l) => a + (l.committedAmount ?? 0), 0)
   const soft = deal.lps.reduce((a, l) => a + (l.softAmount ?? 0), 0)
   const gap = (deal.equityRequired ?? 0) - committed - soft
-  const matches = partners.filter(p => p.active && p.productTypes.includes(deal.assetType) && !onDeal.has(p.id)).slice(0, 4)
+  const matchDeal: MatchDeal = { assetType: deal.assetType, state: deal.state, market: deal.market, submarket: deal.submarket, askPrice: deal.askPrice, projIrr: deal.projIrr }
+  const toMatchPartner = (p: CapitalPartner): MatchPartner => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active })
+  const matches = rankPartners(matchDeal, partners.map(toMatchPartner), onDeal).filter(m => m.score > 0).slice(0, 5)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1990,14 +1993,20 @@ function CapitalTab({ deal, partners, onChanged, onDiscuss }: { deal: Deal; part
       {matches.length > 0 && (
         <div style={{ border: '1px dashed var(--border-2)', borderRadius: 9, padding: '11px 12px', background: 'var(--surface-2, rgba(0,0,0,.03))' }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: MIST, marginBottom: 7 }}>Suggested LPs — mandate fit</div>
-          {matches.map(p => (
-            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 0' }}>
-              <b style={{ color: 'var(--text)' }}>{p.name}</b>
-              <span style={{ marginLeft: 'auto', color: 'var(--text-faint)', fontSize: 11 }}>{[p.returnTarget, p.dealSize].filter(Boolean).join(' · ')}</span>
-              <button style={{ ...ghostBtn, padding: '3px 9px', fontSize: 11 }} disabled={busy} onClick={() => run(() => addDealLp(deal.id, p.id))}>Add</button>
+          {matches.map(m => (
+            <div key={m.partner.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 0', flexWrap: 'wrap' }}>
+              <b style={{ color: 'var(--text)' }}>{m.partner.name}</b>
+              <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: m.partner.tier === 'current' ? '#2e8b57' : 'var(--text-faint)' }}>{PARTNER_TIER_LABEL[m.partner.tier]}</span>
+              <span style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {m.signals.filter(s => s.status !== 'na').map((s, i) => {
+                  const c = s.status === 'hit' ? '#2e8b57' : '#c0654e'
+                  return <span key={i} title={s.detail} style={{ fontSize: 10, color: c, border: `1px solid ${c}44`, borderRadius: 5, padding: '1px 6px' }}>{s.status === 'hit' ? '✓' : '✕'} {s.label}</span>
+                })}
+              </span>
+              <button style={{ ...ghostBtn, padding: '3px 9px', fontSize: 11, marginLeft: 'auto' }} disabled={busy} onClick={() => run(() => addDealLp(deal.id, m.partner.id))}>Add</button>
             </div>
           ))}
-          <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 6 }}>Matched on product type from the Partner book.</div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 6 }}>Ranked by mandate fit — product type, deal size, return target, geography, and relationship tier from the Partner book.</div>
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
