@@ -411,8 +411,16 @@ function Table({ deals, onOpen, buyBoxes = [] }: { deals: Deal[]; onOpen: (id: s
 // ── ANALYTICS VIEW ────────────────────────────────────────────────────────────
 function AnalyticsView({ deals: allDeals, buyBoxes }: { deals: Deal[]; buyBoxes: BuyBox[] }) {
   // Analytics reflect the active book — the watchlist is excluded.
-  const deals = allDeals.filter(d => d.stage !== 'tracking')
+  const deals = useMemo(() => allDeals.filter(d => d.stage !== 'tracking'), [allDeals])
   const hasBuyBox = buyBoxes.some(b => b.active)
+  // Memoize the derived aggregates — several re-run the underwrite/fit engines per
+  // deal, so recomputing them on every render (e.g. parent re-renders) is wasteful.
+  const summary = useMemo(() => returnsSummary(deals), [deals])
+  const irrRank = useMemo(() => irrRankRows(deals), [deals])
+  const capitalByQ = useMemo(() => capitalQuarterRows(deals), [deals])
+  const irrByProfile = useMemo(() => irrByProfileRows(deals), [deals])
+  const fitDist = useMemo(() => fitDistRows(deals, buyBoxes), [deals, buyBoxes])
+  const fitByBox = useMemo(() => fitByBoxRows(deals, buyBoxes), [deals, buyBoxes])
   return (
     <>
       {hasBuyBox && (
@@ -420,27 +428,27 @@ function AnalyticsView({ deals: allDeals, buyBoxes }: { deals: Deal[]; buyBoxes:
           <AnalyticsHeading>Sourcing Fit</AnalyticsHeading>
           <div style={{ ...grid2, marginBottom: 14 }}>
             <Panel title="Strategy fit" cap="Active deals scored against the acquisition buy-boxes.">
-              <Bars rows={fitDistRows(deals, buyBoxes)} color={RISK_COLOR.core} isCount empty="No active deals to score." />
+              <Bars rows={fitDist} color={RISK_COLOR.core} isCount empty="No active deals to score." />
             </Panel>
             <Panel title="On-strategy by buy-box" cap="Deals that best-match each buy-box (non-disqualified).">
-              <Bars rows={fitByBoxRows(deals, buyBoxes)} color={RISK_COLOR.core_plus} isCount empty="No matched deals yet." />
+              <Bars rows={fitByBox} color={RISK_COLOR.core_plus} isCount empty="No matched deals yet." />
             </Panel>
           </div>
         </>
       )}
       <AnalyticsHeading>Returns &amp; Capital</AnalyticsHeading>
-      <ReturnsSummaryStrip s={returnsSummary(deals)} />
+      <ReturnsSummaryStrip s={summary} />
       <div style={{ ...grid2, marginTop: 14 }}>
         <Panel title="Deal returns — levered IRR" cap="Underwritten active deals, best first.">
-          <Bars rows={irrRankRows(deals)} color={RISK_COLOR.core} empty="No deals underwritten yet — save a model on a deal's Underwriting tab." />
+          <Bars rows={irrRank} color={RISK_COLOR.core} empty="No deals underwritten yet — save a model on a deal's Underwriting tab." />
         </Panel>
         <Panel title="Capital deployment by close" cap="Equity required, bucketed by target close quarter.">
-          <Bars rows={capitalQuarterRows(deals)} color={RISK_COLOR.core_plus} empty="No equity requirements set yet." />
+          <Bars rows={capitalByQ} color={RISK_COLOR.core_plus} empty="No equity requirements set yet." />
         </Panel>
       </div>
       <div style={{ ...grid2, marginTop: 14 }}>
         <Panel title="Avg levered IRR by risk profile" cap="Mean projected IRR of underwritten deals in each profile.">
-          <Bars rows={irrByProfileRows(deals)} color={RISK_COLOR.value_add} empty="No underwritten deals to profile yet." />
+          <Bars rows={irrByProfile} color={RISK_COLOR.value_add} empty="No underwritten deals to profile yet." />
         </Panel>
         <Panel title="Capital raised" cap="Committed vs. soft-circled vs. remaining, across active raises.">
           <Donut deals={deals} />
@@ -843,20 +851,23 @@ function ExtractResult({ ex, buyBoxes, onCreate, creating }: { ex: OmExtraction;
 // ── PARTNERS VIEW ─────────────────────────────────────────────────────────────
 // Firm-wide raise view: each active deal's top mandate-fit partners.
 function PortfolioLpMatch({ deals, partners, onOpen }: { deals: Deal[]; partners: CapitalPartner[]; onOpen: (id: string) => void }) {
-  const mps: MatchPartner[] = partners.map(p => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active }))
+  // useMemo before any early return (rules of hooks); ranking is O(deals x partners).
+  const rows = useMemo(() => {
+    const mps: MatchPartner[] = partners.map(p => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active }))
+    return deals
+      .filter(d => !isTerminal(d.stage) && d.stage !== 'closed')
+      .map(d => {
+        const onDeal = new Set(d.lps.map(l => l.partnerId))
+        const md: MatchDeal = { assetType: d.assetType, state: d.state, market: d.market, submarket: d.submarket, askPrice: d.askPrice, projIrr: d.projIrr }
+        const top = rankPartners(md, mps, onDeal).filter(m => m.score > 0).slice(0, 3)
+        const raised = d.lps.reduce((a, l) => a + (l.committedAmount ?? 0) + (l.softAmount ?? 0), 0)
+        const gap = d.equityRequired != null ? Math.max(0, d.equityRequired - raised) : null
+        return { d, top, gap }
+      })
+      .filter(r => r.top.length > 0)
+      .sort((a, b) => (b.gap ?? 0) - (a.gap ?? 0))
+  }, [deals, partners])
   if (!partners.some(p => p.active)) return null
-  const rows = deals
-    .filter(d => !isTerminal(d.stage) && d.stage !== 'closed')
-    .map(d => {
-      const onDeal = new Set(d.lps.map(l => l.partnerId))
-      const md: MatchDeal = { assetType: d.assetType, state: d.state, market: d.market, submarket: d.submarket, askPrice: d.askPrice, projIrr: d.projIrr }
-      const top = rankPartners(md, mps, onDeal).filter(m => m.score > 0).slice(0, 3)
-      const raised = d.lps.reduce((a, l) => a + (l.committedAmount ?? 0) + (l.softAmount ?? 0), 0)
-      const gap = d.equityRequired != null ? Math.max(0, d.equityRequired - raised) : null
-      return { d, top, gap }
-    })
-    .filter(r => r.top.length > 0)
-    .sort((a, b) => (b.gap ?? 0) - (a.gap ?? 0))
   if (!rows.length) return null
   return (
     <div style={{ border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: 12, padding: '15px 16px', marginBottom: 16 }}>
@@ -2040,9 +2051,11 @@ function CapitalTab({ deal, partners, onChanged, onDiscuss }: { deal: Deal; part
   const committed = deal.lps.reduce((a, l) => a + (l.committedAmount ?? 0), 0)
   const soft = deal.lps.reduce((a, l) => a + (l.softAmount ?? 0), 0)
   const gap = (deal.equityRequired ?? 0) - committed - soft
-  const matchDeal: MatchDeal = { assetType: deal.assetType, state: deal.state, market: deal.market, submarket: deal.submarket, askPrice: deal.askPrice, projIrr: deal.projIrr }
-  const toMatchPartner = (p: CapitalPartner): MatchPartner => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active })
-  const matches = rankPartners(matchDeal, partners.map(toMatchPartner), onDeal).filter(m => m.score > 0).slice(0, 5)
+  const matches = useMemo(() => {
+    const md: MatchDeal = { assetType: deal.assetType, state: deal.state, market: deal.market, submarket: deal.submarket, askPrice: deal.askPrice, projIrr: deal.projIrr }
+    const mps: MatchPartner[] = partners.map(p => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active }))
+    return rankPartners(md, mps, new Set(deal.lps.map(l => l.partnerId))).filter(m => m.score > 0).slice(0, 5)
+  }, [deal, partners])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
