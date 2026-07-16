@@ -361,7 +361,7 @@ function Table({ deals, onOpen, buyBoxes = [] }: { deals: Deal[]; onOpen: (id: s
   return (
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-        <thead><tr>{cols.map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <thead><tr>{cols.map(h => <th key={h} style={['Guidance', 'SF'].includes(h) ? { ...th, textAlign: 'right' } : th}>{h}</th>)}</tr></thead>
         <tbody>
           {sorted.map(d => (
             <tr key={d.id} onClick={() => onOpen(d.id)} style={{ cursor: 'pointer' }}
