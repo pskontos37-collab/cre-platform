@@ -520,6 +520,8 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
 }) {
   // Display/export the human-corrected values layered over the AI abstract.
   const a = applyOverrides(row.abstract, row.overrides) ?? {}
+  // Click-to-provision links search the abstract's own source documents.
+  const srcIds: string[] = row.source_doc_ids ?? []
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -616,40 +618,53 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
       </Widget>
 
       <Widget title="Reimbursements — CAM / RET / Insurance" chip={a.cam?.section}>
-        <LongFact k="CAM methodology" v={a.cam?.methodology} />
-        <LongFact k="CAM exact language" v={a.cam?.details_exact_language} />
-        <LongFact k="Pro-rata share calc / denominator" v={a.cam?.prorata_share_calc} />
-        <LongFact k="Definition of shopping center" v={a.cam?.shopping_center_definition} />
-        <LongFact k="Admin fee" v={a.cam?.admin_fee} />
-        <LongFact k="Caps / exclusions" v={a.cam?.caps_exclusions} />
+        <LongFact k="CAM methodology" v={a.cam?.methodology} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="CAM exact language" v={a.cam?.details_exact_language} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Pro-rata share calc / denominator" v={a.cam?.prorata_share_calc} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Definition of shopping center" v={a.cam?.shopping_center_definition} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Admin fee" v={a.cam?.admin_fee} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Caps / exclusions" v={a.cam?.caps_exclusions} src={{ citation: a.cam?.section, docIds: srcIds }} />
         <LongFact k="Audit rights" v={a.cam?.audit_rights ? `Yes${a.cam?.audit_years_back ? ` — ${a.cam.audit_years_back}` : ''}` : a.cam?.audit_rights === false ? 'No' : null} />
-        <LongFact k={`Real estate tax methodology ${a.real_estate_tax?.section ? `[${a.real_estate_tax.section}]` : ''}`} v={a.real_estate_tax?.methodology} />
-        <LongFact k="RET caps on sale/reassessment" v={a.real_estate_tax?.sale_reassessment_caps} />
-        <LongFact k={`Insurance methodology ${a.insurance?.section ? `[${a.insurance.section}]` : ''}`} v={a.insurance?.methodology} />
+        <LongFact k={`Real estate tax methodology ${a.real_estate_tax?.section ? `[${a.real_estate_tax.section}]` : ''}`} v={a.real_estate_tax?.methodology} src={{ citation: a.real_estate_tax?.section, docIds: srcIds }} />
+        <LongFact k="RET caps on sale/reassessment" v={a.real_estate_tax?.sale_reassessment_caps} src={{ citation: a.real_estate_tax?.section, docIds: srcIds }} />
+        <LongFact k={`Insurance methodology ${a.insurance?.section ? `[${a.insurance.section}]` : ''}`} v={a.insurance?.methodology} src={{ citation: a.insurance?.section, docIds: srcIds }} />
       </Widget>
 
       <Widget title="Key clauses">
-        <LongFact k={`Co-tenancy ${a.co_tenancy?.section ? `[${a.co_tenancy.section}]` : ''}`} v={a.co_tenancy?.exists ? a.co_tenancy.exact_language_and_remedies : 'None'} />
-        <LongFact k="Replacement tenants" v={a.co_tenancy?.replacement_tenants_permitted} />
+        <LongFact k={`Co-tenancy ${a.co_tenancy?.section ? `[${a.co_tenancy.section}]` : ''}`} v={a.co_tenancy?.exists ? a.co_tenancy.exact_language_and_remedies : 'None'}
+          src={{ quote: a.co_tenancy?.exact_language_and_remedies, citation: a.co_tenancy?.section, docIds: srcIds }} />
+        <LongFact k="Replacement tenants" v={a.co_tenancy?.replacement_tenants_permitted}
+          src={{ citation: a.co_tenancy?.section, docIds: srcIds }} />
         <LongFact k={`Exclusives — tenant's own protection ${a.exclusives?.section ? `[${a.exclusives.section}]` : ''}`}
           v={a.exclusives?.exists
             ? [a.exclusives.exact_language,
                a.exclusives.remedies ? `REMEDIES: ${a.exclusives.remedies}` : null,
                a.exclusives.conditions ? `CONDITIONS: ${a.exclusives.conditions}` : null].filter(Boolean).join('\n')
-            : 'None'} />
+            : 'None'}
+          src={{ quote: a.exclusives?.exact_language, citation: a.exclusives?.section, docIds: srcIds }} />
         {a.use_restrictions_on_tenant !== undefined && (
           <LongFact k={`Use restrictions ON tenant (others' exclusives) ${a.use_restrictions_on_tenant?.source_exhibit ? `[${a.use_restrictions_on_tenant.source_exhibit}]` : a.use_restrictions_on_tenant?.section ? `[${a.use_restrictions_on_tenant.section}]` : ''}`}
-            v={a.use_restrictions_on_tenant?.exists ? a.use_restrictions_on_tenant.exact_language : 'None'} />
+            v={a.use_restrictions_on_tenant?.exists ? a.use_restrictions_on_tenant.exact_language : 'None'}
+            src={{ quote: a.use_restrictions_on_tenant?.exact_language, citation: a.use_restrictions_on_tenant?.source_exhibit ?? a.use_restrictions_on_tenant?.section, docIds: srcIds }} />
         )}
-        <LongFact k={`Termination / kickout ${a.termination_kickout?.section ? `[${a.termination_kickout.section}]` : ''}`} v={a.termination_kickout?.exists ? a.termination_kickout.details : 'None'} />
-        <LongFact k={`Permitted use ${a.permitted_use?.section ? `[${a.permitted_use.section}]` : ''}`} v={a.permitted_use?.exact_language} />
-        <LongFact k={`Prohibited uses ${a.prohibited_uses?.section ? `[${a.prohibited_uses.section}]` : ''}`} v={a.prohibited_uses?.exact_language} />
-        <LongFact k="Radius clause" v={a.radius_clause?.exists ? a.radius_clause.details : 'None'} />
-        <LongFact k="Continuous operations" v={a.continuous_operations?.exists ? a.continuous_operations.details : 'None'} />
-        <LongFact k="Relocation rights" v={a.relocation_rights?.exists ? `${a.relocation_rights.who_pays ?? ''} ${a.relocation_rights.notes ?? ''}` : 'None'} />
-        <LongFact k="Recapture rights" v={a.recapture_rights?.exists ? a.recapture_rights.details : 'None'} />
-        <LongFact k="Assignment & subletting" v={[a.assignment_subletting?.allowed, a.assignment_subletting?.liability_continues_post_assignment, a.assignment_subletting?.notes].filter(Boolean).join(' · ')} />
-        <LongFact k="Option to purchase" v={a.option_to_purchase?.exists ? a.option_to_purchase.details : 'None'} />
+        <LongFact k={`Termination / kickout ${a.termination_kickout?.section ? `[${a.termination_kickout.section}]` : ''}`} v={a.termination_kickout?.exists ? a.termination_kickout.details : 'None'}
+          src={{ quote: a.termination_kickout?.details, citation: a.termination_kickout?.section, docIds: srcIds }} />
+        <LongFact k={`Permitted use ${a.permitted_use?.section ? `[${a.permitted_use.section}]` : ''}`} v={a.permitted_use?.exact_language}
+          src={{ citation: a.permitted_use?.section, docIds: srcIds }} />
+        <LongFact k={`Prohibited uses ${a.prohibited_uses?.section ? `[${a.prohibited_uses.section}]` : ''}`} v={a.prohibited_uses?.exact_language}
+          src={{ citation: a.prohibited_uses?.section, docIds: srcIds }} />
+        <LongFact k="Radius clause" v={a.radius_clause?.exists ? a.radius_clause.details : 'None'}
+          src={{ quote: a.radius_clause?.details, citation: a.radius_clause?.section, docIds: srcIds }} />
+        <LongFact k="Continuous operations" v={a.continuous_operations?.exists ? a.continuous_operations.details : 'None'}
+          src={{ quote: a.continuous_operations?.details, citation: a.continuous_operations?.section, docIds: srcIds }} />
+        <LongFact k="Relocation rights" v={a.relocation_rights?.exists ? `${a.relocation_rights.who_pays ?? ''} ${a.relocation_rights.notes ?? ''}` : 'None'}
+          src={{ quote: a.relocation_rights?.notes, citation: a.relocation_rights?.section, docIds: srcIds }} />
+        <LongFact k="Recapture rights" v={a.recapture_rights?.exists ? a.recapture_rights.details : 'None'}
+          src={{ quote: a.recapture_rights?.details, citation: a.recapture_rights?.section, docIds: srcIds }} />
+        <LongFact k="Assignment & subletting" v={[a.assignment_subletting?.allowed, a.assignment_subletting?.liability_continues_post_assignment, a.assignment_subletting?.notes].filter(Boolean).join(' · ')}
+          src={{ quote: a.assignment_subletting?.notes ?? a.assignment_subletting?.allowed, citation: a.assignment_subletting?.section, docIds: srcIds }} />
+        <LongFact k="Option to purchase" v={a.option_to_purchase?.exists ? a.option_to_purchase.details : 'None'}
+          src={{ quote: a.option_to_purchase?.details, citation: a.option_to_purchase?.section, docIds: srcIds }} />
       </Widget>
 
       <Widget title="Deposits, allowances, signage & delivery">
@@ -756,8 +771,19 @@ function rankDocsByCitation(docs: Array<{ id: string; title: string | null; file
   }
   return [...docs].sort((a, b) => score(b) - score(a))
 }
-async function openQuoteSource(quote: string, citation: string, sourceDocIds: string[]): Promise<boolean> {
-  if (!quote || !sourceDocIds.length) return false
+// Locate a quote and return everything the popup needs: the full indexed text
+// of the page it lives on (instant display, no PDF load), the doc + page, and
+// a signed PDF deep-link. Null = not locatable (scanned wording mismatch).
+interface LocatedSource {
+  content: string
+  page: number | null
+  docTitle: string
+  pdfUrl: string | null
+  matchStart: number
+  matchLen: number
+}
+async function locateQuoteData(quote: string, citation: string, sourceDocIds: string[]): Promise<LocatedSource | null> {
+  if (!quote || !sourceDocIds.length) return null
   // Verifiers abridge quotes with "…"/"..." mid-quote; the needle must come
   // from ONE contiguous verbatim fragment (the longest), or the literal dots
   // poison the pattern and force the loose fallback.
@@ -772,7 +798,7 @@ async function openQuoteSource(quote: string, citation: string, sourceDocIds: st
     if (words.length < Math.min(n, 3)) continue
     const pat = '%' + words.slice(0, n).join('%') + '%'
     const { data } = await supabase.from('document_chunks')
-      .select('document_id, page_number')
+      .select('document_id, page_number, content')
       .in('document_id', sourceDocIds)
       .eq('kind', 'text')
       .ilike('content', pat)
@@ -783,31 +809,89 @@ async function openQuoteSource(quote: string, citation: string, sourceDocIds: st
       (rankIdx.get(a.document_id) ?? 99) - (rankIdx.get(b.document_id) ?? 99) ||
       (a.page_number ?? 9999) - (b.page_number ?? 9999))[0]
     const doc = ranked.find(d => d.id === hit.document_id) as any
-    if (!doc?.storage_path) return false
-    const { data: signed } = await supabase.storage.from('documents')
-      .createSignedUrl(doc.storage_path, 3600)
-    if (!signed?.signedUrl) return false
-    window.open(signed.signedUrl + (hit.page_number ? `#page=${hit.page_number}` : ''), '_blank')
-    return true
+    let pdfUrl: string | null = null
+    if (doc?.storage_path) {
+      const { data: signed } = await supabase.storage.from('documents')
+        .createSignedUrl(doc.storage_path, 3600)
+      if (signed?.signedUrl) pdfUrl = signed.signedUrl + (hit.page_number ? `#page=${hit.page_number}` : '')
+    }
+    // Highlight: find the fragment inside the chunk (case-insensitive probe on
+    // its head; verbatim quotes land exactly, paraphrases just show the page).
+    const content: string = hit.content ?? ''
+    const probe = fragment.slice(0, 60).toLowerCase()
+    let matchStart = probe.length >= 12 ? content.toLowerCase().indexOf(probe) : -1
+    let matchLen = 0
+    if (matchStart >= 0) matchLen = Math.min(fragment.length, content.length - matchStart)
+    else matchStart = 0
+    return {
+      content, page: hit.page_number ?? null,
+      docTitle: doc?.title ?? doc?.file_name ?? 'document', pdfUrl, matchStart, matchLen,
+    }
   }
-  return false
+  return null
 }
 
-function SourceLink({ quote, citation, sourceDocIds }: { quote: string; citation?: string; sourceDocIds: string[] }) {
+// In-app provision viewer: the exact lease language in its page context, with
+// the located passage highlighted and a deep link to the PDF page.
+function SourceModal({ loc, onClose }: { loc: LocatedSource; onClose: () => void }) {
+  const pre = loc.matchLen ? loc.content.slice(0, loc.matchStart) : loc.content
+  const mid = loc.matchLen ? loc.content.slice(loc.matchStart, loc.matchStart + loc.matchLen) : ''
+  const post = loc.matchLen ? loc.content.slice(loc.matchStart + loc.matchLen) : ''
+  return (
+    <div onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface, #fff)', border: '1px solid var(--border-2)', borderRadius: 10, maxWidth: 760, width: '100%', maxHeight: '78vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={loc.docTitle}>{loc.docTitle}</span>
+          {loc.page && <span style={{ fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>page {loc.page}</span>}
+          <button onClick={onClose}
+            style={{ fontSize: 14, border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0 2px' }}>✕</button>
+        </div>
+        <div style={{ padding: '12px 16px', overflowY: 'auto', fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
+          {pre}
+          {mid && <mark style={{ background: 'rgba(245,158,11,0.35)', color: 'var(--text)', padding: '1px 0', borderRadius: 2 }}>{mid}</mark>}
+          {post}
+        </div>
+        <div style={{ display: 'flex', gap: 8, padding: '10px 16px', borderTop: '1px solid var(--border)', justifyContent: 'flex-end' }}>
+          {!loc.matchLen && <span style={{ fontSize: 11, color: 'var(--text-faint)', marginRight: 'auto', alignSelf: 'center' }}>Exact passage not pinpointed (paraphrase or scanned wording) — showing the located page's text.</span>}
+          {loc.pdfUrl && (
+            <button onClick={() => window.open(loc.pdfUrl!, '_blank')}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+              Open PDF{loc.page ? ` at page ${loc.page}` : ''} ↗
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Click-to-provision link: locates the quoted language and pops the SourceModal
+// (exact clause in page context, highlighted, with a PDF deep link). Used by
+// both the Verification panel and every clause field on the abstract itself.
+function SourceLink({ quote, citation, sourceDocIds, label }: {
+  quote: string; citation?: string; sourceDocIds: string[]; label?: string
+}) {
   const [state, setState] = useState<'idle' | 'busy' | 'miss'>('idle')
+  const [loc, setLoc] = useState<LocatedSource | null>(null)
   if (!quote || !sourceDocIds.length) return null
   return (
-    <button
-      onClick={async () => {
-        setState('busy')
-        const ok = await openQuoteSource(quote, citation ?? '', sourceDocIds).catch(() => false)
-        setState(ok ? 'idle' : 'miss')
-      }}
-      disabled={state === 'busy'}
-      title={state === 'miss' ? 'Quote not located in indexed text (scanned page wording may differ)' : 'Open the source PDF at the cited page'}
-      style={{ fontSize: 10, fontWeight: 600, padding: '1px 8px', marginLeft: 6, borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: state === 'miss' ? 'var(--text-faint)' : 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-      {state === 'busy' ? 'locating…' : state === 'miss' ? 'not located' : 'view source ↗'}
-    </button>
+    <>
+      <button
+        onClick={async () => {
+          setState('busy')
+          const found = await locateQuoteData(quote, citation ?? '', sourceDocIds).catch(() => null)
+          if (found) { setLoc(found); setState('idle') } else setState('miss')
+        }}
+        disabled={state === 'busy'}
+        title={state === 'miss' ? 'Language not located in indexed text (scanned page wording may differ)' : 'Show this provision in the lease'}
+        style={{ fontSize: 10, fontWeight: 600, padding: '1px 8px', marginLeft: 6, borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: state === 'miss' ? 'var(--text-faint)' : 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        {state === 'busy' ? 'locating…' : state === 'miss' ? 'not located' : (label ?? 'view source ↗')}
+      </button>
+      {loc && <SourceModal loc={loc} onClose={() => setLoc(null)} />}
+    </>
   )
 }
 
@@ -1091,12 +1175,21 @@ function Fact({ k, v, wide, sub }: { k: string; v: any; wide?: boolean; sub?: st
   )
 }
 // Every template field renders — an empty field says so explicitly rather than
-// disappearing (gaps also land in the Open Items section).
-function LongFact({ k, v }: { k: string; v: any }) {
+// disappearing (gaps also land in the Open Items section). `src` adds a
+// "view in lease ↗" link that pops the provision's actual language in context.
+function LongFact({ k, v, src }: {
+  k: string; v: any
+  src?: { quote?: string | null; citation?: string | null; docIds?: string[] | null }
+}) {
   const missing = v == null || v === ''
+  const quote = src?.quote ?? (typeof v === 'string' ? v : '')
+  const linkable = !missing && !!quote && quote.length >= 25 && !!src?.docIds?.length
   return (
     <div style={{ marginBottom: 10 }}>
-      <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{k}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+        {k}
+        {linkable && <SourceLink quote={quote} citation={src?.citation ?? ''} sourceDocIds={src!.docIds!} label="view in lease ↗" />}
+      </div>
       <div style={{ fontSize: 12.5, color: missing ? 'var(--text-faint)' : 'var(--text-muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontStyle: missing ? 'italic' : 'normal' }}>
         {missing ? 'Not found in reviewed documents — see Open items' : String(v)}
       </div>

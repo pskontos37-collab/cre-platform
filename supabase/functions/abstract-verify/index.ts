@@ -149,6 +149,8 @@ serve(async (req) => {
     }
     let used = 0
     const parts: string[] = []
+    const fullTextIds = new Set<string>()
+    const truncatedIds = new Set<string>()
     for (const d of docs) {
       const text = (byDoc.get(d.id) ?? []).join('\n')
       if (!text) continue
@@ -157,7 +159,43 @@ serve(async (req) => {
       const slice = text.slice(0, room)
       parts.push(`===== DOCUMENT: "${d.title ?? d.file_name}" (type: ${d.doc_type}) =====\n${slice}`)
       used += slice.length
+      if (slice.length >= text.length) fullTextIds.add(d.id)
+      else truncatedIds.add(d.id)
     }
+
+    // ── 3a. Briefs for docs BEYOND the raw-text budget (v7). The v27
+    // abstractor synthesizes from compact briefs covering the WHOLE file; a
+    // verifier that only sees raw text under CHAR_BUDGET has a NARROWER window
+    // than the writer and produced false "instrument is not among the provided
+    // documents" flags (Burlington's 2026 exercise letter, Wade Jurney's 4th
+    // Amd). Every source doc that didn't fit as raw text rides along as its
+    // structured brief, and the inventory below makes existence undeniable. ──
+    const { data: briefRows } = await sb.from('doc_briefs')
+      .select('document_id, doc_class, chain_role, brief, status')
+      .in('document_id', docs.map(d => d.id))
+    const briefBy = new Map<string, any>()
+    for (const b of (briefRows ?? []) as any[]) if (b.status === 'complete' && b.brief) briefBy.set(b.document_id, b)
+    const BRIEF_BUDGET = 150_000
+    let briefChars = 0
+    const briefParts: string[] = []
+    const briefIncluded = new Set<string>()
+    for (const d of docs) {
+      if (fullTextIds.has(d.id)) continue          // full raw text already in
+      const b = briefBy.get(d.id)
+      if (!b) continue
+      const json = JSON.stringify(b.brief)
+      if (briefChars + json.length > BRIEF_BUDGET) continue
+      briefParts.push(`===== BRIEF (100%-of-text extraction): "${d.title ?? d.file_name}" [${b.doc_class ?? '?'}/${b.chain_role ?? '?'}] =====\n${json}`)
+      briefChars += json.length
+      briefIncluded.add(d.id)
+    }
+    const inventory = docs.map((d: any) => {
+      const how = fullTextIds.has(d.id) ? 'FULL RAW TEXT below'
+        : briefIncluded.has(d.id) ? (truncatedIds.has(d.id) ? 'raw text TRUNCATED below + full brief below' : 'structured brief below')
+        : truncatedIds.has(d.id) ? 'raw text TRUNCATED below'
+        : 'IN FILE — title only in this request'
+      return `- "${d.title ?? d.file_name}" [${d.doc_type}] — ${how}`
+    }).join('\n')
 
     // ── 3b. Re-attach the governing PDFs (primary sources for verbatim quotes) ──
     const MAX_ATTACH_BYTES = 8_000_000
@@ -221,6 +259,11 @@ serve(async (req) => {
       : ''
     const prompt = `You are an independent QA reviewer auditing a commercial lease abstract produced by another analyst for M&J Wilkow. Your job is NOT to re-abstract the lease — it is to ADVERSARIALLY VERIFY the abstract below against the source documents. Assume it may contain errors and try to prove each material value wrong.${attachNote}
 
+SOURCE FILE INVENTORY (every document the abstractor used — a document listed here EXISTS AND WAS AVAILABLE to the abstractor, full stop):
+${inventory}
+
+EXISTENCE DISCIPLINE (critical): NEVER claim an instrument "is not among the provided documents", "does not exist in the source documents", or set amendment_currency.current=false on the ground that a document is absent, when that document IS in the inventory above. Some documents arrive as structured BRIEFS (each extracted from 100% of that document's text) instead of raw text — a brief is full evidence of the document's existence and contents; judge from it exactly as you would from raw text. Only when a value can be confirmed by NEITHER the raw text NOR a brief NOR an attached PDF may you use needs_source — and an instrument referenced by the abstract that appears nowhere in the inventory may still be challenged as unsupported.
+
 Method:
 - For every HIGH-VALUE field (tenant legal name, suite, square footage, rent commencement, expiration, term length, every base_rent_schedule row, options, percentage rent rate/breakpoint, CAM methodology, guarantor, security deposit, tenant allowance, co-tenancy, exclusives, kickout/termination), locate the governing language in the documents and decide:
     confirmed    — the abstract value matches the source (quote it).
@@ -250,8 +293,9 @@ ${mriOptions.length ? `\nMRI option data (RETAILRR-verified; system of record fo
 THE ABSTRACT UNDER REVIEW (produced by model "${row.model ?? 'unknown'}"):
 ${JSON.stringify(row.abstract)}
 
-SOURCE DOCUMENTS:
-${parts.join('\n\n')}`
+SOURCE DOCUMENTS (raw text):
+${parts.join('\n\n')}
+${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs — each extracted from 100% of the document's text; full evidence of existence and contents):\n${briefParts.join('\n\n')}` : ''}`
 
     const textPrompt = attachments.length && used > 150_000
       ? prompt.slice(0, prompt.length - used + 150_000)
