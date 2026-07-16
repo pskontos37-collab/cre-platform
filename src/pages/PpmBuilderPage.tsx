@@ -709,14 +709,21 @@ function SectionsTab({ draft, mutate, setMsg }: {
 }) {
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
+
+  const aiSections = PPM_SECTIONS.filter(s => s.mode === 'ai')
+
+  async function draftOne(key: string) {
+    const text = await draftPpmSection(key, draft.data_sheet, notes[key])
+    mutate(d => {
+      d.sections[key] = { text, mode: 'ai', generated_at: new Date().toISOString(), approved: false }
+    })
+  }
 
   async function generate(key: string) {
     setBusyKey(key)
     try {
-      const text = await draftPpmSection(key, draft.data_sheet, notes[key])
-      mutate(d => {
-        d.sections[key] = { text, mode: 'ai', generated_at: new Date().toISOString(), approved: false }
-      })
+      await draftOne(key)
       setMsg({ kind: 'ok', text: 'Section drafted — review the numbers flagged below, edit freely, then mark approved.' })
     } catch (e) {
       setMsg({ kind: 'err', text: e instanceof Error ? e.message : 'Draft failed' })
@@ -725,8 +732,55 @@ function SectionsTab({ draft, mutate, setMsg }: {
     }
   }
 
+  // Generate every AI section that has no text yet — never touches drafts you've
+  // already generated or edited. Runs sequentially so progress is visible and
+  // the API isn't hammered.
+  async function generateAll() {
+    const pending = aiSections.filter(s => !draft.sections[s.key]?.text)
+    if (!pending.length) {
+      setMsg({ kind: 'ok', text: 'Every section already has a draft. Use a section Regenerate button to redo one.' })
+      return
+    }
+    if (!confirm(`Draft ${pending.length} empty section(s) from the current data sheet? This calls the AI ${pending.length} time(s).`)) return
+    setBatch({ done: 0, total: pending.length })
+    let ok = 0
+    for (const s of pending) {
+      setBusyKey(s.key)
+      try { await draftOne(s.key); ok++ } catch { /* keep going; per-section errors surface on retry */ }
+      setBatch(b => (b ? { ...b, done: b.done + 1 } : b))
+    }
+    setBusyKey(null)
+    setBatch(null)
+    setMsg({
+      kind: ok === pending.length ? 'ok' : 'err',
+      text: ok === pending.length
+        ? `Drafted ${ok} section(s). Review the flagged figures, edit, and mark each approved.`
+        : `Drafted ${ok} of ${pending.length}. Retry any that failed with its Generate button.`,
+    })
+  }
+
+  const draftedCount = aiSections.filter(s => draft.sections[s.key]?.text).length
+
   return (
     <>
+      <Card
+        title="Narrative sections"
+        right={
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+              {batch ? `Drafting ${batch.done}/${batch.total}…` : `${draftedCount}/${aiSections.length} drafted`}
+            </span>
+            <button style={btnPrimary} disabled={busyKey !== null || batch !== null} onClick={generateAll}>
+              {batch ? 'Generating…' : 'Generate all sections'}
+            </button>
+          </div>
+        }
+      >
+        <div style={{ fontSize: 12.5, color: 'var(--text-faint)', lineHeight: 1.5 }}>
+          "Generate all sections" drafts every section that's still empty from the current data sheet — it won't overwrite drafts you've already generated or edited. Template sections below fill automatically and need no generation.
+        </div>
+      </Card>
+
       {PPM_SECTIONS.map(def => {
         const st: PpmSectionState | undefined = draft.sections[def.key]
         if (def.mode === 'template') {

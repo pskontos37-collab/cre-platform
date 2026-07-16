@@ -93,12 +93,15 @@ export async function extractPpmFields(text: string, focus?: string): Promise<Pa
 
 /**
  * Prefill a data sheet from a pipeline deal (+ its latest OM extraction).
- * Fills identity/deal-terms/returns; everything else stays blank for the author.
+ * Fills identity/physical/deal-terms/returns from the pipeline deal, and pulls
+ * the OM extraction (tenant roster, thesis bullets, submarket, occupancy, and
+ * physical/pricing fallbacks). Everything not covered stays blank for the author.
  */
 export async function dataSheetFromDeal(dealId: string): Promise<{ name: string; ds: PpmDataSheet }> {
   const ds = blankDataSheet()
-  const { data: deal, error } = await supabase.from('pipeline_deals').select('*').eq('id', dealId).single()
-  if (error || !deal) throw new Error('Deal not found')
+  const { data: raw, error } = await supabase.from('pipeline_deals').select('*').eq('id', dealId).single()
+  if (error || !raw) throw new Error('Deal not found')
+  const deal = raw as any
 
   ds.propertyName = deal.name ?? ''
   ds.city = deal.city ?? ''
@@ -115,22 +118,45 @@ export async function dataSheetFromDeal(dealId: string): Promise<{ name: string;
   ds.avgCoc = deal.avg_coc ?? null
   ds.holdYears = deal.hold_years ?? null
   ds.exitCap = deal.exit_cap ?? null
-  if (ds.purchasePrice != null && ds.glaSf) ds.pricePsf = Math.round(ds.purchasePrice / ds.glaSf)
-  if (ds.purchasePrice != null && ds.goingInCap != null) ds.inPlaceNoi = Math.round(ds.purchasePrice * ds.goingInCap)
 
-  // Tenant roster from the latest OM extraction, if one exists.
+  // Property type from asset_type + risk_profile (e.g. "Retail - Core Plus").
+  const humanize = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  const typeParts = [deal.asset_type, deal.risk_profile].filter(Boolean).map((s: string) => humanize(s))
+  if (typeParts.length) ds.propertyType = typeParts.join(' - ')
+
+  // Thesis bullets already assembled on the deal by enrich_deals.ps1 (from the
+  // OM key_points). Seed the "market overview notes (for AI)" so the narrative
+  // sections have the deal's positioning to draw on.
+  if (deal.thesis) ds.marketOverviewNotes = String(deal.thesis)
+
+  // Latest OM extraction: tenant roster, thesis fallback, and physical/pricing
+  // fallbacks when the deal's own columns are blank.
   const { data: om } = await supabase
     .from('om_intake').select('extracted')
     .eq('deal_id', dealId).order('created_at', { ascending: false }).limit(1)
   const ex = (om ?? [])[0]?.extracted as any
-  if (ex?.major_tenants?.length) {
-    ds.tenants = ex.major_tenants.map((t: any) => ({
-      name: t.name ?? '', sf: t.sf ?? null, pctGla: null, pctRev: null, rentPsf: t.rent_psf ?? null,
-      leaseType: 'NNN', expiration: t.expiration ?? '', options: t.options ?? '',
-      salesPsf: null, healthRatio: null, placerRank: '', groundLease: false,
-    }))
+  if (ex) {
+    if (ex.major_tenants?.length) {
+      ds.tenants = ex.major_tenants.map((t: any) => ({
+        name: t.name ?? '', sf: t.sf ?? null, pctGla: null, pctRev: null, rentPsf: t.rent_psf ?? null,
+        leaseType: 'NNN', expiration: t.expiration ?? '', options: t.options ?? '',
+        salesPsf: null, healthRatio: null, placerRank: '', groundLease: false,
+      }))
+    }
+    if (ex.occupancy != null) ds.occupancyPct = ex.occupancy > 1 ? ex.occupancy / 100 : ex.occupancy
+    if (!ds.submarketName && ex.submarket) ds.submarketName = ex.submarket
+    if (!ds.glaSf && ex.gla_sf != null) ds.glaSf = ex.gla_sf
+    if (!ds.yearBuilt && ex.year_built) ds.yearBuilt = String(ex.year_built)
+    if (ds.purchasePrice == null && ex.asking_price != null) ds.purchasePrice = ex.asking_price
+    if (ds.goingInCap == null && ex.in_place_cap != null) ds.goingInCap = ex.in_place_cap
+    // Thesis fallback if the deal row had none.
+    if (!ds.marketOverviewNotes && Array.isArray(ex.key_points) && ex.key_points.length) {
+      ds.marketOverviewNotes = ex.key_points.map((k: string) => `- ${k}`).join('\n')
+    }
   }
-  if (ex?.occupancy != null) ds.occupancyPct = ex.occupancy > 1 ? ex.occupancy / 100 : ex.occupancy
+
+  if (ds.purchasePrice != null && ds.glaSf) ds.pricePsf = Math.round(ds.purchasePrice / ds.glaSf)
+  if (ds.purchasePrice != null && ds.goingInCap != null) ds.inPlaceNoi = Math.round(ds.purchasePrice * ds.goingInCap)
 
   return { name: deal.name ?? 'New PPM', ds }
 }
