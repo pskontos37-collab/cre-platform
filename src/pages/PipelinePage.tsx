@@ -11,7 +11,7 @@ import {
   createPartner, updatePartner, deletePartner, type PartnerInput,
   openDiligence, unlinkDiligence, sendDocToDiligence,
   pipelineMetrics, fetchDeckExtras, saveUnderwriting, type UnderwritingModel,
-  BOARD_STAGES, ALL_STAGES, STAGE_LABEL, STAGE_HUE, boardColumn, isTerminal, isActiveStage, STAGE_PROB,
+  BOARD_STAGES, ALL_STAGES, STAGE_LABEL, STAGE_HUE, boardColumn, isTerminal, STAGE_PROB,
   RISK_ORDER, RISK_LABEL, RISK_COLOR, ASSET_ORDER, ASSET_LABEL, ASSET_MONO, ASSET_COLOR,
   LP_STATUS_ORDER, LP_STATUS_LABEL, PARTNER_TIER_LABEL,
   type Deal, type Stage, type RiskProfile, type AssetType, type LpStatus,
@@ -24,6 +24,7 @@ import { PdfDownloadButton, sanitizeFilename } from '../reports/PdfDownloadButto
 import { underwrite, sensitivity, type AcqResult } from '../lib/acqUnderwriting'
 import { underwriteTenant } from '../lib/tenantUnderwriting'
 import { computePromote, DEFAULT_PROMOTE } from '../lib/acqPromote'
+import { computeAcqAlerts, type AlertItem } from '../lib/acqAlerts'
 import type { UwLeaseLine, UwRollover, UwOpex, UwRefi, UwPromote, UwPromoteTier } from '../hooks/usePipeline'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
@@ -199,26 +200,10 @@ function Watchlist({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => v
   )
 }
 
-// ── Deadlines & activity alerts (Phase 2 workflow) ──
-const DAY_MS = 86400000
-const DEADLINE_SOON_DAYS = 45   // surface target closes within this window (or overdue)
-const STALE_DAYS = 21           // active deals with no edit in this long are flagged
-interface AlertItem { d: Deal; days: number }
-function acqAlerts(deals: Deal[], now: number): { deadlines: AlertItem[]; stalled: AlertItem[] } {
-  const active = deals.filter(d => isActiveStage(d.stage))
-  const deadlines = active
-    .filter(d => d.targetCloseDate)
-    .map(d => ({ d, days: Math.round((new Date(d.targetCloseDate!).getTime() - now) / DAY_MS) }))
-    .filter(x => x.days <= DEADLINE_SOON_DAYS)
-    .sort((a, b) => a.days - b.days)
-  const stalled = active
-    .map(d => ({ d, days: Math.round((now - new Date(d.updatedAt).getTime()) / DAY_MS) }))
-    .filter(x => x.days >= STALE_DAYS)
-    .sort((a, b) => b.days - a.days)
-  return { deadlines, stalled }
-}
+// ── Deadlines & activity alerts (Phase 2 workflow) — shared logic in lib/acqAlerts ──
+type DealAlert = AlertItem<Deal>
 function AcqAlerts({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => void }) {
-  const { deadlines, stalled } = acqAlerts(deals, Date.now())
+  const { deadlines, stalled } = computeAcqAlerts(deals, Date.now())
   if (!deadlines.length && !stalled.length) return null
   const dLabel = (n: number) => (n < 0 ? `${-n}d overdue` : n === 0 ? 'today' : `${n}d`)
   const dColor = (n: number) => (n < 0 ? '#c0654e' : n <= 14 ? RISK_COLOR.value_add : 'var(--text-muted)')
@@ -238,8 +223,8 @@ function AcqAlerts({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => v
   )
 }
 function AlertRow({ icon, label, chips, onOpen, metric, color, title }: {
-  icon: string; label: string; chips: AlertItem[]; onOpen: (id: string) => void
-  metric: (x: AlertItem) => string; color: (x: AlertItem) => string; title: (x: AlertItem) => string
+  icon: string; label: string; chips: DealAlert[]; onOpen: (id: string) => void
+  metric: (x: DealAlert) => string; color: (x: DealAlert) => string; title: (x: DealAlert) => string
 }) {
   const CAP = 8
   return (

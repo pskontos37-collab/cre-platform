@@ -25,6 +25,7 @@ export const WIDGET_DEFS: DashboardWidgetDef[] = [
   { key: 'my_tasks',      label: 'My Tasks',                      section: 'workflow',    def: true },
   { key: 'work_orders',   label: 'Open Work Orders',              section: 'workflow',    def: true },
   { key: 'mri_recon',     label: 'MRI Reconciliation',            section: 'workflow',    def: true },
+  { key: 'acq_alerts',    label: 'Acquisition Alerts',            section: 'workflow',    def: true },
 
   { key: 'gl_noi',        label: 'Net Operating Income',          section: 'financial',   def: true },
   { key: 'budget_var',    label: 'Budget vs Actual (YTD)',        section: 'financial',   def: true },
