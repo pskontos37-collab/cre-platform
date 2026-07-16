@@ -1,5 +1,6 @@
 import { useQuery } from './useQuery'
 import { supabase } from '../lib/supabase'
+import type { BuyBox } from '../lib/buyBox'
 
 // Acquisition deal pipeline (v2, migration 20240063). Modeled on the firm's Deal
 // Tracking Sheet: Investment Profile (risk × asset), Team, Submarket, an LP
@@ -298,6 +299,46 @@ export function useCapitalPartners() {
       notes: p.notes ?? null, active: p.active ?? true,
     }))
   }, [])
+}
+
+export function useBuyBoxes() {
+  return useQuery<BuyBox[]>(async () => {
+    const { data, error } = await supabase.from('acquisition_buy_boxes').select('*').order('name').limit(500)
+    if (error) throw new Error(error.message)
+    return ((data ?? []) as any[]).map(b => ({
+      id: b.id, name: b.name,
+      assetTypes: b.asset_types ?? [], riskProfiles: b.risk_profiles ?? [],
+      states: b.states ?? [], markets: b.markets ?? [],
+      minPrice: num(b.min_price), maxPrice: num(b.max_price), minGla: num(b.min_gla), maxGla: num(b.max_gla),
+      minGoingInCap: num(b.min_going_in_cap), maxGoingInCap: num(b.max_going_in_cap),
+      minIrr: num(b.min_irr), minEquityMultiple: num(b.min_equity_multiple),
+      active: b.active ?? true, notes: b.notes ?? null,
+    })) as BuyBox[]
+  }, [])
+}
+export type BuyBoxInput = Omit<BuyBox, 'id'>
+function buyBoxRow(b: BuyBoxInput): Record<string, unknown> {
+  return {
+    name: b.name.trim(), asset_types: b.assetTypes, risk_profiles: b.riskProfiles,
+    states: b.states.map(s => s.trim().toUpperCase()).filter(Boolean), markets: b.markets.map(m => m.trim()).filter(Boolean),
+    min_price: b.minPrice, max_price: b.maxPrice, min_gla: b.minGla, max_gla: b.maxGla,
+    min_going_in_cap: b.minGoingInCap, max_going_in_cap: b.maxGoingInCap,
+    min_irr: b.minIrr, min_equity_multiple: b.minEquityMultiple,
+    active: b.active, notes: b.notes?.trim() || null,
+  }
+}
+export async function createBuyBox(b: BuyBoxInput): Promise<void> {
+  const { error } = await supabase.from('acquisition_buy_boxes').insert(buyBoxRow(b))
+  if (error) throw new Error(error.message)
+}
+export async function updateBuyBox(id: string, b: BuyBoxInput): Promise<void> {
+  const { error } = await supabase.from('acquisition_buy_boxes')
+    .update({ ...buyBoxRow(b), updated_at: new Date().toISOString() }).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+export async function deleteBuyBox(id: string): Promise<void> {
+  const { error } = await supabase.from('acquisition_buy_boxes').delete().eq('id', id)
+  if (error) throw new Error(error.message)
 }
 
 export function useOmIntake() {

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import {
   usePipeline, useCapitalPartners, useOmIntake,
+  useBuyBoxes, createBuyBox, updateBuyBox, deleteBuyBox, type BuyBoxInput,
   createDeal, updateDeal, deleteDeal, closeDeal,
   addDealLp, updateDealLp, removeDealLp, updateOmRow, extractOm, createDealFromExtraction, uploadOmPdf, generateIcMemo,
   useDealDocuments, uploadDealDocument, removeDealDocument, DEAL_DOC_ROLES, dealDocRoleLabel, type DealDoc,
@@ -25,6 +26,7 @@ import { underwrite, sensitivity, type AcqResult } from '../lib/acqUnderwriting'
 import { underwriteTenant } from '../lib/tenantUnderwriting'
 import { computePromote, DEFAULT_PROMOTE } from '../lib/acqPromote'
 import { computeAcqAlerts, type AlertItem } from '../lib/acqAlerts'
+import { bestFit, fitCategory, FIT_LABEL, type BuyBox, type FitDeal, type FitCategory } from '../lib/buyBox'
 import type { UwLeaseLine, UwRollover, UwOpex, UwRefi, UwPromote, UwPromoteTier } from '../hooks/usePipeline'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
@@ -58,9 +60,11 @@ export function PipelinePage() {
   const partnersQ = useCapitalPartners()
   const teamQ = useDealTeamMembers()
   const omQ = useOmIntake()
+  const buyBoxesQ = useBuyBoxes()
   const deals = data ?? []
+  const buyBoxes = buyBoxesQ.data ?? []
 
-  const [view, setView] = useState<'pipeline' | 'analytics' | 'om' | 'partners'>('pipeline')
+  const [view, setView] = useState<'pipeline' | 'analytics' | 'om' | 'partners' | 'buybox'>('pipeline')
   const [assetFilter, setAssetFilter] = useState<'' | AssetType>('')
   const [riskFilter, setRiskFilter] = useState<'' | RiskProfile>('')
   const [boardMode, setBoardMode] = useState<'board' | 'table'>('board')
@@ -101,7 +105,7 @@ export function PipelinePage() {
           </div>
 
           <div style={{ display: 'flex', gap: 3, borderBottom: '1px solid var(--border)', marginBottom: 16, flexWrap: 'wrap' }}>
-            {([['pipeline', 'Pipeline'], ['analytics', 'Analytics'], ['om', 'OM Intake'], ['partners', 'Partners']] as const).map(([k, lab]) => (
+            {([['pipeline', 'Pipeline'], ['analytics', 'Analytics'], ['om', 'OM Intake'], ['partners', 'Partners'], ['buybox', 'Buy-Box']] as const).map(([k, lab]) => (
               <button key={k} onClick={() => setView(k)}
                 style={{ ...navBtn, color: view === k ? 'var(--text)' : 'var(--text-faint)', borderBottomColor: view === k ? 'var(--accent, #466371)' : 'transparent' }}>
                 {lab}
@@ -110,20 +114,21 @@ export function PipelinePage() {
           </div>
 
           {view === 'pipeline' && (
-            <PipelineView deals={visible} totalCount={deals.length}
+            <PipelineView deals={visible} totalCount={deals.length} buyBoxes={buyBoxes}
               boardMode={boardMode} setBoardMode={setBoardMode}
               assetFilter={assetFilter} setAssetFilter={setAssetFilter}
               riskFilter={riskFilter} setRiskFilter={setRiskFilter} onOpen={setOpenId} />
           )}
-          {view === 'analytics' && <AnalyticsView deals={visible} />}
+          {view === 'analytics' && <AnalyticsView deals={visible} buyBoxes={buyBoxes} />}
           {view === 'om' && <OmView rows={omQ.data ?? []} createdBy={appUser?.id ?? null}
             onChanged={() => { omQ.refetch(); refetch() }} onOpen={setOpenId} />}
           {view === 'partners' && <PartnersView partners={partnersQ.data ?? []} onChanged={partnersQ.refetch} />}
+          {view === 'buybox' && <BuyBoxView buyBoxes={buyBoxes} deals={visible} onChanged={buyBoxesQ.refetch} />}
         </>
       )}
 
       {openDeal && (
-        <DealDrawer deal={openDeal} partners={partnersQ.data ?? []} team={teamQ.data ?? []}
+        <DealDrawer deal={openDeal} partners={partnersQ.data ?? []} team={teamQ.data ?? []} buyBoxes={buyBoxes}
           onClose={() => setOpenId(null)} onChanged={refetch} />
       )}
       {composerOpen && (
@@ -146,7 +151,7 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
 
 // ── PIPELINE VIEW ─────────────────────────────────────────────────────────────
 function PipelineView(p: {
-  deals: Deal[]; totalCount: number; boardMode: 'board' | 'table'; setBoardMode: (m: 'board' | 'table') => void
+  deals: Deal[]; totalCount: number; buyBoxes: BuyBox[]; boardMode: 'board' | 'table'; setBoardMode: (m: 'board' | 'table') => void
   assetFilter: '' | AssetType; setAssetFilter: (a: '' | AssetType) => void
   riskFilter: '' | RiskProfile; setRiskFilter: (r: '' | RiskProfile) => void; onOpen: (id: string) => void
 }) {
@@ -178,11 +183,11 @@ function PipelineView(p: {
         <EmptyState icon="📈" title="No deals match these filters." />
       ) : p.boardMode === 'board' ? (
         <>
-          <Board deals={p.deals} onOpen={p.onOpen} />
+          <Board deals={p.deals} onOpen={p.onOpen} buyBoxes={p.buyBoxes} />
           <Watchlist deals={p.deals.filter(d => d.stage === 'tracking')} onOpen={p.onOpen} />
         </>
       ) : (
-        <Table deals={p.deals} onOpen={p.onOpen} />
+        <Table deals={p.deals} onOpen={p.onOpen} buyBoxes={p.buyBoxes} />
       )}
     </>
   )
@@ -242,7 +247,41 @@ function AlertRow({ icon, label, chips, onOpen, metric, color, title }: {
   )
 }
 
-function Board({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => void }) {
+// ── buy-box / strategy fit (Phase 3 sourcing) ──
+const dealToFit = (d: Deal): FitDeal => ({
+  assetType: d.assetType, riskProfile: d.riskProfile, state: d.state, market: d.market,
+  glaSf: d.glaSf, askPrice: d.askPrice, goingInCap: d.goingInCap, projIrr: d.projIrr, equityMultiple: d.equityMultiple,
+})
+const FIT_COLOR: Record<FitCategory, string> = { on: '#2e8b57', partial: RISK_COLOR.value_add, off: '#c0654e', none: 'var(--text-faint)' }
+function FitBadge({ deal, buyBoxes }: { deal: Deal; buyBoxes: BuyBox[] }) {
+  if (!buyBoxes.some(b => b.active)) return null
+  const best = bestFit(dealToFit(deal), buyBoxes)
+  const cat = fitCategory(best)
+  const c = FIT_COLOR[cat]
+  const title = best ? `Best match: ${best.bb.name} — ${best.fit.passed}/${best.fit.applicable} criteria (${Math.round(best.fit.score * 100)}%)` : 'No buy-box defined'
+  return <span title={title} style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: c, background: `${c}1e`, borderRadius: 999, padding: '1px 6px', whiteSpace: 'nowrap' }}>{FIT_LABEL[cat]}</span>
+}
+function scoredActive(deals: Deal[], buyBoxes: BuyBox[]) {
+  return deals.filter(d => !isTerminal(d.stage) && d.stage !== 'closed').map(d => {
+    const best = bestFit(dealToFit(d), buyBoxes)
+    return { d, best, cat: fitCategory(best) }
+  })
+}
+function fitDistRows(deals: Deal[], buyBoxes: BuyBox[]): BarRow[] {
+  const s = scoredActive(deals, buyBoxes)
+  const count = (c: FitCategory) => s.filter(x => x.cat === c).length
+  return ([['On-strategy', count('on')], ['Partial fit', count('partial')], ['Off-strategy', count('off')]] as [string, number][])
+    .filter(([, v]) => v > 0).map(([l, v]) => ({ l, v }))
+}
+function fitByBoxRows(deals: Deal[], buyBoxes: BuyBox[]): BarRow[] {
+  const by: Record<string, number> = {}
+  for (const x of scoredActive(deals, buyBoxes)) {
+    if (x.best && !x.best.fit.disqualified) by[x.best.bb.name] = (by[x.best.bb.name] ?? 0) + 1
+  }
+  return Object.entries(by).sort((a, b) => b[1] - a[1]).map(([l, v]) => ({ l, v }))
+}
+
+function Board({ deals, onOpen, buyBoxes }: { deals: Deal[]; onOpen: (id: string) => void; buyBoxes: BuyBox[] }) {
   return (
     <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 10 }}>
       {BOARD_STAGES.map(col => {
@@ -257,7 +296,7 @@ function Board({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => void 
               <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-muted)' }}>{vol > 0 ? fmtM(vol) : ''}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-              {inCol.map(d => <DealCard key={d.id} d={d} onOpen={onOpen} />)}
+              {inCol.map(d => <DealCard key={d.id} d={d} onOpen={onOpen} buyBoxes={buyBoxes} />)}
               {inCol.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-faint)', padding: '8px 3px' }}>—</div>}
             </div>
           </div>
@@ -267,7 +306,7 @@ function Board({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => void 
   )
 }
 
-function DealCard({ d, onOpen }: { d: Deal; onOpen: (id: string) => void }) {
+function DealCard({ d, onOpen, buyBoxes }: { d: Deal; onOpen: (id: string) => void; buyBoxes: BuyBox[] }) {
   const committed = d.lps.reduce((a, l) => a + (l.committedAmount ?? 0), 0)
   const raise = d.equityRequired ? Math.min(1, committed / d.equityRequired) : 0
   return (
@@ -275,6 +314,7 @@ function DealCard({ d, onOpen }: { d: Deal; onOpen: (id: string) => void }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
         <span style={{ ...mono, background: ASSET_COLOR[d.assetType] }}>{ASSET_MONO[d.assetType]}</span>
         <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: RISK_COLOR[d.riskProfile] }}>{RISK_LABEL[d.riskProfile]}</span>
+        <FitBadge deal={d} buyBoxes={buyBoxes} />
         <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)' }}>{d.stage === 'closed' ? '✓' : Math.round((STAGE_PROB[d.stage] ?? d.probability) * 100) + '%'}</span>
       </div>
       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', lineHeight: 1.25, textAlign: 'left' }}>{d.name}</div>
@@ -309,12 +349,14 @@ function DealCard({ d, onOpen }: { d: Deal; onOpen: (id: string) => void }) {
   )
 }
 
-function Table({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => void }) {
+function Table({ deals, onOpen, buyBoxes = [] }: { deals: Deal[]; onOpen: (id: string) => void; buyBoxes?: BuyBox[] }) {
   const sorted = [...deals].sort((a, b) => ALL_STAGES.indexOf(a.stage) - ALL_STAGES.indexOf(b.stage) || (b.askPrice ?? 0) - (a.askPrice ?? 0))
+  const hasBuyBox = buyBoxes.some(b => b.active)
+  const cols = ['Deal', 'Team', 'Profile', 'Sub', 'Stage', 'City', 'Guidance', 'SF', 'Partner', ...(hasBuyBox ? ['Fit'] : [])]
   return (
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-        <thead><tr>{['Deal', 'Team', 'Profile', 'Sub', 'Stage', 'City', 'Guidance', 'SF', 'Partner'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <thead><tr>{cols.map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>
           {sorted.map(d => (
             <tr key={d.id} onClick={() => onOpen(d.id)} style={{ cursor: 'pointer' }}
@@ -329,6 +371,7 @@ function Table({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => void 
               <td style={tdNum}>{priceLabel(d)}</td>
               <td style={tdNum}>{d.glaSf ? Math.round(d.glaSf / 1000) + 'k' : '—'}</td>
               <td style={td}>{d.partner ?? '—'}</td>
+              {hasBuyBox && <td style={td}><FitBadge deal={d} buyBoxes={buyBoxes} /></td>}
             </tr>
           ))}
         </tbody>
@@ -338,11 +381,25 @@ function Table({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => void 
 }
 
 // ── ANALYTICS VIEW ────────────────────────────────────────────────────────────
-function AnalyticsView({ deals: allDeals }: { deals: Deal[] }) {
+function AnalyticsView({ deals: allDeals, buyBoxes }: { deals: Deal[]; buyBoxes: BuyBox[] }) {
   // Analytics reflect the active book — the watchlist is excluded.
   const deals = allDeals.filter(d => d.stage !== 'tracking')
+  const hasBuyBox = buyBoxes.some(b => b.active)
   return (
     <>
+      {hasBuyBox && (
+        <>
+          <AnalyticsHeading>Sourcing Fit</AnalyticsHeading>
+          <div style={{ ...grid2, marginBottom: 14 }}>
+            <Panel title="Strategy fit" cap="Active deals scored against the acquisition buy-boxes.">
+              <Bars rows={fitDistRows(deals, buyBoxes)} color={RISK_COLOR.core} isCount empty="No active deals to score." />
+            </Panel>
+            <Panel title="On-strategy by buy-box" cap="Deals that best-match each buy-box (non-disqualified).">
+              <Bars rows={fitByBoxRows(deals, buyBoxes)} color={RISK_COLOR.core_plus} isCount empty="No matched deals yet." />
+            </Panel>
+          </div>
+        </>
+      )}
       <AnalyticsHeading>Returns &amp; Capital</AnalyticsHeading>
       <ReturnsSummaryStrip s={returnsSummary(deals)} />
       <div style={{ ...grid2, marginTop: 14 }}>
@@ -864,6 +921,150 @@ function PartnerModal({ partner, onClose, onSaved }: { partner: CapitalPartner |
   )
 }
 
+// ── Buy-Box manager (Phase 3 sourcing) ──
+const rng = (min: number | null, max: number | null, fmt: (n: number) => string) =>
+  min != null && max != null ? `${fmt(min)}–${fmt(max)}` : min != null ? `≥ ${fmt(min)}` : max != null ? `≤ ${fmt(max)}` : ''
+const bbM = (n: number) => `$${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`
+const bbPct = (n: number) => `${(n * 100).toFixed(1)}%`
+const bbSf = (n: number) => `${Math.round(n / 1000)}k SF`
+
+function BuyBoxView({ buyBoxes, deals, onChanged }: { buyBoxes: BuyBox[]; deals: Deal[]; onChanged: () => void }) {
+  const [editing, setEditing] = useState<BuyBox | 'new' | null>(null)
+  const active = deals.filter(d => !isTerminal(d.stage) && d.stage !== 'closed')
+  const onCount = (bb: BuyBox) => active.filter(d => { const b = bestFit(dealToFit(d), [bb]); return !!b && !b.fit.disqualified && b.fit.score >= 0.8 }).length
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '-4px 0 12px' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Define the firm's acquisition criteria. Every active deal is scored against these to surface on-strategy sourcing.</div>
+        <button style={{ ...primaryBtn, marginLeft: 'auto' }} onClick={() => setEditing('new')}>+ Add buy-box</button>
+      </div>
+      {buyBoxes.length === 0 ? (
+        <EmptyState icon="🎯" title="No buy-boxes yet." subtitle="Add your first acquisition buy-box to start scoring deal flow." />
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 13 }}>
+          {buyBoxes.map(bb => <BuyBoxCard key={bb.id} bb={bb} onEdit={() => setEditing(bb)} onStrategy={onCount(bb)} total={active.length} />)}
+        </div>
+      )}
+      {editing && <BuyBoxModal buyBox={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChanged() }} />}
+    </>
+  )
+}
+
+function BuyBoxCard({ bb, onEdit, onStrategy, total }: { bb: BuyBox; onEdit: () => void; onStrategy: number; total: number }) {
+  const crit: string[] = [
+    bb.assetTypes.length ? bb.assetTypes.map(a => ASSET_LABEL[a]).join(' / ') : '',
+    bb.riskProfiles.length ? bb.riskProfiles.map(r => RISK_LABEL[r]).join(' / ') : '',
+    [...bb.states, ...bb.markets].join(', '),
+    rng(bb.minPrice, bb.maxPrice, bbM),
+    rng(bb.minGla, bb.maxGla, bbSf),
+    rng(bb.minGoingInCap, bb.maxGoingInCap, bbPct) && `${rng(bb.minGoingInCap, bb.maxGoingInCap, bbPct)} cap`,
+    bb.minIrr != null ? `IRR ≥ ${bbPct(bb.minIrr)}` : '',
+    bb.minEquityMultiple != null ? `EM ≥ ${bb.minEquityMultiple.toFixed(2)}x` : '',
+  ].filter(Boolean) as string[]
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--surface)', padding: '14px 15px', opacity: bb.active ? 1 : 0.6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 9 }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{bb.name}</span>
+        {!bb.active && <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-faint)', border: '1px solid var(--border-2)', borderRadius: 999, padding: '1px 7px' }}>Inactive</span>}
+        <button style={{ ...miniX, marginLeft: 'auto' }} title={`Edit ${bb.name}`} onClick={onEdit}>✎</button>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {crit.length ? crit.map((c, i) => <span key={i} style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-2, rgba(0,0,0,.04))', borderRadius: 6, padding: '2px 8px' }}>{c}</span>)
+          : <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>No criteria set — matches every deal.</span>}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 10 }}>
+        <b style={{ color: '#2e8b57' }}>{onStrategy}</b> of {total} active deals on-strategy{bb.notes ? ` · ${bb.notes}` : ''}
+      </div>
+    </div>
+  )
+}
+
+function BuyBoxModal({ buyBox, onClose, onSaved }: { buyBox: BuyBox | null; onClose: () => void; onSaved: () => void }) {
+  const [f, setF] = useState<BuyBoxInput>(() => buyBox ? { ...buyBox } : {
+    name: '', assetTypes: [], riskProfiles: [], states: [], markets: [],
+    minPrice: null, maxPrice: null, minGla: null, maxGla: null, minGoingInCap: null, maxGoingInCap: null,
+    minIrr: null, minEquityMultiple: null, active: true, notes: null,
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const set = (p: Partial<BuyBoxInput>) => setF(s => ({ ...s, ...p }))
+  const toggle = <K extends 'assetTypes' | 'riskProfiles'>(k: K, v: BuyBoxInput[K][number]) =>
+    set({ [k]: (f[k] as string[]).includes(v as string) ? (f[k] as string[]).filter(x => x !== v) : [...(f[k] as string[]), v] } as Partial<BuyBoxInput>)
+  const numOrNull = (s: string) => { const n = Number(s.replace(/[,$%\s]/g, '')); return s.trim() === '' || !isFinite(n) ? null : n }
+
+  const save = async () => {
+    if (!f.name.trim()) { setErr('Buy-box needs a name.'); return }
+    setBusy(true); setErr(null)
+    try { if (buyBox) { await updateBuyBox(buyBox.id, f) } else { await createBuyBox(f) } onSaved() }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') }
+    finally { setBusy(false) }
+  }
+  const remove = async () => {
+    if (!buyBox) return
+    if (!confirm(`Delete buy-box "${buyBox.name}"?`)) return
+    setBusy(true); setErr(null)
+    try { await deleteBuyBox(buyBox.id); onSaved() }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Delete failed') }
+    finally { setBusy(false) }
+  }
+  const chip = (on: boolean, color: string, label: string, onClick: () => void) => (
+    <button key={label} type="button" onClick={onClick} style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 10px', borderRadius: 999, cursor: 'pointer', border: `1px solid ${on ? color : 'var(--border-2)'}`, background: on ? color : 'var(--surface)', color: on ? '#fff' : 'var(--text-muted)' }}>{label}</button>
+  )
+  const numInput = (val: number | null, onChange: (n: number | null) => void, ph: string) =>
+    <input value={val ?? ''} placeholder={ph} onChange={e => onChange(numOrNull(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} />
+  const pctInput = (val: number | null, onChange: (n: number | null) => void, ph: string) =>
+    <input value={val != null ? +(val * 100).toFixed(2) : ''} placeholder={ph} onChange={e => { const n = numOrNull(e.target.value); onChange(n == null ? null : n / 100) }} style={{ ...inputStyle, textAlign: 'right' }} />
+
+  return (
+    <Overlay onClose={busy ? () => {} : onClose}>
+      <div style={modal} onClick={e => e.stopPropagation()}>
+        <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>{buyBox ? `Edit ${buyBox.name}` : 'Add acquisition buy-box'}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Field label="Name *"><input autoFocus value={f.name} onChange={e => set({ name: e.target.value })} style={inputStyle} placeholder="e.g. Value-Add Retail — Sunbelt" /></Field>
+          <Field label="Asset types (any if none)">
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {(ASSET_ORDER.concat(['industrial'] as AssetType[])).map(a => chip(f.assetTypes.includes(a), ASSET_COLOR[a], ASSET_LABEL[a], () => toggle('assetTypes', a)))}
+            </div>
+          </Field>
+          <Field label="Risk profiles (any if none)">
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {RISK_ORDER.map(r => chip(f.riskProfiles.includes(r), RISK_COLOR[r], RISK_LABEL[r], () => toggle('riskProfiles', r)))}
+            </div>
+          </Field>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Field label="States (comma, 2-letter)" flex><input value={f.states.join(', ')} onChange={e => set({ states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} style={inputStyle} placeholder="NC, SC, GA, FL, TX" /></Field>
+            <Field label="Markets (comma)" flex><input value={f.markets.join(', ')} onChange={e => set({ markets: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} style={inputStyle} placeholder="Charlotte, Raleigh" /></Field>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Field label="Min price ($)" flex>{numInput(f.minPrice, n => set({ minPrice: n }), '20000000')}</Field>
+            <Field label="Max price ($)" flex>{numInput(f.maxPrice, n => set({ maxPrice: n }), '80000000')}</Field>
+            <Field label="Min GLA (SF)" flex>{numInput(f.minGla, n => set({ minGla: n }), '')}</Field>
+            <Field label="Max GLA (SF)" flex>{numInput(f.maxGla, n => set({ maxGla: n }), '')}</Field>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Field label="Min cap (%)" flex>{pctInput(f.minGoingInCap, n => set({ minGoingInCap: n }), '6')}</Field>
+            <Field label="Max cap (%)" flex>{pctInput(f.maxGoingInCap, n => set({ maxGoingInCap: n }), '')}</Field>
+            <Field label="Min IRR (%)" flex>{pctInput(f.minIrr, n => set({ minIrr: n }), '13')}</Field>
+            <Field label="Min EM (x)" flex>{numInput(f.minEquityMultiple, n => set({ minEquityMultiple: n }), '1.7')}</Field>
+          </div>
+          <Field label="Notes"><input value={f.notes ?? ''} onChange={e => set({ notes: e.target.value })} style={inputStyle} placeholder="Strategy note shown on the card" /></Field>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={f.active} onChange={e => set({ active: e.target.checked })} /> Active (scores deal flow)
+          </label>
+        </div>
+        {err && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 8 }}>{err}</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          {buyBox && <button style={{ ...ghostBtn, color: 'var(--red)', borderColor: 'var(--red)' }} disabled={busy} onClick={remove}>Delete</button>}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button style={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
+            <button style={primaryBtn} onClick={save} disabled={busy}>{busy ? 'Saving…' : buyBox ? 'Save changes' : 'Add buy-box'}</button>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  )
+}
+
 function PartnerCard({ p, onEdit }: { p: CapitalPartner; onEdit: () => void }) {
   const kv = (k: string, v: ReactNode) => <div><div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>{k}</div><div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>{v || '—'}</div></div>
   return (
@@ -888,7 +1089,7 @@ function PartnerCard({ p, onEdit }: { p: CapitalPartner; onEdit: () => void }) {
 }
 
 // ── DEAL DRAWER ───────────────────────────────────────────────────────────────
-function DealDrawer({ deal, partners, team, onClose, onChanged }: { deal: Deal; partners: CapitalPartner[]; team: TeamMember[]; onClose: () => void; onChanged: () => void }) {
+function DealDrawer({ deal, partners, team, buyBoxes, onClose, onChanged }: { deal: Deal; partners: CapitalPartner[]; team: TeamMember[]; buyBoxes: BuyBox[]; onClose: () => void; onChanged: () => void }) {
   const { appUser } = useAuth()
   const [tab, setTab] = useState<'overview' | 'underwriting' | 'capital' | 'documents' | 'discussion'>('overview')
   const [discussLp, setDiscussLp] = useState<string | null>(null)
@@ -965,7 +1166,7 @@ function DealDrawer({ deal, partners, team, onClose, onChanged }: { deal: Deal; 
           ))}
         </div>
 
-        {tab === 'overview' && <OverviewTab deal={deal} team={team} onSave={p => run(() => updateDeal(deal.id, p))} busy={busy} onDelete={() => run(async () => { await deleteDeal(deal.id); onClose() })} />}
+        {tab === 'overview' && <><StrategyFitPanel deal={deal} buyBoxes={buyBoxes} /><OverviewTab deal={deal} team={team} onSave={p => run(() => updateDeal(deal.id, p))} busy={busy} onDelete={() => run(async () => { await deleteDeal(deal.id); onClose() })} /></>}
         {tab === 'underwriting' && <UnderwritingTab deal={deal} busy={busy} onSaveModel={(mdl, c) => run(() => saveUnderwriting(deal.id, mdl, c))} />}
         {tab === 'capital' && <CapitalTab deal={deal} partners={partners} onChanged={onChanged} onDiscuss={lpId => { setDiscussLp(lpId); setTab('discussion') }} />}
         {tab === 'documents' && <DocumentsTab dealId={deal.id} dealName={deal.name} createdBy={appUser?.id ?? null} folderPath={deal.folderPath} folderFiles={deal.folderFiles} docs={docsQ.data ?? []} loading={docsQ.loading} refetch={docsQ.refetch} ddPropertyId={deal.ddPropertyId} />}
@@ -1104,6 +1305,30 @@ function InvestmentSummaryButtons({ deal, preparedBy }: { deal: Deal; preparedBy
   )
 }
 
+function StrategyFitPanel({ deal, buyBoxes }: { deal: Deal; buyBoxes: BuyBox[] }) {
+  if (!buyBoxes.some(b => b.active)) return null
+  const best = bestFit(dealToFit(deal), buyBoxes)
+  if (!best) return null
+  const cat = fitCategory(best)
+  const c = FIT_COLOR[cat]
+  return (
+    <div style={{ border: `1px solid ${c}55`, background: `${c}12`, borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: best.fit.checks.length ? 8 : 0 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: c }}>{FIT_LABEL[cat]}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{best.bb.name} · {best.fit.passed}/{best.fit.applicable} criteria ({Math.round(best.fit.score * 100)}%){best.fit.disqualified ? ' · disqualified' : ''}</span>
+      </div>
+      {best.fit.checks.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {best.fit.checks.map((ck, i) => {
+            const cc = ck.status === 'pass' ? '#2e8b57' : ck.status === 'fail' ? '#c0654e' : 'var(--text-faint)'
+            const mk = ck.status === 'pass' ? '✓' : ck.status === 'fail' ? '✕' : '?'
+            return <span key={i} title={ck.detail ? `Target: ${ck.detail}` : undefined} style={{ fontSize: 10.5, color: cc, border: `1px solid ${cc}44`, borderRadius: 6, padding: '2px 7px', background: 'var(--surface)' }}>{mk} {ck.label}{ck.hard ? '' : ''}</span>
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 function OverviewTab({ deal, team, onSave, busy, onDelete }: { deal: Deal; team: TeamMember[]; onSave: (p: any) => void; busy: boolean; onDelete: () => void }) {
   const [thesis, setThesis] = useState(deal.thesis ?? '')
   return (
