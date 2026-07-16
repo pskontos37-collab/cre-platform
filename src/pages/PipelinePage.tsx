@@ -120,7 +120,7 @@ export function PipelinePage() {
               riskFilter={riskFilter} setRiskFilter={setRiskFilter} onOpen={setOpenId} />
           )}
           {view === 'analytics' && <AnalyticsView deals={visible} buyBoxes={buyBoxes} />}
-          {view === 'om' && <OmView rows={omQ.data ?? []} createdBy={appUser?.id ?? null}
+          {view === 'om' && <OmView rows={omQ.data ?? []} createdBy={appUser?.id ?? null} buyBoxes={buyBoxes}
             onChanged={() => { omQ.refetch(); refetch() }} onOpen={setOpenId} />}
           {view === 'partners' && <PartnersView partners={partnersQ.data ?? []} onChanged={partnersQ.refetch} />}
           {view === 'buybox' && <BuyBoxView buyBoxes={buyBoxes} deals={visible} onChanged={buyBoxesQ.refetch} />}
@@ -661,7 +661,7 @@ function LegendRow({ c, label, v }: { c: string; label: string; v: string }) {
 const SAMPLE_OM = `OFFERING MEMORANDUM — One DTC, Denver, Colorado (Denver Tech Center).
 Two-building suburban office park totaling 240,931 rentable square feet, built 1982 and renovated 2016, freeway-visible in the DTC submarket. Currently 78% leased. Anchored by an investment-grade tenant occupying 62,000 SF through 2029; top five tenants represent 54% of NRA. Roughly 22% vacancy plus near-term rollover offers a value-add lease-up opportunity, with market NNN rents of $27-29 PSF. In-place NOI of approximately $3.3M (a 6.4% cap on guidance of ~$52M / $216 PSF); pro-forma NOI adds back approximately $0.4M of one-time concessions. Assumable financing: $31M at 4.1%, maturing 2027. Three tenants are currently in holdover. A tax reassessment is expected at sale.`
 
-function OmView({ rows, createdBy, onChanged, onOpen }: { rows: any[]; createdBy: string | null; onChanged: () => void; onOpen: (id: string) => void }) {
+function OmView({ rows, createdBy, buyBoxes, onChanged, onOpen }: { rows: any[]; createdBy: string | null; buyBoxes: BuyBox[]; onChanged: () => void; onOpen: (id: string) => void }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState('')
@@ -721,7 +721,7 @@ function OmView({ rows, createdBy, onChanged, onOpen }: { rows: any[]; createdBy
         </details>
         {err && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 10 }}>{err}</div>}
         {busy && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>{phase || 'Working…'}</div>}
-        {ex && <ExtractResult ex={ex} onCreate={create} creating={creating} />}
+        {ex && <ExtractResult ex={ex} buyBoxes={buyBoxes} onCreate={create} creating={creating} />}
       </Panel>
 
       <Panel title="OM tracking" cap="Your intake checklist — from the OM Tracking tab.">
@@ -754,8 +754,18 @@ function chk(v: boolean | string) {
   if (v === 'complete') return <span style={{ color: RISK_COLOR.core, fontWeight: 800 }}>✓</span>
   return <span style={{ color: 'var(--text-faint)' }}>—</span>
 }
-function ExtractResult({ ex, onCreate, creating }: { ex: OmExtraction; onCreate: () => void; creating: boolean }) {
+// Map an OM extraction to a scorable deal using the same defaults the created
+// deal will use (retail / value_add), so the fit preview matches the created deal.
+const omToFit = (ex: OmExtraction): FitDeal => ({
+  assetType: ex.asset_type ?? 'retail', riskProfile: ex.risk_profile ?? 'value_add',
+  state: ex.state ?? null, market: null, glaSf: ex.gla_sf ?? null,
+  askPrice: ex.asking_price ?? null, goingInCap: ex.in_place_cap ?? null,
+  projIrr: null, equityMultiple: null,
+})
+function ExtractResult({ ex, buyBoxes, onCreate, creating }: { ex: OmExtraction; buyBoxes: BuyBox[]; onCreate: () => void; creating: boolean }) {
   const fct = (l: string, v: ReactNode) => <div><div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>{l}</div><div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--accent, #466371)' }}>{v}</div></div>
+  const best = buyBoxes.some(b => b.active) ? bestFit(omToFit(ex), buyBoxes) : null
+  const cat = fitCategory(best)
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--surface)', padding: 15, marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 11 }}>
@@ -763,6 +773,12 @@ function ExtractResult({ ex, onCreate, creating }: { ex: OmExtraction; onCreate:
         <b style={{ fontSize: 15, color: 'var(--text)' }}>{ex.name ?? 'Extracted deal'}</b>
         {ex.risk_profile && <span style={{ marginLeft: 'auto', fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', color: RISK_COLOR[ex.risk_profile] }}>{RISK_LABEL[ex.risk_profile]} · {ex.asset_type ? ASSET_LABEL[ex.asset_type] : ''}</span>}
       </div>
+      {best && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 11, fontSize: 11.5, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em', color: FIT_COLOR[cat], background: `${FIT_COLOR[cat]}1e`, borderRadius: 999, padding: '1px 7px' }}>{FIT_LABEL[cat]}</span>
+          <span>Best match: <b style={{ color: 'var(--text)' }}>{best.bb.name}</b> — {best.fit.passed}/{best.fit.applicable} criteria ({Math.round(best.fit.score * 100)}%){best.fit.disqualified ? ' · disqualified' : ''}</span>
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12 }}>
         {fct('Location', [ex.city, ex.state].filter(Boolean).join(', ') || '—')}
         {fct('Submarket', ex.submarket ?? '—')}
