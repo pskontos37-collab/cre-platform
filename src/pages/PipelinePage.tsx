@@ -298,26 +298,43 @@ function AnalyticsView({ deals: allDeals }: { deals: Deal[] }) {
   const deals = allDeals.filter(d => d.stage !== 'tracking')
   return (
     <>
-      <div style={grid2}>
-        <Panel title="Pipeline funnel" cap="Deals and gross volume at each stage.">
-          <Funnel deals={deals} />
+      <AnalyticsHeading>Returns &amp; Capital</AnalyticsHeading>
+      <ReturnsSummaryStrip s={returnsSummary(deals)} />
+      <div style={{ ...grid2, marginTop: 14 }}>
+        <Panel title="Deal returns — levered IRR" cap="Underwritten active deals, best first.">
+          <Bars rows={irrRankRows(deals)} color={RISK_COLOR.core} empty="No deals underwritten yet — save a model on a deal's Underwriting tab." />
+        </Panel>
+        <Panel title="Capital deployment by close" cap="Equity required, bucketed by target close quarter.">
+          <Bars rows={capitalQuarterRows(deals)} color={RISK_COLOR.core_plus} empty="No equity requirements set yet." />
+        </Panel>
+      </div>
+      <div style={{ ...grid2, marginTop: 14 }}>
+        <Panel title="Avg levered IRR by risk profile" cap="Mean projected IRR of underwritten deals in each profile.">
+          <Bars rows={irrByProfileRows(deals)} color={RISK_COLOR.value_add} empty="No underwritten deals to profile yet." />
         </Panel>
         <Panel title="Capital raised" cap="Committed vs. soft-circled vs. remaining, across active raises.">
           <Donut deals={deals} />
         </Panel>
       </div>
-      <div style={{ ...grid2, marginTop: 14 }}>
+
+      <AnalyticsHeading>Pipeline &amp; Coverage</AnalyticsHeading>
+      <div style={grid2}>
+        <Panel title="Pipeline funnel" cap="Deals and gross volume at each stage.">
+          <Funnel deals={deals} />
+        </Panel>
         <Panel title="Investment-profile matrix" cap="Gross volume by risk profile × asset type.">
           <Matrix deals={deals} />
         </Panel>
+      </div>
+      <div style={{ ...grid2, marginTop: 14 }}>
         <Panel title="Geographic exposure" cap="Gross volume by state.">
           <Bars rows={geoRows(deals)} color="var(--accent, #466371)" />
         </Panel>
-      </div>
-      <div style={{ ...grid2, marginTop: 14 }}>
         <Panel title="Volume by LP partner" cap="Gross deal volume attributed to each capital partner.">
           <Bars rows={partnerRows(deals)} color={RISK_COLOR.core_plus} empty="No partner-attributed volume in this filter." />
         </Panel>
+      </div>
+      <div style={{ ...grid2, marginTop: 14 }}>
         <Panel title="Deal-team load" cap="Active deals each team member is carrying.">
           <Bars rows={teamRows(deals)} color={RISK_COLOR.value_add} isCount />
         </Panel>
@@ -334,6 +351,9 @@ function Panel({ title, cap, children }: { title: string; cap?: string; children
       {children}
     </div>
   )
+}
+function AnalyticsHeading({ children }: { children: ReactNode }) {
+  return <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-faint)', margin: '4px 0 12px' }}>{children}</div>
 }
 
 function Funnel({ deals }: { deals: Deal[] }) {
@@ -403,7 +423,7 @@ function FragmentRow({ a, cell, max, hex }: { a: AssetType; cell: Record<string,
   )
 }
 
-interface BarRow { l: string; v: number }
+interface BarRow { l: string; v: number; fmt?: (v: number) => string }
 function geoRows(deals: Deal[]): BarRow[] {
   const by: Record<string, number> = {}
   for (const d of deals) if (d.state) by[d.state] = (by[d.state] ?? 0) + (d.askPrice ?? 0)
@@ -419,6 +439,74 @@ function teamRows(deals: Deal[]): BarRow[] {
   for (const d of deals) { if (isTerminal(d.stage)) continue; for (const t of d.team) { const k = initials(t); by[k] = (by[k] ?? 0) + 1 } }
   return Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 9).map(([l, v]) => ({ l, v }))
 }
+
+// ── returns-aware analytics (Phase 2) — leans on the underwriting metrics ──
+const pctBar = (v: number) => `${(v * 100).toFixed(1)}%`
+const dealProb = (d: Deal) => STAGE_PROB[d.stage] ?? d.probability
+interface ReturnsSummary {
+  underwritten: number; total: number; avgIrr: number | null; avgEm: number | null
+  totalEquity: number; weightedEquity: number; expectedProfit: number
+  expectedPromote: number; promoteCoverage: number
+}
+function returnsSummary(deals: Deal[]): ReturnsSummary {
+  const uw = deals.filter(d => d.projIrr != null)
+  const eq = (d: Deal) => d.equityRequired ?? 0
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
+  let expectedProfit = 0, expectedPromote = 0, promoteCoverage = 0
+  for (const d of uw) {
+    if (d.equityMultiple != null) expectedProfit += dealProb(d) * (d.equityMultiple - 1) * eq(d)
+    const gp = promoteForMemo(d.underwritingModel)?.gpPromote
+    if (gp != null && isFinite(gp)) { expectedPromote += dealProb(d) * gp; promoteCoverage++ }
+  }
+  return {
+    underwritten: uw.length, total: deals.length,
+    avgIrr: mean(uw.map(d => d.projIrr!)), avgEm: mean(uw.filter(d => d.equityMultiple != null).map(d => d.equityMultiple!)),
+    totalEquity: uw.reduce((a, d) => a + eq(d), 0), weightedEquity: uw.reduce((a, d) => a + dealProb(d) * eq(d), 0),
+    expectedProfit, expectedPromote, promoteCoverage,
+  }
+}
+function irrRankRows(deals: Deal[]): BarRow[] {
+  return deals.filter(d => d.projIrr != null).sort((a, b) => b.projIrr! - a.projIrr!).slice(0, 10)
+    .map(d => ({ l: d.name, v: d.projIrr!, fmt: pctBar }))
+}
+function capitalQuarterRows(deals: Deal[]): BarRow[] {
+  const by: Record<string, number> = {}, ord: Record<string, number> = {}
+  for (const d of deals) {
+    const e = d.equityRequired ?? 0; if (!e) continue
+    let key = 'Unscheduled', o = 9e9
+    if (d.targetCloseDate) {
+      const dt = new Date(d.targetCloseDate), q = Math.floor(dt.getMonth() / 3) + 1
+      key = `Q${q} '${String(dt.getFullYear() % 100).padStart(2, '0')}`; o = dt.getFullYear() * 4 + q
+    }
+    by[key] = (by[key] ?? 0) + e; ord[key] = o
+  }
+  return Object.keys(by).sort((a, b) => ord[a] - ord[b]).map(k => ({ l: k, v: by[k] }))
+}
+function irrByProfileRows(deals: Deal[]): BarRow[] {
+  return RISK_ORDER.map(rp => {
+    const xs = deals.filter(d => d.riskProfile === rp && d.projIrr != null).map(d => d.projIrr!)
+    return xs.length ? { l: RISK_LABEL[rp], v: xs.reduce((a, b) => a + b, 0) / xs.length, fmt: pctBar } : null
+  }).filter((r): r is BarRow => r != null)
+}
+function ReturnsSummaryStrip({ s }: { s: ReturnsSummary }) {
+  return (
+    <div style={{ border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: 12, padding: '14px 17px' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 10 }}>
+        {s.underwritten} of {s.total} active deals underwritten
+        {s.underwritten < s.total ? ` — returns below cover only the ${s.underwritten} with a saved model.` : '.'}
+        {s.underwritten > 0 && s.promoteCoverage < s.underwritten ? ` Expected promote covers ${s.promoteCoverage}.` : ''}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+        <Fact label="Avg levered IRR" value={pct(s.avgIrr)} tint={uwIrrColor(s.avgIrr)} />
+        <Fact label="Avg equity multiple" value={s.avgEm != null ? `${s.avgEm.toFixed(2)}x` : '—'} />
+        <Fact label="Equity to deploy" value={fmtM(s.totalEquity)} />
+        <Fact label="Prob-weighted equity" value={fmtM(s.weightedEquity)} />
+        <Fact label="Expected profit" value={fmtM(s.expectedProfit)} />
+        <Fact label="Expected GP promote" value={fmtM(s.expectedPromote)} tint={RISK_COLOR.core} />
+      </div>
+    </div>
+  )
+}
 function Bars({ rows, color, isCount, empty }: { rows: BarRow[]; color: string; isCount?: boolean; empty?: string }) {
   if (!rows.length) return <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{empty ?? 'No data.'}</div>
   const max = Math.max(1, ...rows.map(r => r.v))
@@ -430,7 +518,7 @@ function Bars({ rows, color, isCount, empty }: { rows: BarRow[]; color: string; 
           <div style={{ height: 16, borderRadius: 5, background: 'var(--surface-2, rgba(0,0,0,.05))', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(r.v / max) * 100}%`, background: color, borderRadius: 5 }} />
           </div>
-          <div style={{ color: 'var(--text)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{isCount ? r.v : fmtM(r.v)}</div>
+          <div style={{ color: 'var(--text)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{r.fmt ? r.fmt(r.v) : isCount ? r.v : fmtM(r.v)}</div>
         </div>
       ))}
     </div>
