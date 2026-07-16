@@ -37,14 +37,11 @@ jobs:
       - name: Type-check (report-only)
         run: npm run typecheck
         continue-on-error: true
-      # Unit tests are REPORT-ONLY: waterfall.test.ts still encodes the pre-tier-fix
-      # ROC->pref->split expectations, but the engine deliberately dropped the
-      # intermediate preferred-return tier (2026-07-12, user-verified). Failures
-      # still surface as annotations. Flip to blocking (drop continue-on-error)
-      # once waterfall.test.ts is reconciled to the current engine.
-      - name: Unit tests (report-only)
+      # Unit tests BLOCK the deploy. The suite was reconciled to the current
+      # engines on 2026-07-16 (waterfall/irrWaterfall/acqPromote) and all 82
+      # pass; a red suite should now fail the build rather than ship.
+      - name: Unit tests
         run: npm run test:run
-        continue-on-error: true
       - name: Build (vite, mirrors Vercel)
         run: npm run build:ci
 
