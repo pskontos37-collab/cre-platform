@@ -14,7 +14,7 @@ import {
   TableRow, TextRun, WidthType,
 } from 'docx'
 import {
-  PPM_SECTIONS, fmtMoney, fmtMult, fmtNum, fmtPct, fmtPsf,
+  PPM_SECTIONS, fmtMoney, fmtMult, fmtNum, fmtPct, fmtPsf, sectionTitle,
   type PpmDataSheet,
 } from '../../lib/ppm/template'
 import type { PpmSectionState } from '../../hooks/usePpmDrafts'
@@ -124,17 +124,32 @@ function gridTable(header: string[], rows: string[][], widths?: number[]): Table
 // ---------------------------------------------------------------------------
 
 function execSummaryTable(ds: PpmDataSheet): Table {
-  const rows: [string, string][] = [
+  const recap = ds.dealStructure === 'pref_equity_recap'
+  const common: [string, string][] = [
     ['Location', [ds.address, [ds.city, ds.state].filter(Boolean).join(', ')].filter(Boolean).join(', ')],
     ['Property Type/Risk Profile', ds.propertyType],
     ['Rentable Area/Land Area', `${fmtNum(ds.glaSf)} Square Feet${ds.landAcres != null ? ` - ${ds.landAcres} Acres` : ''}`],
-    ['Joint Venture Partner', ds.jvPartnerName],
+    [recap ? 'Existing Owner' : 'Joint Venture Partner', recap ? ds.existingOwnerName : ds.jvPartnerName],
     ['Year Built/Renovated', ds.yearBuilt],
     ['Current Occupancy', fmtPct(ds.occupancyPct, 0)],
     ['Parking', ds.parkingSpaces != null ? `${ds.parkingRatio || ''} (${fmtNum(ds.parkingSpaces)} spaces)` : ds.parkingRatio],
+  ]
+  // Recap deals: value + capital stack + preferred-equity + existing loan.
+  const recapCore: [string, string][] = [
+    ['Estimated Property Value', `${fmtMoney(ds.estimatedPropertyValue)}${ds.pricePsf != null ? ` (${fmtPsf(ds.pricePsf)})` : ''}${ds.estValueNote ? `\n${ds.estValueNote}` : ''}`],
+    ['Existing Capital Stack', `Property Value: ${fmtMoney(ds.estimatedPropertyValue)}\nMortgage Balance: ${fmtMoney(ds.existingLoanBalance)}\nCurrent Ownership Equity: ${fmtMoney(ds.currentOwnershipEquity)}`],
+    ['Preferred Equity Capital Requirement', `${fmtMoney(ds.prefEquityAmount)}${ds.prefEquityUse ? `:\nTo be used for ${ds.prefEquityUse}` : ''}`],
+    ['Existing Loan', [ds.existingLoanOriginal != null ? `Original Amount: ${fmtMoney(ds.existingLoanOriginal)}` : '', ds.existingLoanBalance != null ? `Current Balance: ${fmtMoney(ds.existingLoanBalance)}` : '', ds.existingLoanRate != null ? `${fmtPct(ds.existingLoanRate, 2)} Fixed Interest Rate` : '', ds.existingLoanMaturity ? `Maturity: ${ds.existingLoanMaturity}` : ''].filter(Boolean).join('\n')],
+    ['Refinancing Assumptions', ds.refinancingAssumptions],
+  ]
+  const acqCore: [string, string][] = [
     ['Purchase Price', `${fmtMoney(ds.purchasePrice)}${ds.pricePsf != null ? ` (${fmtPsf(ds.pricePsf)})` : ''}\n${fmtPct(ds.goingInCap, 2)} - going-in cap rate`],
     ['Equity Capital Requirement', `${fmtMoney(ds.totalEquity)}:\n${ds.jvPartnerShort || 'Partner'} (${fmtPct(ds.jvPartnerPct, 0)}): ${fmtMoney(ds.partnerEquity)}\nM & J Wilkow Investor Company (${fmtPct(ds.mjwPct, 0)}): ${fmtMoney(ds.mjwEquity)}\nPlus: Sponsor Fee ${fmtMoney(ds.sponsorFee)}\nInvestor Company Working Capital ${fmtMoney(ds.workingCapital)}\nM & J Wilkow Investor Company Total ${fmtMoney(ds.investorCompanyTotal)}`],
     ['Financing Assumption', [`Initial Loan Amount - ${fmtMoney(ds.loanAmount)}${ds.ltvPct != null ? ` (${fmtPct(ds.ltvPct, 0)} LTV)` : ''}`, ds.rateDescription, ds.loanTermYears != null ? `${ds.loanTermYears} Year Term` : '', ds.ioDescription, ds.futureFunding].filter(Boolean).join('\n')],
+  ]
+  const rows: [string, string][] = [
+    ...common,
+    ...(recap ? recapCore : acqCore),
     ['Investment Period', ds.hasUpsideCase
       ? `Base Case Forecast: ${ds.holdYears ?? '__'} Years\nUpside Case Forecast: ${ds.upsideHoldYears ?? '__'} Years`
       : `${ds.holdYears ?? '__'} Years`],
@@ -265,7 +280,7 @@ export async function buildPpmDocx(ds: PpmDataSheet, sections: Record<string, Pp
 
     // PCA/ESA/property-details ride inside PROPERTY DESCRIPTION in the real
     // document; they still get their own sub-banner for clarity.
-    body.push(...sectionHeading(def.title))
+    body.push(...sectionHeading(sectionTitle(def, ds)))
     if (text.trim()) {
       body.push(...renderRichText(text))
     } else {

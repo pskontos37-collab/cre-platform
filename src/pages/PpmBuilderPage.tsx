@@ -62,8 +62,10 @@ function Card({ title, right, children }: { title: string; right?: ReactNode; ch
 
 type Kind = 'text' | 'area' | 'money' | 'num' | 'pct'
 interface FieldDef { key: keyof PpmDataSheet & string; label: string; kind: Kind; hint?: string }
+// structure: show only for that deal structure ('jv' or 'recap'); omit = always.
+interface FieldGroup { title: string; fields: FieldDef[]; structure?: 'jv' | 'recap' }
 
-const FIELD_GROUPS: { title: string; fields: FieldDef[] }[] = [
+const FIELD_GROUPS: FieldGroup[] = [
   { title: 'Identity', fields: [
     { key: 'propertyName', label: 'Property name', kind: 'text' },
     { key: 'address', label: 'Street address', kind: 'text' },
@@ -81,14 +83,14 @@ const FIELD_GROUPS: { title: string; fields: FieldDef[] }[] = [
     { key: 'parkingSpaces', label: 'Parking spaces', kind: 'num' },
     { key: 'parkingRatio', label: 'Parking ratio', kind: 'text', hint: '5.42 per 1,000 SF' },
   ]},
-  { title: 'Deal terms', fields: [
+  { title: 'Deal terms', structure: 'jv', fields: [
     { key: 'purchasePrice', label: 'Purchase price', kind: 'money' },
     { key: 'pricePsf', label: 'Price PSF', kind: 'num' },
     { key: 'goingInCap', label: 'Going-in cap %', kind: 'pct' },
     { key: 'inPlaceNoi', label: 'In-place NOI', kind: 'money' },
     { key: 'totalCapitalization', label: 'Total capitalization', kind: 'money' },
   ]},
-  { title: 'Joint venture', fields: [
+  { title: 'Joint venture', structure: 'jv', fields: [
     { key: 'jvPartnerName', label: 'JV partner (legal name)', kind: 'text' },
     { key: 'jvPartnerShort', label: 'JV partner (short name)', kind: 'text' },
     { key: 'jvPartnerPct', label: 'Partner ownership %', kind: 'pct' },
@@ -98,13 +100,28 @@ const FIELD_GROUPS: { title: string; fields: FieldDef[] }[] = [
     { key: 'jvVehicleName', label: 'JV entity (Operating Company) name', kind: 'text' },
     { key: 'propertyOwnerLlc', label: 'Property-owner LLC name', kind: 'text' },
   ]},
-  { title: 'Equity stack', fields: [
+  { title: 'Equity stack', structure: 'jv', fields: [
     { key: 'totalEquity', label: 'Total equity requirement', kind: 'money' },
     { key: 'partnerEquity', label: 'Partner equity', kind: 'money' },
     { key: 'mjwEquity', label: 'MJW investor-company equity', kind: 'money' },
     { key: 'sponsorFee', label: 'Sponsor fee', kind: 'money' },
     { key: 'workingCapital', label: 'Working capital', kind: 'money' },
     { key: 'investorCompanyTotal', label: 'Investor company total raise', kind: 'money' },
+  ]},
+  { title: 'Preferred-equity recap', structure: 'recap', fields: [
+    { key: 'existingOwnerName', label: 'Existing owner (legal name)', kind: 'text' },
+    { key: 'estimatedPropertyValue', label: 'Estimated property value', kind: 'money' },
+    { key: 'pricePsf', label: 'Value PSF', kind: 'num' },
+    { key: 'estValueNote', label: 'Value basis note', kind: 'area', hint: 'e.g. 7.25% cap on in-place NOI less known vacates' },
+    { key: 'currentOwnershipEquity', label: 'Current ownership equity', kind: 'money' },
+    { key: 'prefEquityAmount', label: 'Preferred equity commitment (MJW)', kind: 'money' },
+    { key: 'prefEquityUse', label: 'Use of preferred equity', kind: 'area', hint: 'leasing costs and capex approved by the MJW Member...' },
+    { key: 'existingLoanOriginal', label: 'Existing loan - original amount', kind: 'money' },
+    { key: 'existingLoanBalance', label: 'Existing loan - current balance', kind: 'money' },
+    { key: 'existingLoanRate', label: 'Existing loan rate %', kind: 'pct' },
+    { key: 'existingLoanMaturity', label: 'Existing loan maturity', kind: 'text', hint: 'e.g. December 6, 2026' },
+    { key: 'refinancingAssumptions', label: 'Refinancing assumptions', kind: 'area' },
+    { key: 'recapSaleKicker', label: 'Sale kicker / override', kind: 'area', hint: 'e.g. if sale >= $62M, excess splits 75/25 while MJW realizes >= 20.8% IRR' },
   ]},
   { title: 'Wilkow Investor Company', fields: [
     { key: 'investorCompanyName', label: 'Investor company name', kind: 'text', hint: 'M & J ____ Investors LLC' },
@@ -554,8 +571,24 @@ function DataSheetTab({ ds, setField, mutate, setMsg }: {
     }
   }
 
+  const structure = ds.dealStructure === 'pref_equity_recap' ? 'recap' : 'jv'
+
   return (
     <>
+      <Card title="Deal structure">
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+          {([['jv_acquisition', 'JV acquisition'], ['pref_equity_recap', 'Preferred-equity recap']] as const).map(([val, lbl]) => (
+            <label key={val} style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+              <input type="radio" name="dealStructure" checked={ds.dealStructure === val} onChange={() => setField('dealStructure', val)} />
+              {lbl}
+            </label>
+          ))}
+          <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+            Recap = MJW injects preferred equity into the existing owner (no purchase, no new JV partner). Switches the Executive Summary table, Capital Structure, and the Recapitalization section.
+          </span>
+        </div>
+      </Card>
+
       <Card title="Paste & extract from a source document"
         right={<button style={btnPrimary} disabled={extracting || !pasteText.trim()} onClick={handleExtract}>{extracting ? 'Extracting…' : 'Extract fields'}</button>}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 10 }}>
@@ -581,7 +614,7 @@ function DataSheetTab({ ds, setField, mutate, setMsg }: {
         </div>
       </Card>
 
-      {FIELD_GROUPS.map(g => (
+      {FIELD_GROUPS.filter(g => !g.structure || g.structure === structure).map(g => (
         <Card key={g.title} title={g.title}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
             {g.fields.map(f => <ScalarField key={f.key} def={f} ds={ds} set={setField} />)}
@@ -669,16 +702,31 @@ function DataSheetTab({ ds, setField, mutate, setMsg }: {
         blank={{ item: '', amount: null }}
         cols={[{ key: 'item', label: 'Item', width: 280 }, { key: 'amount', label: 'Est. cost', kind: 'num', width: 140 }]}
       />
-      <ListEditor
-        title="JV promote tiers"
-        rows={ds.jvWaterfallTiers as unknown as Record<string, unknown>[]}
-        onChange={rows => setField('jvWaterfallTiers', rows)}
-        blank={{ split: '', until: '' }}
-        cols={[
-          { key: 'split', label: 'Split (e.g. 82.16% to MetLife and 17.84% to the Wilkow Investor Company)', width: 340 },
-          { key: 'until', label: 'Until (e.g. the MetLife Fund shall have received the lesser of a 12.0% IRR or a 3.0x equity multiple)', width: 380 },
-        ]}
-      />
+      {structure === 'jv' && (
+        <ListEditor
+          title="JV promote tiers"
+          rows={ds.jvWaterfallTiers as unknown as Record<string, unknown>[]}
+          onChange={rows => setField('jvWaterfallTiers', rows)}
+          blank={{ split: '', until: '' }}
+          cols={[
+            { key: 'split', label: 'Split (e.g. 82.16% to MetLife and 17.84% to the Wilkow Investor Company)', width: 340 },
+            { key: 'until', label: 'Until (e.g. the MetLife Fund shall have received the lesser of a 12.0% IRR or a 3.0x equity multiple)', width: 380 },
+          ]}
+        />
+      )}
+      {structure === 'recap' && (
+        <ListEditor
+          title="Preferred-equity distribution priorities"
+          rows={ds.recapTiers as unknown as Record<string, unknown>[]}
+          onChange={rows => setField('recapTiers', rows)}
+          blank={{ priority: '', recipient: '', hurdle: '' }}
+          cols={[
+            { key: 'priority', label: 'Priority (e.g. First / Second / Excess)', width: 150 },
+            { key: 'recipient', label: 'Recipient (e.g. the MJW Member; the Existing Owner; pari passu 60/40)', width: 300 },
+            { key: 'hurdle', label: 'Hurdle (e.g. the greater of a 15% IRR or a 1.70x equity multiple)', width: 320 },
+          ]}
+        />
+      )}
       <ListEditor
         title="Historical NOI"
         rows={ds.historicalNoi as unknown as Record<string, unknown>[]}

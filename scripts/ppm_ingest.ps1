@@ -17,6 +17,7 @@
 #   .\ppm_ingest.ps1 -Deal "Silverado" -Apply          # extract + create a draft
 #   .\ppm_ingest.ps1 -Deal "Silverado" -Apply -Draft <ppm_draft_id>   # merge into existing
 #   .\ppm_ingest.ps1 -FolderPath "K:\...\Deal" -DealName "X" -Apply    # folder w/o a pipeline deal
+#   .\ppm_ingest.ps1 -Deal "Silverado" -Apply -Recap   # preferred-equity RECAP (no purchase; existing owner + MJW pref return)
 param(
   [string]$Deal,
   [string]$FolderPath,
@@ -24,6 +25,7 @@ param(
   [string]$Draft,
   [switch]$Apply,
   [switch]$Force,
+  [switch]$Recap,
   [int]$MaxPdfMB = 20,
   [string]$Model = 'claude-sonnet-5'
 )
@@ -96,6 +98,18 @@ $MODEL_NAME_RE = 'cf model|cash ?flow|underwrit|model|argus'
 $MODEL_EXCL_RE = 'invoice|reconcil|occupanc|tax|sales|budget|rent ?roll|parking|~\$'
 $CF_SHEET_RE   = 'summary|return|assumption|annual|cash ?flow|cf|sources|uses|leasing'
 $CF_SCHEMA = '{"holdYears":num|null,"exitCap":decimal|null,"projSalePrice":num|null,"projSalePsf":num|null,"projIrr":decimal|null,"avgCoc":decimal|null,"equityMultiple":num|null,"afterTaxIrr":decimal|null,"afterTaxCoc":decimal|null,"capexBudgetTotal":num|null,"capexBudgetLines":[{"item":str,"amount":num}],"opexPsfYr1":num|null,"retPsfYr1":num|null,"mgmtFeePct":decimal|null,"structuralReservePsf":num|null,"leasingAssumptionsNote":str|null}'
+
+# Preferred-equity recap mode: the "loan" doc describes the EXISTING mortgage, and
+# the CF model carries the MJW preferred return + estimated value + pref amount
+# rather than a purchase/JV return. Re-point those two schemas.
+if ($Recap) {
+  $loanCat = $CATS | Where-Object { $_.key -eq 'loan' } | Select-Object -First 1
+  if ($loanCat) {
+    $loanCat.focus  = 'the EXISTING MORTGAGE loan documents / debt summary'
+    $loanCat.schema = '{"existingLoanOriginal":num|null,"existingLoanBalance":num|null,"existingLoanRate":decimal|null,"existingLoanMaturity":str|null,"refinancingAssumptions":str|null}'
+  }
+  $CF_SCHEMA = '{"estimatedPropertyValue":num|null,"estValueNote":str|null,"prefEquityAmount":num|null,"currentOwnershipEquity":num|null,"holdYears":num|null,"exitCap":decimal|null,"projIrr":decimal|null,"avgCoc":decimal|null,"equityMultiple":num|null,"capexBudgetTotal":num|null,"capexBudgetLines":[{"item":str,"amount":num}],"opexPsfYr1":num|null,"retPsfYr1":num|null,"mgmtFeePct":decimal|null,"leasingAssumptionsNote":str|null,"recapSaleKicker":str|null,"recapTiers":[{"priority":str,"recipient":str,"hurdle":str}]}'
+}
 
 # ---------------------------------------------------------------------------
 # File discovery + classification (single recursive walk)
@@ -253,6 +267,7 @@ if ($seed) {
 # name (the exec table and every section need it); the doc extractions can
 # override it if a document states a fuller legal name.
 if (Is-Empty $ds['propertyName']) { $ds['propertyName'] = $DealName }
+if ($Recap) { $ds['dealStructure'] = 'pref_equity_recap' }
 
 # ---------------------------------------------------------------------------
 # Classify, (optionally) extract, merge

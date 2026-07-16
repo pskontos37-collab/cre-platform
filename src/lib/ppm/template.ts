@@ -36,6 +36,8 @@ export interface PpmValueAdd { title: string; body: string }
 export interface PpmContact { name: string; phone: string; email: string }
 export interface PpmWaterfallTier { split: string; until: string }
 export interface PpmBudgetLine { item: string; amount: number | null }
+/** One ordered priority of the preferred-equity recap distribution waterfall. */
+export interface PpmRecapTier { priority: string; recipient: string; hurdle: string }
 
 export interface PpmDataSheet {
   // ---- Identity ----
@@ -61,6 +63,24 @@ export interface PpmDataSheet {
   goingInCap: number | null     // 0.0798 = 7.98%
   inPlaceNoi: number | null
   totalCapitalization: number | null
+
+  // ---- Preferred-equity recap (only when dealStructure = 'pref_equity_recap') ----
+  // A recap has no purchase: MJW injects preferred equity into the existing
+  // owner's capital stack. These replace the purchase/JV fields on the exec
+  // table and in the Capital Structure section.
+  existingOwnerName: string        // 'Silverado Ranch Plaza LLC'
+  estimatedPropertyValue: number | null   // in lieu of a purchase price
+  estValueNote: string             // '7.25% cap rate on in-place NOI (less known vacates)'
+  existingLoanOriginal: number | null
+  existingLoanBalance: number | null       // current balance
+  existingLoanRate: number | null          // decimal
+  existingLoanMaturity: string     // 'December 6, 2026'
+  currentOwnershipEquity: number | null    // existing owner's equity basis
+  prefEquityAmount: number | null          // MJW new capital (e.g. 3,000,000)
+  prefEquityUse: string            // 'leasing costs and capital expenditures approved by the MJW Member...'
+  refinancingAssumptions: string   // future-refinance narrative
+  recapTiers: PpmRecapTier[]       // ordered distribution priorities
+  recapSaleKicker: string          // e.g. 'if sale >= $62M, excess splits 75/25 as long as MJW realizes >= 20.8% IRR'
 
   // ---- JV / sponsor ----
   jvPartnerName: string         // 'MetLife Enhanced Core Property Holdings, LLC'
@@ -212,6 +232,9 @@ export function blankDataSheet(): PpmDataSheet {
     dealStructure: 'jv_acquisition',
     glaSf: null, landAcres: null, yearBuilt: '', occupancyPct: null, parkingSpaces: null, parkingRatio: '',
     purchasePrice: null, pricePsf: null, goingInCap: null, inPlaceNoi: null, totalCapitalization: null,
+    existingOwnerName: '', estimatedPropertyValue: null, estValueNote: '', existingLoanOriginal: null,
+    existingLoanBalance: null, existingLoanRate: null, existingLoanMaturity: '', currentOwnershipEquity: null,
+    prefEquityAmount: null, prefEquityUse: '', refinancingAssumptions: '', recapTiers: [], recapSaleKicker: '',
     jvPartnerName: '', jvPartnerShort: '', jvPartnerBlurb: '', jvPartnerPct: null, mjwPct: null,
     jvHistoryNote: '', jvVehicleName: '', propertyOwnerLlc: '', jvWaterfallTiers: [],
     investorCompanyName: '', managerIncName: '',
@@ -345,7 +368,21 @@ function renderTaxSection(ds: PpmDataSheet): string {
   )
 }
 
+const isRecap = (ds: PpmDataSheet) => ds.dealStructure === 'pref_equity_recap'
+
+function renderRecapCapital(ds: PpmDataSheet): string {
+  return p(
+    `The recapitalization reflects: (i) an estimated property value of ${fmtMoney(ds.estimatedPropertyValue)}${ds.estValueNote ? ` (${ds.estValueNote})` : ''}; (ii) an existing first mortgage with a current balance of approximately ${fmtMoney(ds.existingLoanBalance)}; and (iii) a preferred equity commitment from the Wilkow Investor Company of up to ${fmtMoney(ds.prefEquityAmount)}.`,
+    `A.\tExisting Capital Stack -\n\n\tEstimated Property Value\t${fmtMoney(ds.estimatedPropertyValue)}\n\tExisting Mortgage Balance\t${fmtMoney(ds.existingLoanBalance)}\n\tCurrent Ownership Equity\t${fmtMoney(ds.currentOwnershipEquity)}`,
+    `B.\tThe Preferred Equity Investment - Subject to the terms and conditions of the Recapitalization Agreement, the Wilkow Investor Company (the "MJW Member") will contribute up to ${fmtMoney(ds.prefEquityAmount)} of preferred equity capital${ds.prefEquityUse ? `, to be used exclusively for ${ds.prefEquityUse}` : ''}. The MJW Member will be admitted as the sole managing member of ${ds.existingOwnerName || 'the Owner'}, the existing managing member will be converted to a passive member, and an affiliate of M & J Wilkow will become the property manager.`,
+    `C.\tExisting Mortgage Loan - The Property is subject to a non-recourse first mortgage in the original principal amount of ${fmtMoney(ds.existingLoanOriginal)}${ds.existingLoanRate != null ? `, bearing interest at ${fmtPct(ds.existingLoanRate, 2)} per annum` : ''}${ds.existingLoanMaturity ? `, scheduled to mature on ${ds.existingLoanMaturity}` : ''}. The current balance is approximately ${fmtMoney(ds.existingLoanBalance)}.`,
+    ds.refinancingAssumptions && `D.\tRefinancing Assumptions - ${ds.refinancingAssumptions}`,
+    `The non-member manager of the Wilkow Investor Company will be ${ds.managerIncName || '____'}, a newly organized Delaware corporation, the direct or indirect (through a trust) stockholders of which are ${ds.managerStockholders}.`,
+  )
+}
+
 function renderCapitalStructure(ds: PpmDataSheet): string {
+  if (isRecap(ds)) return renderRecapCapital(ds)
   const budget = ds.acquisitionBudget.length
     ? ds.acquisitionBudget.map(b => `\t${b.item}\t${fmtMoney(b.amount)}`).join('\n')
     : `\tPurchase Price\t${fmtMoney(ds.purchasePrice)}\n\t(itemize loan fees, closing costs, legal, contingency on the data sheet)`
@@ -358,7 +395,19 @@ function renderCapitalStructure(ds: PpmDataSheet): string {
   )
 }
 
+function renderRecapStructure(ds: PpmDataSheet): string {
+  const tiers = ds.recapTiers.length
+    ? ds.recapTiers.map(t => `\t(${t.priority}) ${t.recipient}${t.hurdle ? ` until ${t.hurdle}` : ''}.`).join('\n\n')
+    : '\t(Add the preferred-equity distribution priorities on the data sheet.)'
+  return p(
+    `The Property is currently owned by ${ds.existingOwnerName || '____'} (the "Existing Owner"), a single purpose Delaware limited liability company, subject to a non-recourse first mortgage. Pursuant to a Recapitalization Agreement, the Wilkow Investor Company (the "MJW Member") will contribute up to ${fmtMoney(ds.prefEquityAmount)} of preferred equity capital to recapitalize the Property. The MJW Member will be admitted as the sole managing member, the existing managing member will be converted to a passive member, and an affiliate of M & J Wilkow will become the property manager. A copy of the Recapitalization Agreement will be made available to prospective investors upon request.`,
+    `Distributions of all operating cash flow and sale and/or refinancing proceeds shall be made in the following order of priority:\n\n${tiers}`,
+    ds.recapSaleKicker && `Notwithstanding the foregoing, ${ds.recapSaleKicker}`,
+  )
+}
+
 function renderJvStructure(ds: PpmDataSheet): string {
+  if (isRecap(ds)) return renderRecapStructure(ds)
   const tiers = ds.jvWaterfallTiers.length
     ? ds.jvWaterfallTiers.map(t => `\tThe split shall be ${t.split} until such time as ${t.until}.`).join('\n\n')
     : '\t(Add the JV promote tiers on the data sheet.)'
@@ -443,6 +492,12 @@ export const PPM_SECTIONS: SectionDef[] = [
 ]
 
 export const sectionByKey = (key: string): SectionDef | undefined => PPM_SECTIONS.find(s => s.key === key)
+
+/** Section heading, adjusted for deal structure (e.g. JV vs recap). */
+export function sectionTitle(def: SectionDef, ds: PpmDataSheet): string {
+  if (def.key === 'jv_structure' && isRecap(ds)) return 'THE RECAPITALIZATION'
+  return def.title
+}
 
 // ---------------------------------------------------------------------------
 // Number verification — every $ / % / multiple in an AI draft must exist in
