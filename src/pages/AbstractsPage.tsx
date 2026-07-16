@@ -95,6 +95,20 @@ function useUnresolvedRed(propertyId: string | null, bump: number) {
   }, [propertyId, bump])
 }
 
+// Portfolio rollup rows for the current property — every open item across all
+// its abstracts, severity-tagged and resolution-joined (from the view).
+interface OpenItemRow { tenant_name: string; ord: number; txt: string; severity: OpenSeverity; field: string | null; resolved: boolean; resolution_status: string | null }
+function useOpenItemsView(propertyId: string | null, bump: number) {
+  return useQuery<OpenItemRow[]>(async () => {
+    if (!propertyId) return []
+    const { data, error } = await supabase.from('v_abstract_open_items')
+      .select('tenant_name, ord, txt, severity, field, resolved, resolution_status')
+      .eq('property_id', propertyId)
+    if (error) throw new Error(error.message)
+    return (data ?? []) as OpenItemRow[]
+  }, [propertyId, bump])
+}
+
 // Clause-matrix choices: label + path into the abstract JSON.
 // Exported: the portfolio-wide /clauses page reuses the same definitions.
 export const CLAUSES: Array<{ key: string; label: string; render: (a: any) => string }> = [
@@ -146,8 +160,9 @@ export function AbstractsPage() {
   const [phase, setPhase] = useState<Record<string, string>>({})
   const [verifying, setVerifying] = useState<Set<string>>(new Set())
   const [genError, setGenError] = useState<string | null>(null)
-  const [view, setView] = useState<'tenant' | 'clause'>('tenant')
+  const [view, setView] = useState<'tenant' | 'clause' | 'openitems'>('tenant')
   const [clause, setClause] = useState('co_tenancy')
+  const openItemsView = useOpenItemsView(propertyId, bump)
   // Focus mode: collapse the tenant rail so a single abstract reads near-full-width.
   const [listCollapsed, setListCollapsed] = useState(false)
 
@@ -212,6 +227,13 @@ export function AbstractsPage() {
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
+      // Reconcile resolutions against the freshly regenerated content (archive
+      // vanished items, revive reappeared ones) so the worklist stays honest.
+      try {
+        const { data: fresh } = await supabase.from('lease_abstracts')
+          .select('id, abstract, qa').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa)
+      } catch { /* non-fatal: reconciliation is best-effort */ }
       setBump(b => b + 1)
       setSelected(tenant)
     } catch (e) {
@@ -276,8 +298,9 @@ export function AbstractsPage() {
         <div style={{ display: 'flex', gap: 6 }}>
           <ModeButton label="By tenant" active={view === 'tenant'} onClick={() => setView('tenant')} />
           <ModeButton label="Clause matrix" active={view === 'clause'} onClick={() => setView('clause')} />
+          <ModeButton label="Open items" active={view === 'openitems'} onClick={() => setView('openitems')} />
         </div>
-        {view === 'tenant' && selectedAbstract && (
+        {view === 'tenant' && (
           <button onClick={() => setListCollapsed(c => !c)}
             title={listCollapsed ? 'Show the tenant list' : 'Hide the tenant list for a wider, near-full-screen abstract'}
             style={{ fontSize: 12, padding: '5px 12px', borderRadius: 20, cursor: 'pointer',
@@ -318,7 +341,17 @@ export function AbstractsPage() {
       <RefreshLogBanner onJump={t => { setSelected(t); setView('tenant') }} />
 
       {view === 'tenant' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: listCollapsed ? '1fr' : '320px 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: listCollapsed ? '30px 1fr' : '320px 1fr', gap: 16 }}>
+          {listCollapsed && (
+            <button onClick={() => setListCollapsed(false)}
+              title="Show the tenant list"
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start',
+                paddingTop: 12, gap: 8, borderRadius: 8, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+              <span style={{ fontSize: 13 }}>❯</span>
+              <span style={{ fontSize: 11, letterSpacing: 1, writingMode: 'vertical-rl', textOrientation: 'mixed' }}>Tenants</span>
+            </button>
+          )}
           {!listCollapsed && (
           <Widget title="Tenants" chip={tenants.data ? `${tenants.data.length} active` : undefined}>
             {tenants.loading && <WidgetSkeleton rows={10} />}
@@ -383,7 +416,7 @@ export function AbstractsPage() {
               resolutions={resByAbstract.get(selectedAbstract.id) ?? []} propertyId={propertyId} />}
           </div>
         </div>
-      ) : (
+      ) : view === 'clause' ? (
         <Widget title={`Clause matrix — ${CLAUSES.find(c => c.key === clause)?.label}`} chip={`${(abstracts.data ?? []).length} abstracts`} fullWidth>
           {(abstracts.data ?? []).length === 0
             ? <EmptyState title="No abstracts yet" subtitle="Generate abstracts in the By-tenant view first — the matrix compares them" />
@@ -405,8 +438,73 @@ export function AbstractsPage() {
               </table>
             )}
         </Widget>
+      ) : (
+        <PortfolioOpenItems rows={openItemsView.data ?? []} loading={openItemsView.loading}
+          onJump={t => { setSelected(t); setView('tenant') }} />
       )}
     </div>
+  )
+}
+
+// Portfolio rollup: every open item across the property's abstracts, unresolved
+// red first, grouped by tenant, each row jumping to that tenant's abstract.
+function PortfolioOpenItems({ rows, loading, onJump }: { rows: OpenItemRow[]; loading: boolean; onJump: (tenant: string) => void }) {
+  const [unresolvedOnly, setUnresolvedOnly] = useState(true)
+  const rank: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
+  const shown = rows
+    .filter(r => !unresolvedOnly || !r.resolved)
+    .sort((a, b) =>
+      Number(a.resolved) - Number(b.resolved) ||
+      rank[a.severity] - rank[b.severity] ||
+      a.tenant_name.localeCompare(b.tenant_name))
+  const unresolvedRed = rows.filter(r => !r.resolved && r.severity !== 'info').length
+  return (
+    <Widget title="Open items — portfolio rollup"
+      chip={`${unresolvedRed} unresolved red · ${rows.length} total`} fullWidth>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={unresolvedOnly} onChange={e => setUnresolvedOnly(e.target.checked)} />
+          Unresolved only
+        </label>
+      </div>
+      {loading && <WidgetSkeleton rows={8} />}
+      {!loading && shown.length === 0 && <EmptyState title="Nothing open" subtitle={unresolvedOnly ? 'No unresolved items on this property' : 'No open items on this property'} />}
+      {shown.length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead><tr style={{ textAlign: 'left', color: 'var(--text-faint)', fontSize: 11 }}>
+            <th style={{ padding: '4px 8px', width: 180 }}>Tenant</th>
+            <th style={{ padding: '4px 8px', width: 90 }}>Severity</th>
+            <th style={{ padding: '4px 8px' }}>Item</th>
+            <th style={{ padding: '4px 8px', width: 110 }}>Status</th>
+          </tr></thead>
+          <tbody>
+            {shown.map((r, i) => {
+              const m = OPEN_META[r.severity]
+              return (
+                <tr key={i} style={{ borderTop: '1px solid var(--border)', verticalAlign: 'top', opacity: r.resolved ? 0.55 : 1 }}>
+                  <td style={{ padding: '6px 8px' }}>
+                    <button onClick={() => onJump(r.tenant_name)}
+                      style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}>
+                      {r.tenant_name}
+                    </button>
+                  </td>
+                  <td style={{ padding: '6px 8px' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: m.color }}>{m.icon} {m.label}</span>
+                  </td>
+                  <td style={{ padding: '6px 8px', color: 'var(--text-muted)', textDecoration: r.resolved ? 'line-through' : 'none' }}>
+                    {r.field && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', marginRight: 6 }}>{r.field}</span>}
+                    {r.txt}
+                  </td>
+                  <td style={{ padding: '6px 8px', fontSize: 11, color: r.resolved ? 'var(--green, #22c55e)' : 'var(--text-faint)' }}>
+                    {r.resolved ? (RES_META[(r.resolution_status ?? 'accepted') as ResStatus]?.label ?? 'resolved') : 'open'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </Widget>
   )
 }
 
@@ -638,7 +736,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
         </details>
       )}
 
-      <div id="abstract-source-docs"><SourceDocsPanel docIds={srcIds} /></div>
+      <div id="abstract-source-docs"><SourceDocsPanel docIds={srcIds} tenant={row.tenant_name} propertyId={propertyId ?? null} /></div>
 
       <Widget title={`${a.trade_name ?? row.tenant_name} — Lease Abstract`} chip={a.suite ? `Suite ${a.suite}` : undefined}>
         <Grid>
@@ -933,11 +1031,39 @@ async function clearResolution(abstractId: string, itemKey: string) {
     .eq('abstract_id', abstractId).eq('item_key', itemKey)
   if (error) throw new Error(error.message)
 }
+// After a regenerate, an item may vanish (concern gone → archive its resolution)
+// or reappear (un-archive). Keeps the worklist honest across the living-abstracts
+// refresh without deleting the audit trail. Keys computed exactly as buildWorklist.
+async function reconcileResolutions(abstractId: string, abstract: any, qa: any) {
+  const keys = new Set<string>()
+  for (const p of parseOpenItems(abstract?.open_items ?? [])) keys.add(keyForOpenItem(p))
+  for (const c of (Array.isArray(qa?.field_checks) ? qa.field_checks : [])) if (c?.field && c.verdict !== 'confirmed') keys.add(keyForField(c.field))
+  for (const m of (Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : [])) if (m?.field) keys.add(keyForField(m.field))
+  const { data } = await supabase.from('abstract_item_resolutions')
+    .select('id, item_key, archived').eq('abstract_id', abstractId)
+  for (const r of (data ?? []) as Array<{ id: string; item_key: string; archived: boolean }>) {
+    const shouldArchive = !keys.has(r.item_key)
+    if (shouldArchive !== r.archived) {
+      await supabase.from('abstract_item_resolutions')
+        .update({ archived: shouldArchive, updated_at: new Date().toISOString() }).eq('id', r.id)
+    }
+  }
+}
 // A "Correct" writes the human value into the abstract's override map (dotted
 // path → value), the same layer ReviewPanel and applyOverrides use.
 async function saveFieldOverride(row: AbstractRow, path: string, value: any, reviewerId?: string) {
   const overrides = { ...(row.overrides ?? {}) }
   overrides[path] = value
+  const { error } = await supabase.from('lease_abstracts').update({
+    overrides, reviewed_by: reviewerId ?? null,
+    reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).eq('id', row.id)
+  if (error) throw new Error(error.message)
+}
+// Batch variant: write several dotted-path overrides in ONE update (a per-path
+// loop would each spread the ORIGINAL overrides and clobber the others).
+async function saveFieldOverrides(row: AbstractRow, entries: Record<string, any>, reviewerId?: string) {
+  const overrides = { ...(row.overrides ?? {}), ...entries }
   const { error } = await supabase.from('lease_abstracts').update({
     overrides, reviewed_by: reviewerId ?? null,
     reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -991,7 +1117,7 @@ async function openDocPdf(storagePath: string | null) {
   const { data } = await supabase.storage.from('documents').createSignedUrl(storagePath, 3600)
   if (data?.signedUrl) window.open(data.signedUrl, '_blank')
 }
-interface DocMeta { id: string; title: string | null; file_name: string | null; storage_path: string | null; tenant_id: string | null; property_id: string | null }
+interface DocMeta { id: string; title: string | null; file_name: string | null; storage_path: string | null }
 function DocRow({ d, used }: { d: DocMeta; used?: boolean }) {
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 6px', borderRadius: 6 }}>
@@ -1011,34 +1137,53 @@ function DocRow({ d, used }: { d: DocMeta; used?: boolean }) {
     </div>
   )
 }
+// Resolve a tenant's full matched file set the SAME way the abstractor does —
+// plan mode runs its suffix-stripped name + file_aliases matcher (property-
+// scoped). documents.tenant_id is essentially unpopulated (27/10842), and raw
+// tenant-name ILIKE is unreliable (MRI suffixes like "#4"/"10483" zero it out,
+// common anchors over-match), so the abstractor's own resolver is the only
+// trustworthy source. Returns matched docs INCLUDING ones the abstract didn't
+// rely on — where a missed discrepancy would hide.
+async function fetchTenantFileSet(propertyId: string, tenant: string): Promise<Array<{ id: string; brief_status: string }>> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const res = await fetch(`${FN_BASE}/lease-abstract`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ property_id: propertyId, tenant, plan: true }),
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok || j.error) throw new Error(j.error ?? `match failed (${res.status})`)
+  return Array.isArray(j.docs) ? j.docs.map((d: any) => ({ id: d.id, brief_status: d.brief_status })) : []
+}
+
 // The abstract's underlying source files, each opening the signed PDF in a new
-// tab. This is the reliable way into a document when the quote-locator can't
-// pinpoint a passage (scanned wording differs from indexed text ~40% of the
-// corpus). "Browse all documents" opens the tenant's WHOLE folder — including
-// files the abstractor did NOT use as a source — so a reviewer can check a
-// discrepancy against a document the abstract may have missed.
-function SourceDocsPanel({ docIds }: { docIds: string[] }) {
+// tab (the reliable path when the quote-locator can't pinpoint a scanned page).
+// "Browse all matched documents" runs the abstractor's own matcher and flags
+// used / not-used, so a reviewer can chase a discrepancy in a file the abstract
+// didn't rely on.
+function SourceDocsPanel({ docIds, tenant, propertyId }: { docIds: string[]; tenant?: string; propertyId?: string | null }) {
   const [showAll, setShowAll] = useState(false)
   const sources = useQuery<DocMeta[]>(async () => {
     if (!docIds.length) return []
     const { data, error } = await supabase.from('documents')
-      .select('id, title, file_name, storage_path, tenant_id, property_id').in('id', docIds)
+      .select('id, title, file_name, storage_path').in('id', docIds)
     if (error) throw new Error(error.message)
     return (data ?? []) as DocMeta[]
   }, [docIds.join(',')])
-  const tenantId = (sources.data ?? []).map(d => d.tenant_id).find(Boolean) ?? null
-  const propertyId = (sources.data ?? []).map(d => d.property_id).find(Boolean) ?? null
-  const scope: 'tenant' | 'property' | null = tenantId ? 'tenant' : propertyId ? 'property' : null
-  // The tenant's full document set, loaded only when the reviewer expands it.
-  const all = useQuery<DocMeta[]>(async () => {
-    if (!showAll || !scope) return []
-    let q = supabase.from('documents').select('id, title, file_name, storage_path, tenant_id, property_id')
-    q = scope === 'tenant' ? q.eq('tenant_id', tenantId) : q.eq('property_id', propertyId)
-    const { data, error } = await q.limit(500)
-    if (error) throw new Error(error.message)
-    return ((data ?? []) as DocMeta[]).sort((a, b) =>
-      (a.title ?? a.file_name ?? '').localeCompare(b.title ?? b.file_name ?? ''))
-  }, [showAll, scope, tenantId, propertyId])
+  const canBrowse = !!tenant && !!propertyId
+  // Full matched set via the abstractor's resolver, loaded only on expand.
+  const all = useQuery<Array<DocMeta & { brief_status?: string }>>(async () => {
+    if (!showAll || !canBrowse) return []
+    const matched = await fetchTenantFileSet(propertyId!, tenant!)
+    if (!matched.length) return []
+    const briefBy = new Map(matched.map(m => [m.id, m.brief_status]))
+    const { data } = await supabase.from('documents')
+      .select('id, title, file_name, storage_path').in('id', matched.map(m => m.id))
+    return ((data ?? []) as DocMeta[])
+      .map(d => ({ ...d, brief_status: briefBy.get(d.id) }))
+      .sort((a, b) => (a.title ?? a.file_name ?? '').localeCompare(b.title ?? b.file_name ?? ''))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAll, canBrowse, tenant, propertyId])
   if (!docIds.length) return null
   const srcSet = new Set(docIds)
   return (
@@ -1047,19 +1192,20 @@ function SourceDocsPanel({ docIds }: { docIds: string[] }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         {(sources.data ?? []).map(d => <DocRow key={d.id} d={d} />)}
       </div>
-      {scope && (
+      {canBrowse && (
         <button onClick={() => setShowAll(s => !s)}
           style={{ marginTop: 8, fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-          {showAll ? 'Hide all documents ▴' : `Browse all ${scope} documents ▾`}
+          {showAll ? 'Hide matched documents ▴' : 'Browse all matched documents ▾'}
         </button>
       )}
-      {showAll && scope && (
+      {showAll && canBrowse && (
         <div style={{ marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
           <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>
-            Every document filed under this {scope} — including files not used to build this abstract. Check a discrepancy against anything the abstractor may have missed.
+            Every document the abstractor matched for this tenant (name + file-alias match) — including files it did not rely on. “not used” files are where a missed discrepancy would hide.
           </div>
           {all.loading && <WidgetSkeleton rows={4} />}
-          {!all.loading && (all.data ?? []).length === 0 && <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>No other documents on file.</div>}
+          {all.error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{all.error}</div>}
+          {!all.loading && !all.error && (all.data ?? []).length === 0 && <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>No matched documents returned.</div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 320, overflowY: 'auto' }}>
             {(all.data ?? []).map(d => <DocRow key={d.id} d={d} used={srcSet.has(d.id)} />)}
           </div>
@@ -1124,6 +1270,8 @@ interface WorkItem {
   severity: OpenSeverity
   correctable: boolean       // field points at a scalar we can override inline
   currentValue: string
+  isArray: boolean           // field points at an array of rows we can edit inline
+  arrayValue: any[] | null
   citation: string | null    // best hint for the "open lease" link
   sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith'; text: string; jumpId: string }>
 }
@@ -1135,9 +1283,11 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any): Wo
     let w = map.get(key)
     if (!w) {
       const v = field ? getPath(effective, field) : undefined
+      const isArr = Array.isArray(v)
       w = { key, resolvable: true, kind, field, red, severity,
-        correctable: !!field && (v == null || typeof v !== 'object'),
-        currentValue: v == null ? '' : String(v), citation: null, sources: [] }
+        correctable: !!field && !isArr && (v == null || typeof v !== 'object'),
+        currentValue: v == null ? '' : String(v),
+        isArray: isArr, arrayValue: isArr ? v : null, citation: null, sources: [] }
       map.set(key, w)
     } else {
       if (red) w.red = true
@@ -1171,6 +1321,70 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any): Wo
 const VERB_BTN: React.CSSProperties = { fontSize: 10, fontWeight: 600, padding: '2px 9px', borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)', cursor: 'pointer', whiteSpace: 'nowrap' }
 const RES_INPUT: React.CSSProperties = { width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 5, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' }
 
+// Inline editor for an array field (options, base_rent_schedule): edit each
+// row's scalar cells; save writes element overrides (e.g. options.0.notice_by)
+// in one batch and marks the item corrected.
+function ArrayRowEditor({ row, field, rows, reviewerId, itemKey, kind, onSaved, onCancel }: {
+  row: AbstractRow; field: string; rows: any[]; reviewerId?: string
+  itemKey: string; kind: 'open_item' | 'qa_check'; onSaved: () => void; onCancel: () => void
+}) {
+  const [edits, setEdits] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const cur = (i: number, k: string) => { const v = rows[i]?.[k]; return v == null ? '' : String(v) }
+  const val = (i: number, k: string) => edits[`${i}|${k}`] ?? cur(i, k)
+  const scalarKeys = (r: any) => (r && typeof r === 'object')
+    ? Object.keys(r).filter(k => r[k] == null || typeof r[k] !== 'object') : []
+  async function save() {
+    setBusy(true); setErr(null)
+    try {
+      const entries: Record<string, any> = {}
+      for (const [ik, raw] of Object.entries(edits)) {
+        const sep = ik.indexOf('|'); const i = ik.slice(0, sep); const k = ik.slice(sep + 1)
+        const trimmed = raw.trim()
+        if (trimmed === cur(Number(i), k)) continue
+        let v: any = trimmed
+        if (v !== '' && /^-?\d/.test(v) && !Number.isNaN(Number(v))) v = Number(v)
+        entries[`${field}.${i}.${k}`] = v === '' ? null : v
+      }
+      if (Object.keys(entries).length) await saveFieldOverrides(row, entries, reviewerId)
+      await upsertResolution(row.id, itemKey, kind, 'corrected',
+        `Edited ${Object.keys(entries).length} cell(s) in ${field}`, reviewerId)
+      onSaved()
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  return (
+    <div style={{ marginTop: 6, borderLeft: '2px solid var(--accent)', paddingLeft: 8 }}>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 4 }}>Editing <b>{field}</b> — blank clears a cell. Changed cells save as corrections.</div>
+      <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ borderTop: i ? '1px solid var(--border)' : 'none', padding: '6px 0' }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase' }}>Row {i + 1}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '6px 10px', marginTop: 4 }}>
+              {scalarKeys(r).map(k => (
+                <div key={k}>
+                  <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase' }}>{k}</div>
+                  <input value={val(i, k)} onChange={e => setEdits(s => ({ ...s, [`${i}|${k}`]: e.target.value }))} style={RES_INPUT} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {err && <span style={{ fontSize: 11, color: 'var(--red)' }}>{err}</span>}
+      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <button onClick={() => void save()} disabled={busy}
+          style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+          {busy ? 'Saving…' : 'Save row edits'}
+        </button>
+        <button onClick={onCancel} disabled={busy}
+          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 // One worklist row: either the resolved view (status + note + undo) or the
 // source line(s) + the four resolution verbs with an inline form.
 function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sourceDocIds }: {
@@ -1182,6 +1396,7 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sour
   const [val, setVal] = useState(w.currentValue)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [editRows, setEditRows] = useState(false)
   const color = w.red ? OPEN_META[w.severity].color : 'var(--text-muted)'
 
   if (resolution) {
@@ -1235,9 +1450,13 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sour
         <div><LeaseFileLink citation={w.citation} sourceDocIds={sourceDocIds} label="open lease ↗" /></div>
       </div>
       {w.resolvable ? (
-        mode === null ? (
+        editRows && w.field && w.arrayValue ? (
+          <ArrayRowEditor row={row} field={w.field} rows={w.arrayValue} reviewerId={reviewerId}
+            itemKey={w.key} kind={w.kind} onSaved={() => { setEditRows(false); onSaved() }} onCancel={() => setEditRows(false)} />
+        ) : mode === null ? (
           <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
             {w.correctable && <button style={VERB_BTN} onClick={() => { setMode('corrected'); setVal(w.currentValue) }}>Correct</button>}
+            {w.isArray && <button style={VERB_BTN} onClick={() => setEditRows(true)}>Edit rows</button>}
             <button style={VERB_BTN} onClick={() => setMode('accepted')}>Accept</button>
             <button style={VERB_BTN} onClick={() => setMode('waived')}>Waive</button>
             <button style={VERB_BTN} onClick={() => setMode('needs_doc')}>Needs doc</button>
