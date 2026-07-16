@@ -13,6 +13,7 @@ export interface InvSummaryInput {
   memo: IcMemoNarrative
   preparedBy: string
   generatedAt: string
+  promote?: IcMemoInput['promote']
 }
 
 // palette sampled from the firm's deck (hex without # for pptxgenjs)
@@ -39,7 +40,7 @@ const DISCLAIMER =
   'THIS MATERIAL IS FOR INFORMATIONAL PURPOSES ONLY AND IS DIRECTED ONLY TO QUALIFIED PERSONS OR ENTITIES IN ANY JURISDICTION WHERE ACCESS TO SUCH INFORMATION AND ITS USE IS PERMISSIBLE UNDER APPLICABLE LAWS AND REGULATIONS. THIS SUMMARY DOES NOT CONSTITUTE AN OFFER TO SELL OR THE SOLICITATION OF AN OFFER TO BUY ANY SECURITIES. ANY OFFER OF INTERESTS IN THE “WILKOW INVESTOR COMPANY” (AS DEFINED HEREIN), WHEN AND IF MADE, WILL BE MADE ONLY BY MEANS OF A CONFIDENTIAL PRIVATE PLACEMENT MEMORANDUM (THE “MEMORANDUM”) AND ONLY TO PERSONS WHO MEET ALL APPLICABLE LEGAL AND SUITABILITY STANDARDS. PRIOR TO MAKING AN INVESTMENT DECISION WITH RESPECT TO THE UNITS REFERRED TO HEREIN, PROSPECTIVE INVESTORS AND THEIR ADVISORS MUST REVIEW THE OFFERING DOCUMENTS, INCLUDING THE COMPLETE MEMORANDUM AND THE EXHIBITS THERETO. THIS SUMMARY REFERS TO IMPORTANT ASPECTS OF THE TRANSACTION TO BE DISCUSSED, AND POSSIBLY SUPERSEDED, IN THE OFFERING DOCUMENTS WHICH MUST BE CAREFULLY CONSIDERED BY ALL POTENTIAL INVESTORS AND THEIR ADVISORS. AN INVESTMENT IN UNITS INVOLVES VARIOUS RISK FACTORS, CONFLICTS OF INTEREST AND COMPENSATION TO MANAGEMENT, ALL OF WHICH WILL BE DISCUSSED MORE FULLY IN THE MEMORANDUM. THE INFORMATION CONTAINED IN THIS SUMMARY IS CONFIDENTIAL AND MAY NOT BE DISTRIBUTED TO ANY OTHER PARTY.'
 
 export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promise<Blob> {
-  const { deal, memo } = input
+  const { deal, memo, promote } = input
   const { default: PptxGenJS } = await import('pptxgenjs')
   const pptx = new PptxGenJS()
   pptx.defineLayout({ name: 'WILKOW_LTR', width: 11, height: 8.5 })
@@ -206,6 +207,21 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
         { text: v, options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A }, align: 'right' } },
       ]),
     ] as any, { x: 0.45, y: 1.25, w: 4.6, colW: [2.7, 1.9], fontFace: SERIF, fontSize: 12, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.36, valign: 'middle', margin: 0.06 })
+
+    if (promote) {
+      const em = (x: number | null) => (x != null && isFinite(x) ? `${x.toFixed(2)}x` : '—')
+      const lpInt = Math.round(promote.lpEquityPct * 100)
+      const gpInt = 100 - lpInt
+      const cell = (text: string, i: number, align?: string) => ({ text, options: { color: TEXT, fill: { color: i % 2 ? ROW_B : ROW_A }, ...(align ? { align } : {}) } })
+      const promoteRows = [
+        ['LP / GP Split', 'IRR', 'Multiple'].map(h => ({ text: h, options: { bold: true, color: 'FFFFFF', fill: { color: STEEL } } })),
+        [cell(`LP (${lpInt}% equity)`, 0), cell(pct(promote.lpIrr), 0, 'right'), cell(em(promote.lpEm), 0, 'right')],
+        [cell(`GP (${gpInt}% co-invest)`, 1), cell(pct(promote.gpIrr), 1, 'right'), cell(em(promote.gpEm), 1, 'right')],
+      ]
+      s.addTable(promoteRows as any, { x: 0.45, y: 2.95, w: 4.6, colW: [2.4, 1.1, 1.1], fontFace: SERIF, fontSize: 11.5, border: { type: 'solid', color: 'FFFFFF', pt: 1 }, rowH: 0.32, valign: 'middle', margin: 0.06 })
+      s.addText(`${lpInt}/${gpInt} co-invest · ${pct(promote.prefRate)} pref pari-passu · GP promote ${fmt$(promote.gpPromote)} (${pct(promote.gpPromotePctOfProfit)} of profit)`,
+        { x: 0.45, y: 3.95, w: 4.9, h: 0.35, fontFace: SERIF, fontSize: 9.5, italic: true, color: MUTED, valign: 'top' } as any)
+    }
 
     if (deal.lps.length) {
       const lpRows = [
