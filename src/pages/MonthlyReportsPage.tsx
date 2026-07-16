@@ -133,11 +133,12 @@ function PropertyCard({ property, rows }: { property: string; rows: ReportRow[] 
 // Multi-select property picker: check one property or any combination. Live —
 // toggling a box updates the filter immediately (no Apply step). Mirrors the
 // header's property picker idiom (click-outside to close).
-function PropertyMultiSelect({ options, selected, onToggle, onClear }: {
+function PropertyMultiSelect({ options, selected, onToggle, onClear, onSelectAll }: {
   options: string[]
   selected: Set<string>
   onToggle: (name: string) => void
   onClear: () => void
+  onSelectAll: () => void
 }) {
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
@@ -152,8 +153,9 @@ function PropertyMultiSelect({ options, selected, onToggle, onClear }: {
   }, [open])
 
   const count = selected.size
-  const active = count > 0
-  const label = count === 0 ? 'All properties'
+  const allSelected = count > 0 && count === options.length
+  const active = count > 0 && !allSelected
+  const label = count === 0 || allSelected ? 'All properties'
     : count === 1 ? [...selected][0]
     : `${count} properties`
 
@@ -179,12 +181,20 @@ function PropertyMultiSelect({ options, selected, onToggle, onClear }: {
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 6px 8px' }}>
             <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Pick one property or any combination</span>
-            <button
-              onClick={onClear}
-              style={{ fontSize: 10.5, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              Clear
-            </button>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                onClick={onSelectAll}
+                style={{ fontSize: 10.5, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                Select all
+              </button>
+              <button
+                onClick={onClear}
+                style={{ fontSize: 10.5, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                Clear
+              </button>
+            </div>
           </div>
           {options.map(name => (
             <label
@@ -266,6 +276,7 @@ export function MonthlyReportsPage() {
               selected={selected}
               onToggle={toggleProp}
               onClear={() => setSelected(new Set())}
+              onSelectAll={() => setSelected(new Set(allProps))}
             />
             <input
               value={q}
