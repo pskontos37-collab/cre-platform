@@ -1216,8 +1216,8 @@ function SourceDocsPanel({ docIds, tenant, propertyId }: { docIds: string[]; ten
   return (
     <Widget title="Source documents" chip={`${docIds.length}`}>
       {sources.loading && <WidgetSkeleton rows={3} />}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {(sources.data ?? []).map(d => <DocRow key={d.id} d={d} />)}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1px 20px' }}>
+        {[...(sources.data ?? [])].sort(byDocDateDesc).map(d => <DocRow key={d.id} d={d} />)}
       </div>
       {canBrowse && (
         <button onClick={() => setShowAll(s => !s)}
@@ -1233,7 +1233,7 @@ function SourceDocsPanel({ docIds, tenant, propertyId }: { docIds: string[]; ten
           {all.loading && <WidgetSkeleton rows={4} />}
           {all.error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{all.error}</div>}
           {!all.loading && !all.error && (all.data ?? []).length === 0 && <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>No matched documents returned.</div>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 320, overflowY: 'auto' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1px 20px', maxHeight: 320, overflowY: 'auto' }}>
             {(all.data ?? []).map(d => <DocRow key={d.id} d={d} used={srcSet.has(d.id)} />)}
           </div>
         </div>
