@@ -12,6 +12,7 @@ import { PdfDownloadButton } from '../reports/PdfDownloadButton'
 import type { WaterfallXlsxInput, WfClass } from '../reports/waterfallExcel'
 import { AgreementQaBadge, AgreementQaPanel } from '../components/AgreementQaPanel'
 import { AgreementAbstractPanel } from '../components/AgreementAbstractPanel'
+import { AgreementAbstractPdfButton } from '../reports/AgreementAbstractPdfButton'
 
 const usd = (n: number, dp = 0) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: dp })
@@ -331,6 +332,8 @@ export function WaterfallPage() {
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{d.name}</span>
                     <AgreementQaBadge status={d.qa_status} />
+                    <span style={{ flex: 1 }} />
+                    <AgreementAbstractPdfButton kind="jv" name={d.name} abstract={d.abstract} qa={d.qa} qaStatus={d.qa_status} qaAt={d.qa_at} />
                   </div>
                   <AgreementAbstractPanel kind="jv" abstract={d.abstract} />
                   {d.qa && <AgreementQaPanel qa={d.qa} qaStatus={d.qa_status} qaAt={d.qa_at} />}

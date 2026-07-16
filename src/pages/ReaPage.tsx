@@ -8,6 +8,7 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { ReaPdfButton } from '../reports/ReaPdfButton'
 import { AgreementQaBadge, AgreementQaPanel } from '../components/AgreementQaPanel'
 import { AgreementAbstractPanel } from '../components/AgreementAbstractPanel'
+import { AgreementAbstractPdfButton } from '../reports/AgreementAbstractPdfButton'
 
 // ── M&J Wilkow corporate palette (wilkow.com) — see ReceivablesPage ─────────
 const WILKOW      = '#466371'
@@ -128,7 +129,14 @@ function AgreementCard({ a }: { a: ReaAgreement }) {
 
       {/* abstractor-v2: the verified brief-synthesis abstract + independent
           verification verdict (agreement-abstract / agreement-verify kind=rea). */}
-      {a.abstract && <AgreementAbstractPanel kind="rea" abstract={a.abstract} />}
+      {a.abstract && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+            <AgreementAbstractPdfButton kind="rea" name={a.name} abstract={a.abstract} qa={a.qa} qaStatus={a.qaStatus} qaAt={a.qaAt} />
+          </div>
+          <AgreementAbstractPanel kind="rea" abstract={a.abstract} />
+        </>
+      )}
       {a.qa && <AgreementQaPanel qa={a.qa} qaStatus={a.qaStatus} qaAt={a.qaAt} />}
 
       {a.openItems && (
