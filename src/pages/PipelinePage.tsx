@@ -21,7 +21,9 @@ import { useAssignableUsers, indexUsers, userLabel } from '../hooks/useTasks'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { PdfDownloadButton, sanitizeFilename } from '../reports/PdfDownloadButton'
-import { underwrite, sensitivity } from '../lib/acqUnderwriting'
+import { underwrite, sensitivity, type AcqResult } from '../lib/acqUnderwriting'
+import { underwriteTenant } from '../lib/tenantUnderwriting'
+import type { UwLeaseLine, UwRollover, UwOpex } from '../hooks/usePipeline'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
 // Analytics (funnel · investment-profile matrix · geo · partners), OM Intake
@@ -978,16 +980,86 @@ type UwComputed = {
   exitCap: number | null; holdYears: number | null; stabilizedYield: number | null
   equityRequired: number | null; totalCapitalization: number | null
 }
-// Live first-pass underwriting model: editable assumptions -> levered returns +
-// sensitivity, computed in-browser (src/lib/acqUnderwriting). Save writes the
-// returns to the deal's metric columns (board / meeting deck / IC memo read them).
+// Underwriting tab — toggle between the Quick (direct-cap) model and the
+// bottoms-up Tenant-level model; both compute in-browser and, on Save, write the
+// returns to the deal (board / meeting deck / IC memo read them).
 function UnderwritingTab({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean; onSaveModel: (m: UnderwritingModel, c: UwComputed) => void }) {
-  const seed: UnderwritingModel = deal.underwritingModel ?? {
-    purchasePrice: deal.askPrice ?? 0, acqCostsPct: 0.02, capexUpfront: 0,
-    inPlaceNoi: (deal.askPrice != null && deal.goingInCap != null) ? Math.round(deal.askPrice * deal.goingInCap) : 0,
-    noiGrowthPct: 0.03, holdYears: deal.holdYears ?? 5,
-    exitCapPct: deal.exitCap ?? deal.goingInCap ?? 0.065, sellingCostsPct: 0.02,
-    ltvPct: 0.6, loanRatePct: 0.065, amortYears: 30,
+  const [mode, setMode] = useState<'simple' | 'tenant'>(deal.underwritingModel?.mode === 'tenant' ? 'tenant' : 'simple')
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', border: '1px solid var(--border-2)', borderRadius: 6, overflow: 'hidden', alignSelf: 'flex-start' }}>
+        {(['simple', 'tenant'] as const).map(md => (
+          <button key={md} onClick={() => setMode(md)} style={{ ...segBtn, background: mode === md ? 'var(--accent, #466371)' : 'var(--surface)', color: mode === md ? '#fff' : 'var(--text-muted)' }}>
+            {md === 'simple' ? 'Quick (direct-cap)' : 'Tenant-level'}
+          </button>
+        ))}
+      </div>
+      {mode === 'simple'
+        ? <SimpleUwEditor deal={deal} busy={busy} onSaveModel={onSaveModel} />
+        : <TenantUwEditor deal={deal} busy={busy} onSaveModel={onSaveModel} />}
+    </div>
+  )
+}
+
+const uwIrrColor = (v: number | null) => v == null ? 'var(--text-faint)' : v >= 0.15 ? '#2e8b57' : v >= 0.10 ? 'var(--accent, #466371)' : v >= 0.07 ? 'var(--text)' : '#c0654e'
+const gridInput: CSSProperties = { fontSize: 11.5, padding: '4px 6px', borderRadius: 5, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)', width: '100%', boxSizing: 'border-box' }
+
+function UwReturns({ r }: { r: AcqResult }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+      <Fact label="Levered IRR" value={pct(r.leveredIrr)} tint={uwIrrColor(r.leveredIrr)} />
+      <Fact label="Equity multiple" value={r.equityMultiple ? `${r.equityMultiple.toFixed(2)}x` : '—'} />
+      <Fact label="Avg cash-on-cash" value={pct(r.avgCashOnCash)} />
+      <Fact label="Unlevered IRR" value={pct(r.unleveredIrr)} />
+      <Fact label="Equity" value={fmtM(r.equity)} />
+      <Fact label="Yield-on-cost (exit)" value={pct(r.stabilizedYieldOnCostPct)} />
+      <Fact label="DSCR (yr 1)" value={r.yearOneDscr != null ? `${r.yearOneDscr.toFixed(2)}x` : '—'} />
+      <Fact label="Debt yield (yr 1)" value={pct(r.yearOneDebtYield)} />
+    </div>
+  )
+}
+function UwSensitivity({ exitCaps, rows, irr, baseCol, baseRow }: { exitCaps: number[]; rows: number[]; irr: (number | null)[][]; baseCol: number; baseRow: number }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', fontSize: 11.5 }}>
+        <thead><tr>
+          <th style={sgHead}>growth \ exit</th>
+          {exitCaps.map(ec => <th key={ec} style={sgHead}>{pct(ec, 2)}</th>)}
+        </tr></thead>
+        <tbody>
+          {rows.map((g, gi) => (
+            <tr key={g}>
+              <td style={{ ...sgCell, fontWeight: 700, color: 'var(--text-muted)' }}>{pct(g, 1)}</td>
+              {(irr[gi] ?? []).map((v, ci) => {
+                const isBase = Math.abs(g - baseRow) < 1e-6 && Math.abs(exitCaps[ci] - baseCol) < 1e-6
+                return <td key={ci} style={{ ...sgCell, color: uwIrrColor(v), fontWeight: isBase ? 800 : 500, background: isBase ? 'var(--surface-2, rgba(70,99,113,.08))' : undefined }}>{pct(v, 1)}</td>
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+function UwSaveBar({ busy, saved, onSave }: { busy: boolean; saved: boolean; onSave: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={onSave}>
+        {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save underwrite'}
+      </button>
+      <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>Writes IRR / EM / CoC / exit cap / hold / equity to the deal. Sheet-owned price &amp; going-in cap are left untouched.</span>
+    </div>
+  )
+}
+
+function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean; onSaveModel: (m: UnderwritingModel, c: UwComputed) => void }) {
+  const um = deal.underwritingModel
+  const seed: UnderwritingModel = {
+    purchasePrice: um?.purchasePrice ?? deal.askPrice ?? 0, acqCostsPct: um?.acqCostsPct ?? 0.02, capexUpfront: um?.capexUpfront ?? 0,
+    inPlaceNoi: um?.inPlaceNoi ?? ((deal.askPrice != null && deal.goingInCap != null) ? Math.round(deal.askPrice * deal.goingInCap) : 0),
+    noiGrowthPct: um?.noiGrowthPct ?? 0.03, holdYears: um?.holdYears ?? deal.holdYears ?? 5,
+    exitCapPct: um?.exitCapPct ?? deal.exitCap ?? deal.goingInCap ?? 0.065, sellingCostsPct: um?.sellingCostsPct ?? 0.02,
+    ltvPct: um?.ltvPct ?? 0.6, loanRatePct: um?.loanRatePct ?? 0.065, amortYears: um?.amortYears ?? 30,
   }
   const [m, setM] = useState<UnderwritingModel>(seed)
   const [saved, setSaved] = useState(false)
@@ -997,33 +1069,17 @@ function UnderwritingTab({ deal, busy, onSaveModel }: { deal: Deal; busy: boolea
   const exitCaps = useMemo(() => [-0.005, -0.0025, 0, 0.0025, 0.005].map(d => +(m.exitCapPct + d).toFixed(4)).filter(x => x > 0), [m.exitCapPct])
   const growths = useMemo(() => [-0.01, 0, 0.01, 0.02].map(d => +(m.noiGrowthPct + d).toFixed(4)).filter(x => x >= 0), [m.noiGrowthPct])
   const grid = useMemo(() => sensitivity({ ...m, closeDate: today }, exitCaps, growths), [m, today, exitCaps, growths])
-
   const computed: UwComputed = {
     projIrr: r.leveredIrr, equityMultiple: r.equityMultiple || null, avgCoc: r.avgCashOnCash,
     exitCap: m.exitCapPct, holdYears: m.holdYears, stabilizedYield: r.stabilizedYieldOnCostPct,
     equityRequired: Math.round(r.equity), totalCapitalization: Math.round(r.totalBasis),
   }
-  const irrColor = (v: number | null) => v == null ? 'var(--text-faint)' : v >= 0.15 ? '#2e8b57' : v >= 0.10 ? 'var(--accent, #466371)' : v >= 0.07 ? 'var(--text)' : '#c0654e'
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-        First-pass levered underwrite. Edit the assumptions; returns recompute live. <b>Save</b> writes them to the deal — the board, meeting deck and IC memo pick them up. {deal.underwritingModel ? '' : 'Seeded from the OM guidance / cap; tune before relying.'}
+        First-pass levered underwrite. Edit the assumptions; returns recompute live. <b>Save</b> writes them to the deal. {deal.underwritingModel ? '' : 'Seeded from the OM guidance / cap; tune before relying.'}
       </div>
-
-      {/* returns */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
-        <Fact label="Levered IRR" value={pct(r.leveredIrr)} tint={irrColor(r.leveredIrr)} />
-        <Fact label="Equity multiple" value={r.equityMultiple ? `${r.equityMultiple.toFixed(2)}x` : '—'} />
-        <Fact label="Avg cash-on-cash" value={pct(r.avgCashOnCash)} />
-        <Fact label="Unlevered IRR" value={pct(r.unleveredIrr)} />
-        <Fact label="Equity" value={fmtM(r.equity)} />
-        <Fact label="Yield-on-cost (exit)" value={pct(r.stabilizedYieldOnCostPct)} />
-        <Fact label="DSCR (yr 1)" value={r.yearOneDscr != null ? `${r.yearOneDscr.toFixed(2)}x` : '—'} />
-        <Fact label="Debt yield (yr 1)" value={pct(r.yearOneDebtYield)} />
-      </div>
-
-      {/* assumptions */}
+      <UwReturns r={r} />
       <div>
         <SectionLabel2>Assumptions</SectionLabel2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
@@ -1040,23 +1096,109 @@ function UnderwritingTab({ deal, busy, onSaveModel }: { deal: Deal; busy: boolea
           <MInput label="Amort (0 = IO)" kind="yr" value={m.amortYears} onChange={set('amortYears')} disabled={busy} />
         </div>
       </div>
-
-      {/* sensitivity: levered IRR over exit cap x NOI growth */}
       <div>
         <SectionLabel2>Levered IRR — exit cap (cols) &times; NOI growth (rows)</SectionLabel2>
+        <UwSensitivity exitCaps={exitCaps} rows={growths} irr={grid.leveredIrr} baseCol={m.exitCapPct} baseRow={m.noiGrowthPct} />
+      </div>
+      <UwSaveBar busy={busy} saved={saved} onSave={() => { onSaveModel({ ...m, mode: 'simple' }, computed); setSaved(true) }} />
+    </div>
+  )
+}
+
+const D_ROLL: UwRollover = { renewalProbPct: 0.7, marketRentPsf: 0, marketRentGrowthPct: 0.03, downtimeMonths: 6, tiNewPsf: 30, tiRenewPsf: 10, lcNewPsf: 15, lcRenewPsf: 5, freeRentMonthsNew: 3 }
+const D_OPEX: UwOpex = { recoverableOpexPsf: 0, nonRecoverableOpexPsf: 0, opexGrowthPct: 0.03, generalVacancyPct: 0, creditLossPct: 0.005, capitalReservePsf: 0.25, otherIncomePsf: 0 }
+
+function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean; onSaveModel: (m: UnderwritingModel, c: UwComputed) => void }) {
+  const um = deal.underwritingModel
+  const seed: UnderwritingModel = {
+    purchasePrice: um?.purchasePrice ?? deal.askPrice ?? 0, acqCostsPct: um?.acqCostsPct ?? 0.02, capexUpfront: um?.capexUpfront ?? 0,
+    inPlaceNoi: 0, noiGrowthPct: 0.03, holdYears: um?.holdYears ?? deal.holdYears ?? 5,
+    exitCapPct: um?.exitCapPct ?? deal.exitCap ?? deal.goingInCap ?? 0.065, sellingCostsPct: um?.sellingCostsPct ?? 0.02,
+    ltvPct: um?.ltvPct ?? 0.6, loanRatePct: um?.loanRatePct ?? 0.065, amortYears: um?.amortYears ?? 30,
+    mode: 'tenant', glaSf: um?.glaSf ?? deal.glaSf ?? 0,
+    leases: um?.leases ?? [], rollover: { ...D_ROLL, ...(um?.rollover ?? {}) }, opex: { ...D_OPEX, ...(um?.opex ?? {}) },
+  }
+  const [m, setM] = useState<UnderwritingModel>(seed)
+  const [saved, setSaved] = useState(false)
+  const today = new Date().toISOString().slice(0, 10)
+  const leases = m.leases ?? []
+  const roll = m.rollover ?? D_ROLL
+  const opex = m.opex ?? D_OPEX
+  const setF = (k: keyof UnderwritingModel) => (v: number) => { setM(p => ({ ...p, [k]: v })); setSaved(false) }
+  const setRoll = (k: keyof UwRollover) => (v: number) => { setM(p => ({ ...p, rollover: { ...(p.rollover ?? D_ROLL), [k]: v } })); setSaved(false) }
+  const setOpex = (k: keyof UwOpex) => (v: number) => { setM(p => ({ ...p, opex: { ...(p.opex ?? D_OPEX), [k]: v } })); setSaved(false) }
+  const updLease = (i: number, patch: Partial<UwLeaseLine>) => { setM(p => { const ls = [...(p.leases ?? [])]; ls[i] = { ...ls[i], ...patch }; return { ...p, leases: ls } }); setSaved(false) }
+  const addLease = () => { setM(p => ({ ...p, leases: [...(p.leases ?? []), { name: 'New tenant', sf: 0, baseRentPsf: 0, annualBumpPct: 0.03, termRemainingYears: 5, recovery: 'nnn' } as UwLeaseLine] })); setSaved(false) }
+  const delLease = (i: number) => { setM(p => ({ ...p, leases: (p.leases ?? []).filter((_, j) => j !== i) })); setSaved(false) }
+
+  const model = {
+    glaSf: m.glaSf ?? 0, purchasePrice: m.purchasePrice, acqCostsPct: m.acqCostsPct, capexUpfront: m.capexUpfront,
+    holdYears: m.holdYears, exitCapPct: m.exitCapPct, sellingCostsPct: m.sellingCostsPct,
+    ltvPct: m.ltvPct, loanRatePct: m.loanRatePct, amortYears: m.amortYears, closeDate: today,
+    leases: leases as any, rollover: roll as any, opex: opex as any,
+  }
+  const r = useMemo(() => underwriteTenant(model), [m, today])
+  const exitCaps = useMemo(() => [-0.005, -0.0025, 0, 0.0025, 0.005].map(d => +(m.exitCapPct + d).toFixed(4)).filter(x => x > 0), [m.exitCapPct])
+  const growths = useMemo(() => [-0.01, 0, 0.01, 0.02].map(d => +(roll.marketRentGrowthPct + d).toFixed(4)).filter(x => x >= 0), [roll.marketRentGrowthPct])
+  const irrGrid = useMemo(() => growths.map(g => exitCaps.map(ec =>
+    underwriteTenant({ ...model, exitCapPct: ec, rollover: { ...roll, marketRentGrowthPct: g } as any }).leveredIrr)), [m, today, exitCaps, growths])
+
+  const totalSf = leases.reduce((s, l) => s + (l.sf || 0), 0)
+  const computed: UwComputed = {
+    projIrr: r.leveredIrr, equityMultiple: r.equityMultiple || null, avgCoc: r.avgCashOnCash,
+    exitCap: m.exitCapPct, holdYears: m.holdYears, stabilizedYield: r.stabilizedYieldOnCostPct,
+    equityRequired: Math.round(r.equity), totalCapitalization: Math.round(r.totalBasis),
+  }
+  const recCell: CSSProperties = { ...sgCell, textAlign: 'right', color: 'var(--text-muted)' }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+        Bottoms-up lease-by-lease underwrite (NNN recoveries, blended rollover, TI/LC, forward-NOI exit). {leases.length ? '' : 'No rent roll yet — run enrich_deal.ps1 -Deal "' + deal.name + '" to auto-populate from the rent roll, or add tenants below.'}
+      </div>
+      <UwReturns r={r} />
+
+      {/* rent roll */}
+      <div>
+        <SectionLabel2>Rent roll ({leases.length} tenants · {Math.round(totalSf).toLocaleString()} SF{m.glaSf ? ` of ${Math.round(m.glaSf).toLocaleString()} GLA` : ''})</SectionLabel2>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 11.5, width: '100%' }}>
+            <thead><tr>{['Tenant', 'SF', 'Base $/SF', 'Bump %', 'Term (yrs)', 'Recovery', ''].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {leases.map((l, i) => (
+                <tr key={i}>
+                  <td style={{ ...sgCell, minWidth: 130 }}><input value={l.name} disabled={busy} onChange={e => updLease(i, { name: e.target.value })} style={gridInput} /></td>
+                  <td style={sgCell}><input value={l.sf} disabled={busy} onChange={e => updLease(i, { sf: Number(e.target.value) || 0 })} style={{ ...gridInput, textAlign: 'right', width: 80 }} /></td>
+                  <td style={sgCell}><input value={l.baseRentPsf} disabled={busy} onChange={e => updLease(i, { baseRentPsf: Number(e.target.value) || 0 })} style={{ ...gridInput, textAlign: 'right', width: 70 }} /></td>
+                  <td style={sgCell}><input value={+(l.annualBumpPct * 100).toFixed(2)} disabled={busy} onChange={e => updLease(i, { annualBumpPct: (Number(e.target.value) || 0) / 100 })} style={{ ...gridInput, textAlign: 'right', width: 55 }} /></td>
+                  <td style={sgCell}><input value={l.termRemainingYears} disabled={busy} onChange={e => updLease(i, { termRemainingYears: Number(e.target.value) || 0 })} style={{ ...gridInput, textAlign: 'right', width: 55 }} /></td>
+                  <td style={sgCell}><select value={l.recovery} disabled={busy} onChange={e => updLease(i, { recovery: e.target.value as UwLeaseLine['recovery'] })} style={{ ...gridInput, width: 80 }}><option value="nnn">NNN</option><option value="gross">Gross</option><option value="base_year">Base-yr</option></select></td>
+                  <td style={sgCell}><button style={miniX} disabled={busy} onClick={() => delLease(i)} title="Remove">✕</button></td>
+                </tr>
+              ))}
+              {leases.length === 0 && <tr><td colSpan={7} style={{ ...sgCell, textAlign: 'center', color: 'var(--text-faint)' }}>No tenants yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <button style={{ ...ghostBtn, marginTop: 8 }} disabled={busy} onClick={addLease}>+ Add tenant</button>
+      </div>
+
+      {/* NOI by year */}
+      <div>
+        <SectionLabel2>NOI by year</SectionLabel2>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 11.5 }}>
-            <thead><tr>
-              <th style={sgHead}>growth \ exit</th>
-              {exitCaps.map(ec => <th key={ec} style={sgHead}>{pct(ec, 2)}</th>)}
-            </tr></thead>
+            <thead><tr>{['Year', 'Base rent', 'Recoveries', 'OpEx', 'Vac/credit', 'NOI', 'Capital'].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
             <tbody>
-              {growths.map((g, gi) => (
-                <tr key={g}>
-                  <td style={{ ...sgCell, fontWeight: 700, color: 'var(--text-muted)' }}>{pct(g, 1)}</td>
-                  {grid.leveredIrr[gi].map((v, ci) => (
-                    <td key={ci} style={{ ...sgCell, color: irrColor(v), fontWeight: v != null && Math.abs(g - m.noiGrowthPct) < 1e-6 && Math.abs(exitCaps[ci] - m.exitCapPct) < 1e-6 ? 800 : 500, background: Math.abs(g - m.noiGrowthPct) < 1e-6 && Math.abs(exitCaps[ci] - m.exitCapPct) < 1e-6 ? 'var(--surface-2, rgba(70,99,113,.08))' : undefined }}>{pct(v, 1)}</td>
-                  ))}
+              {r.breakdown.map(b => (
+                <tr key={b.year}>
+                  <td style={{ ...sgCell, textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)' }}>Yr {b.year}</td>
+                  <td style={recCell}>{fmtM(b.baseRent)}</td>
+                  <td style={recCell}>{fmtM(b.recoveries)}</td>
+                  <td style={recCell}>{fmtM(-b.opex)}</td>
+                  <td style={recCell}>{fmtM(-b.vacancyCredit)}</td>
+                  <td style={{ ...sgCell, textAlign: 'right', fontWeight: 700, color: 'var(--text)' }}>{fmtM(b.noi)}</td>
+                  <td style={recCell}>{b.capital ? fmtM(-b.capital) : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1064,12 +1206,49 @@ function UnderwritingTab({ deal, busy, onSaveModel }: { deal: Deal; busy: boolea
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => { onSaveModel(m, computed); setSaved(true) }}>
-          {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save underwrite'}
-        </button>
-        <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>Writes IRR / EM / CoC / exit cap / hold / equity to the deal. Sheet-owned price &amp; going-in cap are left untouched.</span>
+      {/* market leasing assumptions */}
+      <div>
+        <SectionLabel2>Market leasing (rollover)</SectionLabel2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+          <MInput label="Renewal prob." kind="pct" value={roll.renewalProbPct} onChange={setRoll('renewalProbPct')} disabled={busy} />
+          <MInput label="Market rent" kind="usd" value={roll.marketRentPsf} onChange={setRoll('marketRentPsf')} disabled={busy} />
+          <MInput label="Mkt rent growth" kind="pct" value={roll.marketRentGrowthPct} onChange={setRoll('marketRentGrowthPct')} disabled={busy} />
+          <MInput label="Downtime (mo)" kind="yr" value={roll.downtimeMonths} onChange={setRoll('downtimeMonths')} disabled={busy} />
+          <MInput label="TI new $/SF" kind="usd" value={roll.tiNewPsf} onChange={setRoll('tiNewPsf')} disabled={busy} />
+          <MInput label="TI renew $/SF" kind="usd" value={roll.tiRenewPsf} onChange={setRoll('tiRenewPsf')} disabled={busy} />
+          <MInput label="LC new $/SF" kind="usd" value={roll.lcNewPsf} onChange={setRoll('lcNewPsf')} disabled={busy} />
+          <MInput label="LC renew $/SF" kind="usd" value={roll.lcRenewPsf} onChange={setRoll('lcRenewPsf')} disabled={busy} />
+          <MInput label="Free rent (mo)" kind="yr" value={roll.freeRentMonthsNew} onChange={setRoll('freeRentMonthsNew')} disabled={busy} />
+        </div>
       </div>
+
+      {/* opex + financing */}
+      <div>
+        <SectionLabel2>Operating expenses &amp; financing</SectionLabel2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+          <MInput label="Recoverable OpEx $/SF" kind="usd" value={opex.recoverableOpexPsf} onChange={setOpex('recoverableOpexPsf')} disabled={busy} />
+          <MInput label="Non-recov OpEx $/SF" kind="usd" value={opex.nonRecoverableOpexPsf} onChange={setOpex('nonRecoverableOpexPsf')} disabled={busy} />
+          <MInput label="OpEx growth" kind="pct" value={opex.opexGrowthPct} onChange={setOpex('opexGrowthPct')} disabled={busy} />
+          <MInput label="Gen. vacancy" kind="pct" value={opex.generalVacancyPct} onChange={setOpex('generalVacancyPct')} disabled={busy} />
+          <MInput label="Credit loss" kind="pct" value={opex.creditLossPct} onChange={setOpex('creditLossPct')} disabled={busy} />
+          <MInput label="Reserves $/SF" kind="usd" value={opex.capitalReservePsf} onChange={setOpex('capitalReservePsf')} disabled={busy} />
+          <MInput label="Other income $/SF" kind="usd" value={opex.otherIncomePsf ?? 0} onChange={setOpex('otherIncomePsf')} disabled={busy} />
+          <MInput label="GLA (SF)" kind="usd" value={m.glaSf ?? 0} onChange={setF('glaSf')} disabled={busy} />
+          <MInput label="Purchase price" kind="usd" value={m.purchasePrice} onChange={setF('purchasePrice')} disabled={busy} />
+          <MInput label="Hold" kind="yr" value={m.holdYears} onChange={setF('holdYears')} disabled={busy} />
+          <MInput label="Exit cap" kind="pct" value={m.exitCapPct} onChange={setF('exitCapPct')} disabled={busy} />
+          <MInput label="LTV" kind="pct" value={m.ltvPct} onChange={setF('ltvPct')} disabled={busy} />
+          <MInput label="Loan rate" kind="pct" value={m.loanRatePct} onChange={setF('loanRatePct')} disabled={busy} />
+          <MInput label="Amort (0 = IO)" kind="yr" value={m.amortYears} onChange={setF('amortYears')} disabled={busy} />
+        </div>
+      </div>
+
+      <div>
+        <SectionLabel2>Levered IRR — exit cap (cols) &times; market-rent growth (rows)</SectionLabel2>
+        <UwSensitivity exitCaps={exitCaps} rows={growths} irr={irrGrid} baseCol={m.exitCapPct} baseRow={roll.marketRentGrowthPct} />
+      </div>
+
+      <UwSaveBar busy={busy} saved={saved} onSave={() => { onSaveModel({ ...m, mode: 'tenant' }, computed); setSaved(true) }} />
     </div>
   )
 }

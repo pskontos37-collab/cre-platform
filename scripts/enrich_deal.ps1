@@ -13,6 +13,7 @@
 #   4. extract_site_plans   secure a site-plan PDF (standalone or clipped from the OM)
 #   5. render_site_plans    rasterize it to a stored JPEG for the meeting deck
 #   6. extract_underwriting fill return metrics from the deal's own CF model / docs
+#   7. extract_rent_roll    auto-populate the tenant-level underwriting model from the rent roll
 # Logs to scripts\logs\enrich_<deal>_<date>.log. Idempotent - safe to re-run.
 param([Parameter(Mandatory=$true)][string]$Deal)
 $ErrorActionPreference = "Continue"   # a failed step logs; later steps still run
@@ -38,12 +39,13 @@ function Step([string]$title, [scriptblock]$body){
   catch { $m = "STEP FAILED: $($_.Exception.Message)"; Write-Output $m; Add-Content $log $m }
 }
 
-Step "1/6 Link folder"           { & (Join-Path $here 'link_deal_folders.ps1')   -DealFilter $Deal }
-Step "2/6 Mirror documents"      { & (Join-Path $here 'mirror_deal_docs.ps1')     -Apply -DealFilter $Deal }
-Step "3/6 OM facts + tenants"    { & (Join-Path $here 'enrich_deals.ps1')         -Apply -DealFilter $Deal }
-Step "4/6 Site plan"             { & (Join-Path $here 'extract_site_plans.ps1')   -Apply -DealFilter $Deal }
-Step "5/6 Render site plan"      { & (Join-Path $here 'render_site_plans.ps1')          -DealFilter $Deal }
-Step "6/6 Underwriting"          { & (Join-Path $here 'extract_underwriting.ps1') -Apply -DealFilter $Deal }
+Step "1/7 Link folder"           { & (Join-Path $here 'link_deal_folders.ps1')   -DealFilter $Deal }
+Step "2/7 Mirror documents"      { & (Join-Path $here 'mirror_deal_docs.ps1')     -Apply -DealFilter $Deal }
+Step "3/7 OM facts + tenants"    { & (Join-Path $here 'enrich_deals.ps1')         -Apply -DealFilter $Deal }
+Step "4/7 Site plan"             { & (Join-Path $here 'extract_site_plans.ps1')   -Apply -DealFilter $Deal }
+Step "5/7 Render site plan"      { & (Join-Path $here 'render_site_plans.ps1')          -DealFilter $Deal }
+Step "6/7 Underwriting metrics"  { & (Join-Path $here 'extract_underwriting.ps1') -Apply -DealFilter $Deal }
+Step "7/7 Rent roll -> model"    { & (Join-Path $here 'extract_rent_roll.ps1')    -Apply -DealFilter $Deal }
 
 $done = "===== Enrichment complete for '$Deal' ($(Get-Date -Format 'HH:mm:ss')). Log: $log ====="
 Write-Output $done; Add-Content $log $done

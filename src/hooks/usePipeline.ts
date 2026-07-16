@@ -97,7 +97,8 @@ export interface DealLp {
 }
 
 /** Editable acquisition-underwriting assumptions (decimals for rates), persisted
- *  on pipeline_deals.underwriting_model. Mirrors AcqAssumptions minus closeDate. */
+ *  on pipeline_deals.underwriting_model. Shared financing/exit fields + a simple
+ *  (direct-cap) payload and an optional tenant-level (rent-roll) payload. */
 export interface UnderwritingModel {
   purchasePrice: number
   acqCostsPct: number
@@ -110,7 +111,16 @@ export interface UnderwritingModel {
   ltvPct: number
   loanRatePct: number
   amortYears: number
+  // tenant-level (v2) — present when mode === 'tenant'
+  mode?: 'simple' | 'tenant'
+  glaSf?: number
+  leases?: UwLeaseLine[]
+  rollover?: UwRollover
+  opex?: UwOpex
 }
+export interface UwLeaseLine { name: string; sf: number; baseRentPsf: number; annualBumpPct: number; termRemainingYears: number; recovery: 'nnn' | 'gross' | 'base_year'; proRataSharePct?: number }
+export interface UwRollover { renewalProbPct: number; marketRentPsf: number; marketRentGrowthPct: number; downtimeMonths: number; tiNewPsf: number; tiRenewPsf: number; lcNewPsf: number; lcRenewPsf: number; freeRentMonthsNew: number }
+export interface UwOpex { recoverableOpexPsf: number; nonRecoverableOpexPsf: number; opexGrowthPct: number; generalVacancyPct: number; creditLossPct: number; capitalReservePsf: number; otherIncomePsf?: number }
 
 export interface Deal {
   id: string
