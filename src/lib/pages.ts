@@ -32,6 +32,7 @@ export const PAGES: PageDef[] = [
   { key: 'financials',  path: '/financials',  label: 'Financials',  icon: '📊', restricted: true, group: 'portfolio' },
   { key: 'receivables', path: '/receivables', label: 'Receivables', icon: '💵', group: 'portfolio' },
   { key: 'waterfall',   path: '/waterfall',   label: 'Waterfall',   icon: '💧', restricted: true, group: 'portfolio' },
+  { key: 'investors',   path: '/investors',   label: 'Investors',   icon: '📤', restricted: true, group: 'portfolio' },
   { key: 'transactions',path: '/transactions',label: 'Transactions',icon: '🧾', restricted: true, group: 'portfolio' },
   { key: 'management',  path: '/management',  label: 'Agreements',  icon: '📝', restricted: true, group: 'portfolio' },
   { key: 'rea',         path: '/rea',         label: 'REAs',        icon: '📜', group: 'portfolio' },

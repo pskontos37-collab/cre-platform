@@ -14,6 +14,7 @@ import { ContactsPage } from './pages/ContactsPage'
 import { AnnouncementsPage } from './pages/AnnouncementsPage'
 import { FinancialsPage } from './pages/FinancialsPage'
 import { WaterfallPage } from './pages/WaterfallPage'
+import { InvestorReportingPage } from './pages/InvestorReportingPage'
 import { ManagementPage } from './pages/ManagementPage'
 import { PropertiesPage } from './pages/PropertiesPage'
 import { PropertyDetailPage } from './pages/PropertyDetailPage'
@@ -272,6 +273,18 @@ function AppRoutes() {
             <RequirePage pageKey="waterfall">
               <AppLayout>
                 <WaterfallPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/investors"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="investors">
+              <AppLayout>
+                <InvestorReportingPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
