@@ -74,6 +74,14 @@ function Resolve-Psf($psf, $total, $gla, $ceil){
   if($p -gt $ceil){ $p = 0.0 }   # still implausible -> leave for the analyst
   return [math]::Round($p, 2)
 }
+# Newest 4-digit year (2000-2099) mentioned in a doc's title/filename; 0 if none.
+# Used to prefer the most-recent operating statement over older / larger ones.
+function Doc-Year($doc){
+  $s = "$($doc.title) $($doc.file_name)"
+  $yrs = [regex]::Matches($s, '20\d\d') | ForEach-Object { [int]$_.Value } | Where-Object { $_ -le 2099 }
+  if($yrs){ return ($yrs | Measure-Object -Maximum).Maximum }
+  return 0
+}
 
 # tenant-model deals + GLA + current model
 $sel = 'id,name,gla_sf,underwriting_model'
@@ -104,7 +112,8 @@ foreach($d in $deals){
       -and ($_.documents.title + ' ' + $_.documents.file_name) -match '(?i)income\s*statement|p&l|profit.*loss|t-?12|trailing|operating\s*statement' `
       -and ($_.documents.title + ' ' + $_.documents.file_name) -notmatch '(?i)offering|memorandum|\bom\b|sales|rent\s*roll|survey|warranty|easement|overview|guidance|site\s*plan' })
   }
-  $pick = @($cand | Sort-Object { [long]$_.documents.file_size_bytes } -Descending | Select-Object -First 1)
+  # prefer the NEWEST-year statement (a current T-12 beats an old one); size breaks ties.
+  $pick = @($cand | Sort-Object @{ Expression = { Doc-Year $_.documents }; Descending = $true }, @{ Expression = { [long]$_.documents.file_size_bytes }; Descending = $true } | Select-Object -First 1)
   if($pick.Count -eq 0){ Write-Output ("  {0}: no operating statement in storage" -f $d.name); $noStmt++; continue }
   $doc = $pick[0].documents
   Write-Output ("  {0}: reading statement '{1}'" -f $d.name, $doc.title)
