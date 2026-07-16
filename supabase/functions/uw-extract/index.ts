@@ -72,6 +72,24 @@ async function anthropicT12(key: string, signedUrl: string, dealName: string, to
   return block.input
 }
 
+// verify_jwt=true means the platform gateway has already validated the JWT
+// signature before this code runs, so a decoded role claim is trustworthy. The
+// cron sends the project service_role key; that JWT is a validly-signed
+// service_role token but not necessarily byte-identical to the function's
+// injected SUPABASE_SERVICE_ROLE_KEY (so requireUser's exact-match service check
+// misses it). Trust the role claim for the cron; staff users still go through
+// requireUser below.
+function bearerRole(req: Request): string | null {
+  const tok = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim()
+  const parts = tok.split('.')
+  if (parts.length !== 3) return null
+  try {
+    const b = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const payload = JSON.parse(atob(b + '='.repeat((4 - b.length % 4) % 4)))
+    return typeof payload.role === 'string' ? payload.role : null
+  } catch { return null }
+}
+
 // Prefer the stated PSF when plausible, else total / GLA; repair mis-parsed totals.
 function resolvePsf(psf: unknown, total: unknown, gla: number, ceil: number): number {
   let p = typeof psf === 'number' ? psf : 0
@@ -176,8 +194,11 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   try {
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-    const caller = await requireUser(req, sb)          // accepts the service-role key (cron) or a privileged user
-    if (!caller.isPrivileged) throw new AuthError('Deal data is restricted', 403)
+    // cron path: gateway-verified service_role JWT. Staff path: requireUser (must be privileged).
+    if (bearerRole(req) !== 'service_role') {
+      const caller = await requireUser(req, sb)
+      if (!caller.isPrivileged) throw new AuthError('Deal data is restricted', 403)
+    }
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')
