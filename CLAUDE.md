@@ -54,7 +54,21 @@ Use the Supabase dashboard → SQL editor, or the Supabase CLI (`supabase db pus
 | 20240011_indexes.sql | Performance indexes |
 
 Later migrations (20240012+) are feature migrations — see each feature's notes in the
-project memory. Highest applied as of 2026-07-11: 20240074_property_nca.
+project memory.
+
+### Migration numbering protocol (multiple sessions work this repo in parallel)
+
+- Supabase records migrations by FULL NAME, not number — duplicate numbers on disk
+  are ugly but harmless. Known number dups: 20240053, 20240055, 20240072, 20240086,
+  20240096. Do not renumber applied migrations.
+- Before claiming a number, check BOTH the `supabase/migrations/` directory on disk
+  (a parallel session may have claimed a file without applying it yet) AND the
+  database (`supabase_migrations.schema_migrations` or `list_migrations`), AND the
+  "next free" pointer in the project memory index.
+- After applying via MCP `apply_migration`, always write the identical .sql file to
+  `supabase/migrations/` and commit it — the repo must reflect the prod schema.
+  (Three applied migrations sat untracked for days; recoverable only because
+  nothing deleted them.)
 
 ## Architecture decisions
 
@@ -77,6 +91,16 @@ The `entitlements` table grants per-user, per-resource access. `scope` values:
 
 Two RLS helper functions enforce this: `is_admin_or_am()` and `can_access_property(uuid)`.
 They live inside the database and cannot be spoofed by the application.
+
+### Anon-role posture (migration 20240098)
+The anon key ships in the browser bundle, so the `anon` role holds ZERO write
+privileges on public tables (revoked wholesale, including default privileges for
+future tables) and no EXECUTE on SECURITY DEFINER RPCs (migrations 20240093/95 —
+note a plain `revoke from anon` is not enough; the default PUBLIC grant must be
+revoked too). All writes come from `authenticated` staff (gated by RLS) or edge
+functions running as `service_role`. The tenant portal uses the anon key only to
+invoke the edge-function gateway, never PostgREST. Keep it this way: new RPCs get
+`revoke execute ... from public, anon; grant execute ... to authenticated, service_role;`.
 
 ### Waterfall engine
 `src/lib/waterfall.ts` — pure TypeScript, zero database calls, fully testable.
