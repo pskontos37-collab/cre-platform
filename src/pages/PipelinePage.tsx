@@ -1216,7 +1216,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
         <SectionLabel2>Rent roll ({leases.length} tenants · {Math.round(totalSf).toLocaleString()} SF{m.glaSf ? ` of ${Math.round(m.glaSf).toLocaleString()} GLA` : ''})</SectionLabel2>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 11.5, width: '100%' }}>
-            <thead><tr>{['Tenant', 'SF', 'Base $/SF', 'Bump %', 'Term (yrs)', 'Recovery', ''].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Tenant', 'SF', 'Base $/SF', 'Bump %', 'Term (yrs)', 'Recovery', 'Sales $/SF', '% rent', 'Base-yr $/SF', ''].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
             <tbody>
               {leases.map((l, i) => (
                 <tr key={i}>
@@ -1226,10 +1226,13 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
                   <td style={sgCell}><input value={+(l.annualBumpPct * 100).toFixed(2)} disabled={busy} onChange={e => updLease(i, { annualBumpPct: (Number(e.target.value) || 0) / 100 })} style={{ ...gridInput, textAlign: 'right', width: 55 }} /></td>
                   <td style={sgCell}><input value={l.termRemainingYears} disabled={busy} onChange={e => updLease(i, { termRemainingYears: Number(e.target.value) || 0 })} style={{ ...gridInput, textAlign: 'right', width: 55 }} /></td>
                   <td style={sgCell}><select value={l.recovery} disabled={busy} onChange={e => updLease(i, { recovery: e.target.value as UwLeaseLine['recovery'] })} style={{ ...gridInput, width: 80 }}><option value="nnn">NNN</option><option value="gross">Gross</option><option value="base_year">Base-yr</option></select></td>
+                  <td style={sgCell}><input value={l.salesPsf ?? ''} placeholder="—" disabled={busy} onChange={e => updLease(i, { salesPsf: e.target.value === '' ? undefined : (Number(e.target.value) || 0) })} style={{ ...gridInput, textAlign: 'right', width: 62 }} /></td>
+                  <td style={sgCell}><input value={l.pctRentRate != null ? +(l.pctRentRate * 100).toFixed(2) : ''} placeholder="—" disabled={busy} onChange={e => updLease(i, { pctRentRate: e.target.value === '' ? undefined : (Number(e.target.value) || 0) / 100 })} style={{ ...gridInput, textAlign: 'right', width: 48 }} /></td>
+                  <td style={sgCell}><input value={l.baseYearOpexPsf ?? ''} placeholder={l.recovery === 'base_year' ? 'yr1' : '—'} disabled={busy} onChange={e => updLease(i, { baseYearOpexPsf: e.target.value === '' ? undefined : (Number(e.target.value) || 0) })} style={{ ...gridInput, textAlign: 'right', width: 62 }} /></td>
                   <td style={sgCell}><button style={miniX} disabled={busy} onClick={() => delLease(i)} title="Remove">✕</button></td>
                 </tr>
               ))}
-              {leases.length === 0 && <tr><td colSpan={7} style={{ ...sgCell, textAlign: 'center', color: 'var(--text-faint)' }}>No tenants yet.</td></tr>}
+              {leases.length === 0 && <tr><td colSpan={10} style={{ ...sgCell, textAlign: 'center', color: 'var(--text-faint)' }}>No tenants yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1241,13 +1244,14 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
         <SectionLabel2>NOI by year</SectionLabel2>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 11.5 }}>
-            <thead><tr>{['Year', 'Base rent', 'Recoveries', 'OpEx', 'Vac/credit', 'NOI', 'Capital', 'DSCR', 'Debt yld'].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Year', 'Base rent', 'Recoveries', '% rent', 'OpEx', 'Vac/credit', 'NOI', 'Capital', 'DSCR', 'Debt yld'].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
             <tbody>
               {r.breakdown.map(b => (
                 <tr key={b.year}>
                   <td style={{ ...sgCell, textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)' }}>Yr {b.year}</td>
                   <td style={recCell}>{fmtM(b.baseRent)}</td>
                   <td style={recCell}>{fmtM(b.recoveries)}</td>
+                  <td style={recCell}>{b.pctRent ? fmtM(b.pctRent) : '—'}</td>
                   <td style={recCell}>{fmtM(-b.opex)}</td>
                   <td style={recCell}>{fmtM(-b.vacancyCredit)}</td>
                   <td style={{ ...sgCell, textAlign: 'right', fontWeight: 700, color: 'var(--text)' }}>{fmtM(b.noi)}</td>
@@ -1289,6 +1293,9 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
           <MInput label="Credit loss" kind="pct" value={opex.creditLossPct} onChange={setOpex('creditLossPct')} disabled={busy} />
           <MInput label="Reserves $/SF" kind="usd" value={opex.capitalReservePsf} onChange={setOpex('capitalReservePsf')} disabled={busy} />
           <MInput label="Other income $/SF" kind="usd" value={opex.otherIncomePsf ?? 0} onChange={setOpex('otherIncomePsf')} disabled={busy} />
+          <MInput label="CAM admin fee" kind="pct" value={opex.adminFeePct ?? 0} onChange={setOpex('adminFeePct')} disabled={busy} />
+          <MInput label="Gross-up occ." kind="pct" value={opex.grossUpPct ?? 0} onChange={setOpex('grossUpPct')} disabled={busy} />
+          <MInput label="Sales growth" kind="pct" value={opex.salesGrowthPct ?? opex.opexGrowthPct} onChange={setOpex('salesGrowthPct')} disabled={busy} />
           <MInput label="GLA (SF)" kind="usd" value={m.glaSf ?? 0} onChange={setF('glaSf')} disabled={busy} />
           <MInput label="Purchase price" kind="usd" value={m.purchasePrice} onChange={setF('purchasePrice')} disabled={busy} />
           <MInput label="Hold" kind="yr" value={m.holdYears} onChange={setF('holdYears')} disabled={busy} />
@@ -1299,6 +1306,19 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
           <MInput label="IO years" kind="yr" value={m.ioYears ?? 0} onChange={setF('ioYears')} disabled={busy} />
           <MInput label="Loan fee" kind="pct" value={m.loanFeePct ?? 0} onChange={setF('loanFeePct')} disabled={busy} />
         </div>
+      </div>
+
+      {/* controllable-CAM recovery cap: tenants pay capped growth, landlord absorbs the rest */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
+          <input type="checkbox" checked={opex.recoveryCapPct != null} disabled={busy}
+            onChange={e => setOpex('recoveryCapPct')((e.target.checked ? 0.05 : undefined) as unknown as number)} />
+          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>
+            Cap controllable recovery growth{opex.recoveryCapPct != null ? '' : ' (off)'}
+          </span>
+        </label>
+        {opex.recoveryCapPct != null &&
+          <div style={{ width: 150 }}><MInput label="Recovery cap / yr" kind="pct" value={opex.recoveryCapPct} onChange={setOpex('recoveryCapPct')} disabled={busy} /></div>}
       </div>
 
       <UwRefiEditor refi={m.refi ?? null} onChange={refi => { setM(p => ({ ...p, refi })); setSaved(false) }} busy={busy} />
