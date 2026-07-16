@@ -82,8 +82,8 @@ $CATS = @(
   @{ key='zoning'; label='zoning / PZR'; nameRe='zoning|pzr'; pathRe='zoning|pzr|5\.03';
      prefer='report|summary'; focus='the ZONING REPORT (or PZR)';
      schema='{"zoningText":str|null,"taxParcels":str|null,"floodZoneText":str|null}' }
-  @{ key='opstmt'; label='operating statements'; nameRe='operating ?statement|income ?statement|\bt-?12\b|\bop ?stmt\b|trailing ?twelve'; pathRe='operating ?statement|income statement|1\.02';
-     exclude='tenant|lease|commenc|estoppel|deposit'; prefer='trailing|annual|income ?statement|summary'; focus='the HISTORICAL OPERATING STATEMENTS / income statements';
+  @{ key='opstmt'; label='operating statements'; nameRe='operating ?statement|income ?statement|\bt-?12\b|\bop ?stmt\b|trailing ?twelve|12[ _]?month|twelve[ _]?month'; pathRe='operating ?statement|income statement|1\.02';
+     exclude='tenant|lease|commenc|estoppel|deposit'; prefer='trailing|annual|income ?statement|12[ _]?month|summary'; focus='the HISTORICAL OPERATING STATEMENTS / income / 12-month statements';
      schema='{"opexPsfYr1":num|null,"retPsfYr1":num|null,"historicalNoi":[{"year":str,"income":num|null,"expenses":num|null,"noi":num|null}]}' }
   @{ key='cotenancy'; label='co-tenancy / exclusives'; nameRe='cotenancy|co-?tenancy|exclusive|termination'; pathRe='cotenancy|co-?tenancy|exclusive|termination|4\.18';
      prefer='summary'; focus='the CO-TENANCY, EXCLUSIVE USE and TERMINATION RIGHTS summary';
@@ -91,6 +91,18 @@ $CATS = @(
   @{ key='survey'; label='survey'; nameRe='survey|alta'; pathRe='survey|5\.01';
      prefer='alta'; focus='the ALTA SURVEY';
      schema='{"landAcres":num|null,"parkingSpaces":num|null,"parkingRatio":str|null}' }
+  # OM = rich multi-field source for loosely-organized folders that lack the
+  # numbered DD taxonomy. Fills identity / physical / market / tenant profiles
+  # (NOT price/returns - those come from the CF model). Runs after the specific
+  # categories so authoritative docs win the fill-empty merge.
+  @{ key='om'; label='offering memorandum'; nameRe='\bom\b|offering ?memorandum'; pathRe='offering ?memorand|teaser';
+     exclude='rent ?roll|pricing|void|progress|update|underwriting|statement|argus|\.avux'; prefer='\bom\b|offering ?memorandum';
+     focus='the OFFERING MEMORANDUM (broker OM) - use it for property/market/tenant facts, NOT its asking price or broker pro-forma returns';
+     schema='{"address":str|null,"city":str|null,"state":str|null,"msa":str|null,"propertyType":str|null,"yearBuilt":str|null,"landAcres":num|null,"parkingSpaces":num|null,"parkingRatio":str|null,"submarketName":str|null,"trafficCounts":str|null,"pop3mi":num|null,"pop5mi":num|null,"hhi3mi":num|null,"marketOverviewNotes":str|null,"salesCompsNote":str|null,"leaseCompsNote":str|null,"competingCentersNote":str|null,"anchorStory":str|null,"tenantProfiles":[{"name":str,"sf":num|null,"creditRating":str|null,"expiration":str|null,"blurb":str}]}' }
+  @{ key='market'; label='market report'; nameRe='retail[ _]?figures|why[ _][a-z]|demographic|economic|beltway|costar|cbre|market[ _]?square'; pathRe='market[ _]?data|\bcomps?\b';
+     exclude='tenant|lease|rent ?roll'; prefer='retail[ _]?figures|overview|demographic';
+     focus='the MARKET / demographic / retail-figures report';
+     schema='{"submarketName":str|null,"marketVacancy":decimal|null,"submarketVacancy":decimal|null,"pop3mi":num|null,"pop5mi":num|null,"hhi3mi":num|null,"trafficCounts":str|null,"marketOverviewNotes":str|null,"salesCompsNote":str|null,"leaseCompsNote":str|null,"competingCentersNote":str|null}' }
 )
 
 # The cash-flow model is handled separately (Excel print of its summary sheets).
@@ -107,6 +119,15 @@ if ($Recap) {
   if ($loanCat) {
     $loanCat.focus  = 'the EXISTING MORTGAGE loan documents / debt summary'
     $loanCat.schema = '{"existingLoanOriginal":num|null,"existingLoanBalance":num|null,"existingLoanRate":decimal|null,"existingLoanMaturity":str|null,"refinancingAssumptions":str|null}'
+  }
+  # In recap mode the "jv" slot instead sources the recapitalization agreement /
+  # LOI for the existing owner + preferred-equity terms (e.g. a root "Signed LOI").
+  $jvCat = $CATS | Where-Object { $_.key -eq 'jv' } | Select-Object -First 1
+  if ($jvCat) {
+    $jvCat.label  = 'recap agreement / LOI'
+    $jvCat.nameRe = '\bloi\b|recap|letter of intent|joint ?venture|\bjv\b'
+    $jvCat.focus  = 'the RECAPITALIZATION AGREEMENT or letter of intent (LOI)'
+    $jvCat.schema = '{"existingOwnerName":str|null,"currentOwnershipEquity":num|null,"prefEquityAmount":num|null,"prefEquityUse":str|null,"recapSaleKicker":str|null,"recapTiers":[{"priority":str,"recipient":str,"hurdle":str}]}'
   }
   $CF_SCHEMA = '{"estimatedPropertyValue":num|null,"estValueNote":str|null,"prefEquityAmount":num|null,"currentOwnershipEquity":num|null,"holdYears":num|null,"exitCap":decimal|null,"projIrr":decimal|null,"avgCoc":decimal|null,"equityMultiple":num|null,"capexBudgetTotal":num|null,"capexBudgetLines":[{"item":str,"amount":num}],"opexPsfYr1":num|null,"retPsfYr1":num|null,"mgmtFeePct":decimal|null,"leasingAssumptionsNote":str|null,"recapSaleKicker":str|null,"recapTiers":[{"priority":str,"recipient":str,"hurdle":str}]}'
 }
