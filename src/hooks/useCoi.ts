@@ -97,3 +97,85 @@ export function useCoiCertificates(propertyIds: string[]) {
     return ((data ?? []) as any[]).map(mapRow)
   }, [propertyIds.join(',')])
 }
+
+// ── Review queue: COIs coi-extract parsed but couldn't confidently route ──────
+export interface CoiReviewItem {
+  id: string
+  storagePath: string | null
+  insuredName: string | null
+  producerName: string | null
+  effectiveDate: string | null
+  expirationDate: string | null
+  suggestedPropertyId: string | null
+  suggestedPartyType: PartyType | null
+  suggestedPartyName: string | null
+  reason: string
+  coverages: { coverage_type: string; each_occurrence: number | null; aggregate: number | null }[]
+  source: string
+  createdAt: string
+}
+
+const REVIEW_REASON_LABEL: Record<string, string> = {
+  property_unresolved: 'Property not recognized',
+  ambiguous_property: 'Matched more than one property',
+  low_confidence: 'Low-confidence match',
+}
+export const reviewReasonLabel = (r: string) => REVIEW_REASON_LABEL[r] ?? r
+
+export function useCoiReviewQueue() {
+  return useQuery<CoiReviewItem[]>(async () => {
+    const { data, error } = await supabase
+      .from('coi_review_queue')
+      .select('id, storage_path, insured_name, producer_name, effective_date, expiration_date, suggested_property_id, suggested_party_type, suggested_party_name, reason, coverages, source, created_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+    if (error) throw new Error(error.message)
+    return ((data ?? []) as any[]).map(r => ({
+      id: r.id,
+      storagePath: r.storage_path,
+      insuredName: r.insured_name,
+      producerName: r.producer_name,
+      effectiveDate: r.effective_date,
+      expirationDate: r.expiration_date,
+      suggestedPropertyId: r.suggested_property_id,
+      suggestedPartyType: r.suggested_party_type,
+      suggestedPartyName: r.suggested_party_name,
+      reason: r.reason,
+      coverages: Array.isArray(r.coverages) ? r.coverages : [],
+      source: r.source,
+      createdAt: r.created_at,
+    }))
+  }, [])
+}
+
+// File a queued item: re-run coi-extract with the chosen property/party (which
+// re-parses the stored PDF and grades it), then coi-extract marks the queue row
+// filed. Requires the stored storage_path.
+export async function resolveReviewItem(
+  item: CoiReviewItem,
+  propertyId: string,
+  partyType: PartyType,
+  partyName: string,
+): Promise<void> {
+  if (!item.storagePath) throw new Error('This item has no stored file to re-file; dismiss and re-upload.')
+  const { data, error } = await supabase.functions.invoke('coi-extract', {
+    body: {
+      storage_path: item.storagePath,
+      property_id: propertyId,
+      party_type: partyType,
+      party_name: partyName,
+      queue_id: item.id,
+      source: 'manual',
+    },
+  })
+  if (error) throw new Error(error.message)
+  if (data?.error) throw new Error(data.error)
+}
+
+export async function dismissReviewItem(id: string, notes?: string): Promise<void> {
+  const { error } = await supabase
+    .from('coi_review_queue')
+    .update({ status: 'dismissed', resolved_at: new Date().toISOString(), notes: notes ?? null })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}

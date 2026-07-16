@@ -2,8 +2,9 @@ import { useMemo, useState, type CSSProperties } from 'react'
 import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds, usePropertyNameMap } from '../hooks/useFilteredPropertyIds'
 import {
-  useCoiCertificates, STATUS_META, PARTY_META,
-  type CoiCertificate, type CoiStatus, type PartyType,
+  useCoiCertificates, useCoiReviewQueue, resolveReviewItem, dismissReviewItem, reviewReasonLabel,
+  STATUS_META, PARTY_META,
+  type CoiCertificate, type CoiStatus, type PartyType, type CoiReviewItem,
 } from '../hooks/useCoi'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -22,8 +23,9 @@ export function InsurancePage() {
   const { data: properties } = useProperties()
   const propertyIds = useFilteredPropertyIds(properties ?? null)
   const propertyNames = usePropertyNameMap(properties ?? null)
-  const { data, loading, error } = useCoiCertificates(propertyIds)
+  const { data, loading, error, refetch } = useCoiCertificates(propertyIds)
   const certs = data ?? []
+  const { data: reviewItems, refetch: refetchReview } = useCoiReviewQueue()
 
   const [partyFilter, setPartyFilter] = useState<PartyFilter>('all')
   const [statusFilter, setStatusFilter] = useState<CoiStatus | null>(null)
@@ -87,6 +89,14 @@ export function InsurancePage() {
         limits, policy numbers and expiration dates populate as certificates are parsed from the
         ACORD PDFs. Missing / expired / deficient parties are the collection worklist.
       </div>
+
+      {(reviewItems?.length ?? 0) > 0 && (
+        <ReviewQueue
+          items={reviewItems!}
+          properties={(properties ?? []).map(p => ({ id: p.id, name: p.name }))}
+          onChange={() => { refetchReview(); refetch() }}
+        />
+      )}
 
       {/* KPI row */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
@@ -209,3 +219,80 @@ function PartyRow({ c }: { c: CoiCertificate }) {
 }
 
 const linkBtn: CSSProperties = { fontSize: 11.5, fontWeight: 600, padding: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }
+
+// ── Review queue: unrouted COIs from the folder/mailbox, triaged here ─────────
+function ReviewQueue({ items, properties, onChange }: {
+  items: CoiReviewItem[]
+  properties: { id: string; name: string }[]
+  onChange: () => void
+}) {
+  return (
+    <div style={{ marginBottom: 22, border: '1px solid var(--amber)', borderRadius: 12, background: 'var(--surface)', padding: '14px 18px' }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)', marginBottom: 3 }}>📥 Review queue · {items.length}</div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 12 }}>
+        Certificates that arrived (folder / email) but couldn’t be auto-routed to a property. Assign a property + party and file, or dismiss.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {items.map(it => <ReviewRow key={it.id} item={it} properties={properties} onChange={onChange} />)}
+      </div>
+    </div>
+  )
+}
+
+function ReviewRow({ item, properties, onChange }: {
+  item: CoiReviewItem
+  properties: { id: string; name: string }[]
+  onChange: () => void
+}) {
+  const [propertyId, setPropertyId] = useState(item.suggestedPropertyId ?? '')
+  const [partyType, setPartyType] = useState<PartyType>(item.suggestedPartyType ?? 'vendor')
+  const [partyName, setPartyName] = useState(item.suggestedPartyName ?? item.insuredName ?? '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function file() {
+    setErr(null)
+    if (!propertyId) { setErr('Choose a property'); return }
+    if (!partyName.trim()) { setErr('Enter a party name'); return }
+    setBusy(true)
+    try { await resolveReviewItem(item, propertyId, partyType, partyName.trim()); onChange() }
+    catch (e: any) { setErr(e?.message ?? 'File failed'); setBusy(false) }
+  }
+  async function dismiss() {
+    if (!confirm('Dismiss this certificate from the queue?')) return
+    setBusy(true)
+    try { await dismissReviewItem(item.id); onChange() }
+    catch (e: any) { setErr(e?.message ?? 'Dismiss failed'); setBusy(false) }
+  }
+
+  const covSummary = item.coverages.map(c => c.coverage_type.toUpperCase()).join(', ')
+  return (
+    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 9, padding: '10px 12px' }}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{item.insuredName ?? 'Unknown insured'}</span>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--amber)' }}>{reviewReasonLabel(item.reason)}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{item.source}{item.expirationDate ? ` · exp ${item.expirationDate}` : ' · no dates'}</span>
+      </div>
+      {covSummary && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{item.coverages.length} coverages: {covSummary}</div>}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+        <select value={propertyId} onChange={e => setPropertyId(e.target.value)} style={sel}>
+          <option value="">Property…</option>
+          {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={partyType} onChange={e => setPartyType(e.target.value as PartyType)} style={sel}>
+          <option value="tenant">Tenant</option>
+          <option value="vendor">Vendor</option>
+          <option value="contractor">Contractor</option>
+        </select>
+        <input value={partyName} onChange={e => setPartyName(e.target.value)} placeholder="Party name" style={{ ...sel, minWidth: 180 }} />
+        <button onClick={file} disabled={busy} style={fileBtn}>{busy ? '…' : 'File'}</button>
+        <button onClick={dismiss} disabled={busy} style={{ ...linkBtn, color: 'var(--red)' }}>Dismiss</button>
+      </div>
+      {err && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 6 }}>{err}</div>}
+    </div>
+  )
+}
+
+const sel: CSSProperties = { fontSize: 12, padding: '5px 8px', borderRadius: 7, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }
+const fileBtn: CSSProperties = { fontSize: 12, fontWeight: 650, padding: '5px 16px', borderRadius: 7, cursor: 'pointer', background: WILKOW, color: '#fff', border: 'none' }

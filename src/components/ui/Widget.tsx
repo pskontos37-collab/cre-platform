@@ -57,8 +57,14 @@ export function Widget({ title, chip, href, hrefLabel, children, fullWidth, minH
           borderBottom:  '1px solid var(--border)',
           display:       'flex',
           alignItems:    'center',
-          justifyContent:'space-between',
-          gap:           8,
+          // Let the header wrap when a narrow card can't fit the title alongside
+          // wide chip controls: the title keeps its own line at full width and
+          // the controls drop beneath it, rather than the title being crushed to
+          // an ellipsis (which happened on narrow cards, e.g. sidebar collapsed →
+          // grid fits an extra column → cards shrink toward the 340px minimum).
+          flexWrap:      'wrap',
+          columnGap:     8,
+          rowGap:        6,
           flex:          'none',
         }}
       >
@@ -79,7 +85,7 @@ export function Widget({ title, chip, href, hrefLabel, children, fullWidth, minH
         >
           {title}
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 'none' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 'none', marginLeft: 'auto' }}>
           {chip != null && (
             typeof chip === 'string' ? (
               <span
