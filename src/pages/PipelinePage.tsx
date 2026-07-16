@@ -11,7 +11,7 @@ import {
   createPartner, updatePartner, deletePartner, type PartnerInput,
   openDiligence, unlinkDiligence, sendDocToDiligence,
   pipelineMetrics, fetchDeckExtras, saveUnderwriting, type UnderwritingModel,
-  BOARD_STAGES, ALL_STAGES, STAGE_LABEL, STAGE_HUE, boardColumn, isTerminal, STAGE_PROB,
+  BOARD_STAGES, ALL_STAGES, STAGE_LABEL, STAGE_HUE, boardColumn, isTerminal, isActiveStage, STAGE_PROB,
   RISK_ORDER, RISK_LABEL, RISK_COLOR, ASSET_ORDER, ASSET_LABEL, ASSET_MONO, ASSET_COLOR,
   LP_STATUS_ORDER, LP_STATUS_LABEL, PARTNER_TIER_LABEL,
   type Deal, type Stage, type RiskProfile, type AssetType, type LpStatus,
@@ -171,6 +171,8 @@ function PipelineView(p: {
         <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-faint)' }}>{p.deals.length} deals</span>
       </div>
 
+      <AcqAlerts deals={p.deals} onOpen={p.onOpen} />
+
       {p.deals.length === 0 ? (
         <EmptyState icon="📈" title="No deals match these filters." />
       ) : p.boardMode === 'board' ? (
@@ -194,6 +196,64 @@ function Watchlist({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => v
       </summary>
       <div style={{ padding: '0 10px 10px' }}><Table deals={deals} onOpen={onOpen} /></div>
     </details>
+  )
+}
+
+// ── Deadlines & activity alerts (Phase 2 workflow) ──
+const DAY_MS = 86400000
+const DEADLINE_SOON_DAYS = 45   // surface target closes within this window (or overdue)
+const STALE_DAYS = 21           // active deals with no edit in this long are flagged
+interface AlertItem { d: Deal; days: number }
+function acqAlerts(deals: Deal[], now: number): { deadlines: AlertItem[]; stalled: AlertItem[] } {
+  const active = deals.filter(d => isActiveStage(d.stage))
+  const deadlines = active
+    .filter(d => d.targetCloseDate)
+    .map(d => ({ d, days: Math.round((new Date(d.targetCloseDate!).getTime() - now) / DAY_MS) }))
+    .filter(x => x.days <= DEADLINE_SOON_DAYS)
+    .sort((a, b) => a.days - b.days)
+  const stalled = active
+    .map(d => ({ d, days: Math.round((now - new Date(d.updatedAt).getTime()) / DAY_MS) }))
+    .filter(x => x.days >= STALE_DAYS)
+    .sort((a, b) => b.days - a.days)
+  return { deadlines, stalled }
+}
+function AcqAlerts({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => void }) {
+  const { deadlines, stalled } = acqAlerts(deals, Date.now())
+  if (!deadlines.length && !stalled.length) return null
+  const dLabel = (n: number) => (n < 0 ? `${-n}d overdue` : n === 0 ? 'today' : `${n}d`)
+  const dColor = (n: number) => (n < 0 ? '#c0654e' : n <= 14 ? RISK_COLOR.value_add : 'var(--text-muted)')
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)', padding: '11px 13px' }}>
+      {deadlines.length > 0 && (
+        <AlertRow icon="⏱" label={`Close deadlines (${deadlines.length})`} chips={deadlines} onOpen={onOpen}
+          metric={x => dLabel(x.days)} color={x => dColor(x.days)}
+          title={x => `${x.d.name} · ${STAGE_LABEL[x.d.stage]}${x.d.bidText ? ` · bid ${x.d.bidText}` : ''} · target close ${x.d.targetCloseDate}`} />
+      )}
+      {stalled.length > 0 && (
+        <AlertRow icon="⚠" label={`No recent activity (${stalled.length})`} chips={stalled} onOpen={onOpen}
+          metric={x => `${x.days}d idle`} color={() => 'var(--text-muted)'}
+          title={x => `${x.d.name} · ${STAGE_LABEL[x.d.stage]} · last updated ${x.d.updatedAt.slice(0, 10)}`} />
+      )}
+    </div>
+  )
+}
+function AlertRow({ icon, label, chips, onOpen, metric, color, title }: {
+  icon: string; label: string; chips: AlertItem[]; onOpen: (id: string) => void
+  metric: (x: AlertItem) => string; color: (x: AlertItem) => string; title: (x: AlertItem) => string
+}) {
+  const CAP = 8
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{icon} {label}</span>
+      {chips.slice(0, CAP).map(x => (
+        <button key={x.d.id} onClick={() => onOpen(x.d.id)} title={title(x)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--border-2)', borderRadius: 999, background: 'var(--surface-2, rgba(0,0,0,.03))', padding: '2px 9px', fontSize: 11.5, color: 'var(--text)', cursor: 'pointer', maxWidth: 240 }}>
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.d.name}</span>
+          <span style={{ fontWeight: 700, color: color(x), whiteSpace: 'nowrap' }}>{metric(x)}</span>
+        </button>
+      ))}
+      {chips.length > CAP && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>+{chips.length - CAP} more</span>}
+    </div>
   )
 }
 
