@@ -57,6 +57,9 @@ export interface DealRow {
   // abstractor-v2 JV phase (migration 20240105): verified operating-agreement
   // abstract + QA verdict (agreement-abstract / agreement-verify kind=jv).
   abstract: any | null
+  // Entity-matched source documents the abstract was synthesized from. Persisted
+  // by agreement-abstract so a regenerate re-reads the SAME curated doc set.
+  abstract_source_doc_ids: string[] | null
   qa: any | null
   qa_status: string | null
   qa_at: string | null
@@ -65,6 +68,23 @@ export interface DealRow {
   preferred_equity_positions: DealPrefPosition[]
   capital_flows: CapitalFlowRow[]
   entity_investors: EntityInvestorRow[]
+}
+
+/** On-demand regeneration of a JV deal's verified operating-agreement abstract.
+ *  Re-runs agreement-abstract (kind=jv) against the deal's stored
+ *  abstract_source_doc_ids (the entity-matched doc set jv_rollout curated), then
+ *  the agreement-verify adversarial pass. The generator invalidates the prior QA
+ *  before verify re-scores it. Returns the fresh qa_status for the toast. */
+export async function regenerateJvAbstract(dealId: string): Promise<{ qaStatus: string | null; docsUsed: number }> {
+  const gen = await supabase.functions.invoke('agreement-abstract', { body: { kind: 'jv', id: dealId } })
+  if (gen.error) throw new Error((gen.data as any)?.error ?? gen.error.message)
+  if ((gen.data as any)?.error) throw new Error((gen.data as any).error)
+  const docsUsed = Number((gen.data as any)?.docs_used ?? 0)
+
+  const ver = await supabase.functions.invoke('agreement-verify', { body: { kind: 'jv', id: dealId } })
+  if (ver.error) throw new Error((ver.data as any)?.error ?? ver.error.message)
+  if ((ver.data as any)?.error) throw new Error((ver.data as any).error)
+  return { qaStatus: (ver.data as any)?.qa_status ?? null, docsUsed }
 }
 
 /** All modeled deals with tiers, pref positions, dated capital flows, rosters, and property name. */

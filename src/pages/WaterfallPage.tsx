@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, type CSSProperties, type ReactNode } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { useDeals, type DealRow, type SellTodayConfig } from '../hooks/useDeals'
+import { useDeals, regenerateJvAbstract, type DealRow, type SellTodayConfig } from '../hooks/useDeals'
 import { getWaterfallDefaults, useGlNca } from '../hooks/useWaterfallDefaults'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -107,11 +107,65 @@ function runSellToday(g: PropertyGroup, inp: Inputs): SellTodayResult | null {
   })
 }
 
+// On-demand regenerate of a JV deal's verified operating-agreement abstract.
+// Re-runs agreement-abstract + agreement-verify against the deal's stored
+// entity-matched source docs, then refetches so the panel/QA badge update in
+// place. Overwrites the current abstract and costs an API call, so it confirms
+// first. Disabled if the deal was never mapped to source documents (only
+// jv_rollout establishes that mapping today).
+function RegenAbstractButton({ deal, onDone }: { deal: DealRow; onDone: () => void }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'error' | 'done'>('idle')
+  const [msg, setMsg] = useState<string | null>(null)
+  const mapped = Array.isArray(deal.abstract_source_doc_ids) && deal.abstract_source_doc_ids.length > 0
+  const off = state === 'busy' || !mapped
+
+  async function onClick() {
+    if (off) return
+    if (!window.confirm(`Regenerate the verified abstract for "${deal.name}" from its ${deal.abstract_source_doc_ids!.length} source document(s)?\n\nThis re-reads the same agreement documents, overwrites the current abstract, and re-runs verification.`)) return
+    setState('busy'); setMsg(null)
+    try {
+      const { qaStatus } = await regenerateJvAbstract(deal.id)
+      setState('done'); setMsg(qaStatus ? `verified: ${qaStatus}` : null)
+      onDone()
+      setTimeout(() => setState('idle'), 4000)
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e)
+      console.error('[jv-abstract-regen]', m)
+      setState('error'); setMsg(m)
+    }
+  }
+
+  const label = state === 'busy' ? 'Regenerating…' : state === 'error' ? 'Failed — retry' : state === 'done' ? '✓ Updated' : '↻ Regenerate'
+  const red = state === 'error'
+  return (
+    <button
+      onClick={onClick}
+      disabled={off}
+      title={
+        !mapped ? 'No source documents mapped to this deal yet — run jv_rollout to curate the entity-matched agreement docs first'
+        : state === 'error' && msg ? `Error: ${msg}`
+        : state === 'done' && msg ? `Abstract regenerated (${msg})`
+        : 'Regenerate this abstract from its source agreement documents and compare against the modeled tiers'
+      }
+      style={{
+        fontSize: 11.5, fontWeight: 600, padding: '8px 14px', borderRadius: 8, whiteSpace: 'nowrap',
+        border: '1px solid ' + (red ? 'var(--red, #ef4444)' : state === 'done' ? 'var(--accent)' : 'var(--border)'),
+        background: 'var(--surface)',
+        color: red ? 'var(--red, #ef4444)' : state === 'done' ? 'var(--accent)' : 'var(--text-muted)',
+        cursor: off ? (state === 'busy' ? 'default' : 'not-allowed') : 'pointer',
+        opacity: !mapped ? 0.5 : 1,
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
 // ── page ──────────────────────────────────────────────────────────────────
 
 export function WaterfallPage() {
   const { appUser } = useAuth()
-  const { data: deals, loading, error } = useDeals()
+  const { data: deals, loading, error, refetch } = useDeals()
 
   const groups = useMemo<PropertyGroup[]>(() => {
     const byProp = new Map<string, PropertyGroup>()
@@ -351,6 +405,7 @@ export function WaterfallPage() {
                     <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{d.name}</span>
                     <AgreementQaBadge status={d.qa_status} />
                     <span style={{ flex: 1 }} />
+                    <RegenAbstractButton deal={d} onDone={refetch} />
                     <AgreementAbstractPdfButton kind="jv" name={d.name} abstract={d.abstract} qa={d.qa} qaStatus={d.qa_status} qaAt={d.qa_at} />
                   </div>
                   <AgreementAbstractPanel kind="jv" abstract={d.abstract} />
