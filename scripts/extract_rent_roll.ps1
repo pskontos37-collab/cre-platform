@@ -99,12 +99,12 @@ foreach($d in $deals){
   $recOpex = $(if($null -ne $r.recoverable_opex_psf){[double]$r.recoverable_opex_psf}else{0})
   $nonRec = $(if($null -ne $r.non_recoverable_opex_psf){[double]$r.non_recoverable_opex_psf}else{0})
 
-  # NB: local must NOT be named $model — that collides (case-insensitive) with the
+  # NB: local must NOT be named $model - that collides (case-insensitive) with the
   # [string]$Model param and its type constraint coerces the hashtable to a string.
   $uwm = @{
     purchasePrice=[double]($(if($d.ask_price){$d.ask_price}else{0})); acqCostsPct=0.02; capexUpfront=0; inPlaceNoi=0; noiGrowthPct=0.03;
     holdYears=5; exitCapPct=[double]($(if($d.going_in_cap){$d.going_in_cap}else{0.065})); sellingCostsPct=0.02;
-    ltvPct=0.6; loanRatePct=0.065; amortYears=30; mode='tenant'; glaSf=[double]$gla; leases=$leases;
+    ltvPct=0.6; loanRatePct=0.065; amortYears=30; mode='tenant'; periodicity='monthly'; glaSf=[double]$gla; leases=$leases;
     rollover=@{ renewalProbPct=0.7; marketRentPsf=$mkt; marketRentGrowthPct=0.03; downtimeMonths=6; tiNewPsf=30; tiRenewPsf=10; lcNewPsf=15; lcRenewPsf=5; freeRentMonthsNew=3; releaseTermYears=7 };
     opex=@{ recoverableOpexPsf=$recOpex; nonRecoverableOpexPsf=$nonRec; opexGrowthPct=0.03; generalVacancyPct=0; creditLossPct=0.005; capitalReservePsf=0.25; otherIncomePsf=0 }
   }

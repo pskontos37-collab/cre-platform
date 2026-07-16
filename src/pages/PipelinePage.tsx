@@ -1852,6 +1852,8 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     ltvPct: um?.ltvPct ?? 0.6, loanRatePct: um?.loanRatePct ?? 0.065, amortYears: um?.amortYears ?? 30,
     ioYears: um?.ioYears ?? 0, loanFeePct: um?.loanFeePct ?? 0, refi: um?.refi ?? null,
     mode: 'tenant', glaSf: um?.glaSf ?? deal.glaSf ?? 0,
+    // saved tenant models keep annual (no silent NOI shift); brand-new models default to monthly precision
+    periodicity: um?.periodicity ?? (um?.mode === 'tenant' ? 'annual' : 'monthly'),
     leases: um?.leases ?? [], rollover: { ...D_ROLL, ...(um?.rollover ?? {}) }, opex: { ...D_OPEX, ...(um?.opex ?? {}) },
     promote: um?.promote ?? DEFAULT_PROMOTE,
   }
@@ -1873,6 +1875,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     holdYears: m.holdYears, exitCapPct: m.exitCapPct, sellingCostsPct: m.sellingCostsPct,
     ltvPct: m.ltvPct, loanRatePct: m.loanRatePct, amortYears: m.amortYears,
     ioYears: m.ioYears, loanFeePct: m.loanFeePct, refi: m.refi, closeDate: today,
+    periodicity: m.periodicity ?? 'annual',
     leases: leases as any, rollover: roll as any, opex: opex as any,
   }
   const r = useMemo(() => underwriteTenant(model), [m, today])
@@ -1891,8 +1894,20 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-        Bottoms-up lease-by-lease underwrite (NNN recoveries, blended rollover, TI/LC, forward-NOI exit). {leases.length ? '' : 'No rent roll yet — run enrich_deal.ps1 -Deal "' + deal.name + '" to auto-populate from the rent roll, or add tenants below.'}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', flex: 1 }}>
+          Bottoms-up lease-by-lease underwrite (NNN recoveries, blended rollover, TI/LC, forward-NOI exit). {leases.length ? '' : 'No rent roll yet — run enrich_deal.ps1 -Deal "' + deal.name + '" to auto-populate from the rent roll, or add tenants below.'}
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', cursor: 'pointer' }}
+          title="Monthly times downtime, free rent and lease expiry to the month; annual smears them across the year.">
+          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Periods</span>
+          <select value={m.periodicity ?? 'annual'} disabled={busy}
+            onChange={e => { const v = e.target.value as 'annual' | 'monthly'; setM(p => ({ ...p, periodicity: v })); setSaved(false) }}
+            style={{ fontSize: 11, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}>
+            <option value="annual">Annual</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
       </div>
       <UwReturns r={r} />
       <UwReconciliation deal={deal} modelNoi={r.yearlyNoi[0] ?? 0} />

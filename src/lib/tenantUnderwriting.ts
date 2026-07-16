@@ -94,6 +94,7 @@ export interface TenantModelAssumptions {
   leases: LeaseLine[]
   rollover: RolloverAssumptions
   opex: OpexAssumptions
+  periodicity?: 'annual' | 'monthly'  // NOI granularity (default 'annual'); 'monthly' times downtime/free-rent/expiry to the month
 }
 
 interface TenantYear {
@@ -204,18 +205,123 @@ function propertyYear(m: TenantModelAssumptions, t: number): TenantYearBreakdown
   return { year: t, baseRent, recoveries, pctRent, otherIncome, opex, vacancyCredit, noi, capital: capital + o.capitalReservePsf * m.glaSf }
 }
 
+// ─────────────────────── monthly (opt-in) sub-model ───────────────────────
+// Same economics as the annual model, but resolved on a monthly grid so downtime,
+// free rent and lease expiry are timed to the month (not smeared across a whole
+// year). Annual expense/recovery figures are divided by 12; annual growth uses the
+// month's year index. Rolls up to the SAME annual noiByYear the returns core reads,
+// so financing/refi/promote are unchanged. A flat, no-rollover model reproduces the
+// annual result exactly (PS-validated).
+
+interface MonthFlow { rent: number; capital: number; occupiedSf: number; occFrac: number }
+
+/** One lease's base rent, leasing capital and occupied SF for absolute month mAbs (1-indexed from close). */
+function leaseMonth(l: LeaseLine, roll: RolloverAssumptions, mAbs: number): MonthFlow {
+  const termMo = Math.max(0, Math.round(l.termRemainingYears * 12))
+  const yr0 = Math.floor((mAbs - 1) / 12)                    // 0-based year for annual growth/steps
+  const marketPsf = roll.marketRentPsf * Math.pow(1 + roll.marketRentGrowthPct, yr0)
+
+  if (mAbs <= termMo) {
+    const annualRent = l.baseRentPsf * Math.pow(1 + l.annualBumpPct, yr0) * l.sf   // stepped annually
+    return { rent: annualRent / 12, capital: 0, occupiedSf: l.sf, occFrac: 1 }
+  }
+
+  // rolled: the space re-leases every releaseTermYears. Each new lease starts with
+  // downtime (vacant), then free rent (occupied, no rent); TI/LC hit the event month.
+  const releaseMo = Math.max(1, Math.round((roll.releaseTermYears ?? 7) * 12))
+  const cyclePos = (mAbs - termMo - 1) % releaseMo           // 0..releaseMo-1 within the current lease
+  const eventMonth = cyclePos === 0
+  const p = Math.min(1, Math.max(0, roll.renewalProbPct))
+  const dtMo = Math.max(0, Math.round(roll.downtimeMonths))
+  const frMo = Math.max(0, Math.round(roll.freeRentMonthsNew))
+  const inDowntime = cyclePos < dtMo
+  const inFreeRent = cyclePos >= dtMo && cyclePos < dtMo + frMo
+  const mkMonthly = marketPsf * l.sf / 12
+  const newRent = (inDowntime || inFreeRent) ? 0 : mkMonthly
+  const newOccSf = inDowntime ? 0 : l.sf                     // no recovery while vacant
+  return {
+    rent: p * mkMonthly + (1 - p) * newRent,                 // renewal: full rent, no downtime/free rent
+    capital: eventMonth ? (p * (roll.tiRenewPsf + roll.lcRenewPsf) + (1 - p) * (roll.tiNewPsf + roll.lcNewPsf)) * l.sf : 0,
+    occupiedSf: p * l.sf + (1 - p) * newOccSf,
+    occFrac: l.sf > 0 ? (p * l.sf + (1 - p) * newOccSf) / l.sf : 0,
+  }
+}
+
+interface MonthAgg { baseRent: number; recoveries: number; pctRent: number; otherIncome: number; opex: number; vacancyCredit: number; capital: number }
+
+/** Property NOI components for absolute month mAbs (1-indexed). */
+function propertyMonth(m: TenantModelAssumptions, mAbs: number): MonthAgg {
+  const o = m.opex
+  const yr0 = Math.floor((mAbs - 1) / 12)
+  const grow = Math.pow(1 + o.opexGrowthPct, yr0)
+  const taxInsGrow = Math.pow(1 + (o.taxInsuranceGrowthPct ?? o.opexGrowthPct), yr0)
+  const controllableOpex = o.recoverableOpexPsf * m.glaSf * grow / 12
+  const taxInsExpense = (o.taxInsurancePsf ?? 0) * m.glaSf * taxInsGrow / 12
+  const nonRecoverableOpex = o.nonRecoverableOpexPsf * m.glaSf * grow / 12
+  const otherIncome = (o.otherIncomePsf ?? 0) * m.glaSf * grow / 12
+
+  const billGrow = o.recoveryCapPct != null
+    ? Math.pow(1 + Math.min(o.opexGrowthPct, o.recoveryCapPct), yr0)
+    : grow
+  const billedCtrlPsf = o.recoverableOpexPsf * billGrow
+  const billedTaxPsf = (o.taxInsurancePsf ?? 0) * taxInsGrow
+  const adminFee = 1 + Math.max(0, o.adminFeePct ?? 0)
+  const grossUp = Math.min(1, Math.max(0, o.grossUpPct ?? 0))
+  const salesGrow = Math.pow(1 + (o.salesGrowthPct ?? o.opexGrowthPct), yr0)
+
+  let baseRent = 0, recoveries = 0, pctRent = 0, capital = 0
+  for (const l of m.leases) {
+    const y = leaseMonth(l, m.rollover, mAbs)
+    baseRent += y.rent
+    capital += y.capital
+    const fullSf = l.proRataSharePct != null ? l.proRataSharePct * m.glaSf : l.sf
+    const occSf = l.proRataSharePct != null ? l.proRataSharePct * m.glaSf * y.occFrac : y.occupiedSf
+    const billSf = grossUp > 0 ? Math.min(fullSf, Math.max(occSf, grossUp * fullSf)) : occSf
+    if (l.recovery === 'nnn') {
+      recoveries += billSf * (billedCtrlPsf * adminFee + billedTaxPsf) / 12
+    } else if (l.recovery === 'base_year') {
+      const stop = l.baseYearOpexPsf ?? (o.recoverableOpexPsf + (o.taxInsurancePsf ?? 0))
+      recoveries += occSf * Math.max(0, (billedCtrlPsf + billedTaxPsf) - stop) / 12
+    }
+    const rate = l.pctRentRate ?? 0
+    if (rate > 0 && (l.salesPsf ?? 0) > 0) {
+      const sales = (l.salesPsf as number) * l.sf * salesGrow                        // annual sales
+      const bp = l.breakpointPsf != null ? l.breakpointPsf * l.sf : (y.rent * 12) / rate  // annual base
+      pctRent += Math.max(0, rate * (sales - bp)) * y.occFrac / 12
+    }
+  }
+  const egi = baseRent + recoveries + pctRent + otherIncome
+  const vacancyCredit = egi * (o.generalVacancyPct + o.creditLossPct)
+  const opex = controllableOpex + taxInsExpense + nonRecoverableOpex
+  return { baseRent, recoveries, pctRent, otherIncome, opex, vacancyCredit, capital }
+}
+
+/** Year t (1-indexed) NOI built by aggregating its 12 months. */
+function propertyYearMonthly(m: TenantModelAssumptions, t: number): TenantYearBreakdown {
+  let baseRent = 0, recoveries = 0, pctRent = 0, otherIncome = 0, opex = 0, vacancyCredit = 0, capital = 0
+  for (let k = 1; k <= 12; k++) {
+    const a = propertyMonth(m, (t - 1) * 12 + k)
+    baseRent += a.baseRent; recoveries += a.recoveries; pctRent += a.pctRent; otherIncome += a.otherIncome
+    opex += a.opex; vacancyCredit += a.vacancyCredit; capital += a.capital
+  }
+  const noi = baseRent + recoveries + pctRent + otherIncome - opex - vacancyCredit
+  return { year: t, baseRent, recoveries, pctRent, otherIncome, opex, vacancyCredit, noi, capital: capital + m.opex.capitalReservePsf * m.glaSf }
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 export function underwriteTenant(m: TenantModelAssumptions): TenantUnderwriteResult {
   const hold = Math.max(1, Math.round(m.holdYears))
+  const py = m.periodicity === 'monthly' ? propertyYearMonthly : propertyYear
   const breakdown: TenantYearBreakdown[] = []
   const noiByYear: number[] = []
   const capitalByYear: number[] = []
   for (let t = 1; t <= hold; t++) {
-    const y = propertyYear(m, t)
+    const y = py(m, t)
     breakdown.push(y)
     noiByYear.push(y.noi)
     capitalByYear.push(y.capital)
   }
-  const exitYearNoi = propertyYear(m, hold + 1).noi   // forward NOI at sale
+  const exitYearNoi = py(m, hold + 1).noi   // forward NOI at sale
 
   const base = computeReturns({
     noiByYear, capitalByYear, exitYearNoi,

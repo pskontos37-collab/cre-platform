@@ -118,6 +118,7 @@ export interface UnderwritingModel {
   refi?: UwRefi | null        // optional mid-hold cash-out refinance
   // tenant-level (v2) — present when mode === 'tenant'
   mode?: 'simple' | 'tenant'
+  periodicity?: 'annual' | 'monthly'  // tenant-model NOI granularity (default annual for saved models, monthly for new)
   glaSf?: number
   leases?: UwLeaseLine[]
   rollover?: UwRollover
