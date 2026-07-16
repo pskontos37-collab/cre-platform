@@ -43,6 +43,7 @@ export interface IcMemoInput {
     gpIrr: number | null; gpEm: number | null
     gpPromote: number; gpPromotePctOfProfit: number
   } | null
+  scenarios?: { name: string; leveredIrr: number | null; equityMultiple: number | null; avgCoc: number | null; yearOneDscr: number | null; equity: number; exitCap: number | null }[]
   strategyFit?: { category: string; buyBox: string; score: number } | null
   topLps?: string[]
   memo: {
@@ -86,7 +87,7 @@ function Para({ children }: { children: string }) {
 }
 function Divider() { return <View style={{ borderTopWidth: 0.75, borderTopColor: RULE, marginVertical: 12 }} /> }
 
-function IcMemoDoc({ deal, memo, preparedBy, generatedAt, promote, strategyFit, topLps }: IcMemoInput) {
+function IcMemoDoc({ deal, memo, preparedBy, generatedAt, promote, scenarios, strategyFit, topLps }: IcMemoInput) {
   const profile = `${RISK_LABEL[deal.riskProfile] ?? deal.riskProfile} ${ASSET_LABEL[deal.assetType] ?? deal.assetType}`
   const loc = [deal.city, deal.state].filter(Boolean).join(', ')
   const committed = deal.lps.reduce((a, l) => a + (l.committed ?? 0), 0)
@@ -161,6 +162,17 @@ function IcMemoDoc({ deal, memo, preparedBy, generatedAt, promote, strategyFit, 
             </View>
           </View>
         </View>
+
+        {scenarios && scenarios.length > 0 ? (
+          <View style={{ marginTop: 10 }}>
+            <Text style={{ fontSize: 7, letterSpacing: 0.8, color: TEXT_FAINT, fontFamily: 'Helvetica-Bold', marginBottom: 4 }}>SCENARIO ANALYSIS — BEAR / BASE / BULL</Text>
+            <TableHeader cols={['Case', 'Levered IRR', 'Multiple', 'Cash-on-cash', 'Yr-1 DSCR', 'Exit cap', 'Equity']} widths={['22%', '14%', '12%', '15%', '13%', '11%', '13%']} />
+            {scenarios.map((s, i) => (
+              <TableRow key={i} widths={['22%', '14%', '12%', '15%', '13%', '11%', '13%']}
+                cells={[safe(s.name), pct(s.leveredIrr), s.equityMultiple != null ? `${s.equityMultiple.toFixed(2)}x` : '—', pct(s.avgCoc), s.yearOneDscr != null ? `${s.yearOneDscr.toFixed(2)}x` : '—', pct(s.exitCap), fmt(s.equity)]} />
+            ))}
+          </View>
+        ) : null}
         <Divider />
 
         {/* ── Capital & LPs ── */}

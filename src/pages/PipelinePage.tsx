@@ -29,7 +29,7 @@ import { computePromote, DEFAULT_PROMOTE } from '../lib/acqPromote'
 import { computeAcqAlerts, type AlertItem } from '../lib/acqAlerts'
 import { bestFit, fitCategory, FIT_LABEL, type BuyBox, type FitDeal, type FitCategory } from '../lib/buyBox'
 import { rankPartners, type MatchPartner, type MatchDeal } from '../lib/partnerMatch'
-import type { UwLeaseLine, UwRollover, UwOpex, UwRefi, UwPromote, UwPromoteTier } from '../hooks/usePipeline'
+import type { UwLeaseLine, UwRollover, UwOpex, UwRefi, UwPromote, UwPromoteTier, UwScenario } from '../hooks/usePipeline'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
 // Analytics (funnel · investment-profile matrix · geo · partners), OM Intake
@@ -1477,6 +1477,7 @@ function promoteForMemo(um: UnderwritingModel | null | undefined) {
         holdYears: um.holdYears, exitCapPct: um.exitCapPct, sellingCostsPct: um.sellingCostsPct,
         ltvPct: um.ltvPct, loanRatePct: um.loanRatePct, amortYears: um.amortYears,
         ioYears: um.ioYears, loanFeePct: um.loanFeePct, refi: um.refi ?? null, closeDate,
+        periodicity: um.periodicity ?? 'annual',
         leases: um.leases ?? [], rollover: um.rollover ?? D_ROLL, opex: um.opex ?? D_OPEX,
       })
     : underwrite({
@@ -1494,6 +1495,26 @@ function promoteForMemo(um: UnderwritingModel | null | undefined) {
   }
 }
 
+// Recompute the full returns result from a stored/working model (scenario compare).
+function computeUw(um: UnderwritingModel, closeDate: string): AcqResult {
+  return um.mode === 'tenant'
+    ? underwriteTenant({
+        glaSf: um.glaSf ?? 0, purchasePrice: um.purchasePrice, acqCostsPct: um.acqCostsPct, capexUpfront: um.capexUpfront,
+        holdYears: um.holdYears, exitCapPct: um.exitCapPct, sellingCostsPct: um.sellingCostsPct,
+        ltvPct: um.ltvPct, loanRatePct: um.loanRatePct, amortYears: um.amortYears,
+        ioYears: um.ioYears, loanFeePct: um.loanFeePct, refi: um.refi ?? null, closeDate,
+        periodicity: um.periodicity ?? 'annual',
+        leases: um.leases ?? [], rollover: um.rollover ?? D_ROLL, opex: um.opex ?? D_OPEX,
+      })
+    : underwrite({
+        purchasePrice: um.purchasePrice, acqCostsPct: um.acqCostsPct, capexUpfront: um.capexUpfront,
+        inPlaceNoi: um.inPlaceNoi, noiGrowthPct: um.noiGrowthPct, holdYears: um.holdYears,
+        exitCapPct: um.exitCapPct, sellingCostsPct: um.sellingCostsPct,
+        ltvPct: um.ltvPct, loanRatePct: um.loanRatePct, amortYears: um.amortYears,
+        ioYears: um.ioYears, loanFeePct: um.loanFeePct, refi: um.refi ?? null, closeDate,
+      })
+}
+
 // AI-narrative fetch shape (ic-memo fn).
 function InvestmentSummaryButtons({ deal, buyBoxes, partners, preparedBy }: { deal: Deal; buyBoxes: BuyBox[]; partners: CapitalPartner[]; preparedBy: string }) {
   const buildInput = async () => {
@@ -1502,8 +1523,14 @@ function InvestmentSummaryButtons({ deal, buyBoxes, partners, preparedBy }: { de
     const md: MatchDeal = { assetType: deal.assetType, state: deal.state, market: deal.market, submarket: deal.submarket, askPrice: deal.askPrice, projIrr: deal.projIrr }
     const mps: MatchPartner[] = partners.map(p => ({ id: p.id, name: p.name, tier: p.tier, productTypes: p.productTypes, markets: p.markets, returnTarget: p.returnTarget, dealSize: p.dealSize, active: p.active }))
     const topLps = rankPartners(md, mps, new Set(deal.lps.map(l => l.partnerId))).filter(m => m.score > 0).slice(0, 4).map(m => m.partner.name)
+    const uwToday = new Date().toISOString().slice(0, 10)
+    const scenarios = (deal.underwritingModel?.scenarios ?? []).map(s => {
+      const rr = computeUw({ ...s.model, mode: s.model.mode ?? deal.underwritingModel?.mode }, uwToday)
+      return { name: s.name, leveredIrr: rr.leveredIrr, equityMultiple: rr.equityMultiple || null, avgCoc: rr.avgCashOnCash, yearOneDscr: rr.yearOneDscr, equity: Math.round(rr.equity), exitCap: s.model.exitCapPct }
+    })
     return {
       promote: promoteForMemo(deal.underwritingModel),
+      scenarios,
       strategyFit: best ? { category: FIT_LABEL[fitCategory(best)], buyBox: best.bb.name, score: Math.round(best.fit.score * 100) } : null,
       topLps,
       deal: {
@@ -1635,6 +1662,9 @@ function UnderwritingTab({ deal, busy, onSaveModel }: { deal: Deal; busy: boolea
 
 const uwIrrColor = (v: number | null) => v == null ? 'var(--text-faint)' : v >= 0.15 ? '#2e8b57' : v >= 0.10 ? 'var(--accent, #466371)' : v >= 0.07 ? 'var(--text)' : '#c0654e'
 const gridInput: CSSProperties = { fontSize: 11.5, padding: '4px 6px', borderRadius: 5, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)', width: '100%', boxSizing: 'border-box' }
+const scenTh: CSSProperties = { padding: '5px 12px', textAlign: 'center', borderBottom: '1px solid var(--border-2)', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }
+const scenTd: CSSProperties = { padding: '4px 12px', textAlign: 'center', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
+const scenMini: CSSProperties = { fontSize: 9.5, padding: '1px 5px', borderRadius: 4, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text-muted)', cursor: 'pointer' }
 
 function UwReturns({ r }: { r: AcqResult }) {
   return (
@@ -1768,6 +1798,98 @@ function UwRefiEditor({ refi, onChange, busy }: { refi: UwRefi | null; onChange:
     </div>
   )
 }
+// Named-case (bear/base/bull) save + side-by-side compare. Scenarios are snapshots
+// of the working model stored in underwriting_model.scenarios; each column is
+// recomputed live so the table never goes stale.
+function UwScenarioPanel({ mode, current, scenarios, busy, onSaveScenario, onLoad, onDelete }: {
+  mode: 'simple' | 'tenant'
+  current: UnderwritingModel
+  scenarios: UwScenario[]
+  busy: boolean
+  onSaveScenario: (name: string) => void
+  onLoad: (model: UnderwritingModel) => void
+  onDelete: (name: string) => void
+}) {
+  const today = new Date().toISOString().slice(0, 10)
+  const [name, setName] = useState('')
+  const pct = (v: number | null | undefined) => v == null ? '—' : (v * 100).toFixed(1) + '%'
+  const xm = (v: number | null | undefined) => v == null ? '—' : v.toFixed(2) + 'x'
+
+  const cols = useMemo(() => {
+    const base = [{ key: '__current', label: 'Working', model: { ...current, mode } }]
+      .concat(scenarios.map(s => ({ key: s.name, label: s.name, model: { ...s.model, mode: s.model.mode ?? mode } })))
+    return base.map(c => {
+      const r = computeUw(c.model, today)
+      return { ...c, irr: r.leveredIrr, em: r.equityMultiple || null, coc: r.avgCashOnCash, dscr: r.yearOneDscr, equity: r.equity, exitCap: c.model.exitCapPct, hold: c.model.holdYears }
+    })
+  }, [current, scenarios, mode, today])
+
+  const rows: { label: string; get: (c: (typeof cols)[number]) => string; color?: (c: (typeof cols)[number]) => string }[] = [
+    { label: 'Levered IRR', get: c => pct(c.irr), color: c => uwIrrColor(c.irr) },
+    { label: 'Equity multiple', get: c => xm(c.em) },
+    { label: 'Avg cash-on-cash', get: c => pct(c.coc) },
+    { label: 'Yr-1 DSCR', get: c => xm(c.dscr) },
+    { label: 'Equity', get: c => fmtM(c.equity) },
+    { label: 'Exit cap', get: c => pct(c.exitCap) },
+    { label: 'Hold (yrs)', get: c => c.hold == null ? '—' : String(c.hold) },
+  ]
+
+  const save = (n: string) => { const nm = n.trim(); if (!nm) return; onSaveScenario(nm); setName('') }
+
+  return (
+    <div>
+      <SectionLabel2>Scenarios — bear / base / bull</SectionLabel2>
+      <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginBottom: 8 }}>
+        Save the current assumptions as a named case, then compare side by side. Saved cases persist on the deal and appear in the IC memo.
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        {['Base', 'Bear', 'Bull'].map(preset => (
+          <button key={preset} disabled={busy} onClick={() => save(preset)} style={{ ...segBtn, borderRadius: 6, border: '1px solid var(--border-2)', color: 'var(--text-muted)', background: 'var(--surface)' }}>Save as {preset}</button>
+        ))}
+        <input value={name} disabled={busy} placeholder="Custom name…" onChange={e => setName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(name) }} style={{ ...gridInput, width: 130 }} />
+        <button disabled={busy || !name.trim()} onClick={() => save(name)} style={{ ...primaryBtn, opacity: (busy || !name.trim()) ? 0.5 : 1 }}>Save case</button>
+      </div>
+      {cols.length > 1 ? (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 11.5, minWidth: 320 }}>
+            <thead>
+              <tr>
+                <th style={{ ...scenTh, textAlign: 'left' }}></th>
+                {cols.map(c => (
+                  <th key={c.key} style={scenTh}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                      <span style={{ fontWeight: 700, color: 'var(--text)' }}>{c.label}</span>
+                      {c.key !== '__current' && (
+                        <span style={{ display: 'flex', gap: 6 }}>
+                          <button disabled={busy} onClick={() => { const s = scenarios.find(x => x.name === c.key); if (s) onLoad(s.model) }} style={scenMini}>Load</button>
+                          <button disabled={busy} onClick={() => onDelete(c.key)} style={{ ...scenMini, color: '#c0654e' }}>Delete</button>
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(row => (
+                <tr key={row.label}>
+                  <td style={{ ...scenTd, textAlign: 'left', color: 'var(--text-muted)' }}>{row.label}</td>
+                  {cols.map(c => (
+                    <td key={c.key} style={{ ...scenTd, color: row.color ? row.color(c) : 'var(--text)' }}>{row.get(c)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>No saved scenarios yet — save the current case above to start comparing.</div>
+      )}
+    </div>
+  )
+}
+
 function UwSaveBar({ busy, saved, onSave }: { busy: boolean; saved: boolean; onSave: () => void }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1804,6 +1926,16 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     exitCap: m.exitCapPct, holdYears: m.holdYears, stabilizedYield: r.stabilizedYieldOnCostPct,
     equityRequired: Math.round(r.equity), totalCapitalization: Math.round(r.totalBasis),
   }
+  const saveScenario = (name: string) => {
+    const snap: UwScenario = { name, model: { ...m, mode: 'simple', scenarios: undefined }, savedAt: new Date().toISOString() }
+    const next: UnderwritingModel = { ...m, mode: 'simple', scenarios: [...(m.scenarios ?? []).filter(s => s.name !== name), snap] }
+    setM(next); onSaveModel(next, computed); setSaved(true)
+  }
+  const loadScenario = (model: UnderwritingModel) => { setM({ ...model, scenarios: m.scenarios }); setSaved(false) }
+  const deleteScenario = (name: string) => {
+    const next: UnderwritingModel = { ...m, scenarios: (m.scenarios ?? []).filter(s => s.name !== name) }
+    setM(next); onSaveModel(next, computed)
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
@@ -1835,6 +1967,7 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
         <SectionLabel2>Levered IRR — exit cap (cols) &times; NOI growth (rows)</SectionLabel2>
         <UwSensitivity exitCaps={exitCaps} rows={growths} irr={grid.leveredIrr} baseCol={m.exitCapPct} baseRow={m.noiGrowthPct} />
       </div>
+      <UwScenarioPanel mode="simple" current={m} scenarios={m.scenarios ?? []} busy={busy} onSaveScenario={saveScenario} onLoad={loadScenario} onDelete={deleteScenario} />
       <UwSaveBar busy={busy} saved={saved} onSave={() => { onSaveModel({ ...m, mode: 'simple' }, computed); setSaved(true) }} />
     </div>
   )
@@ -1889,6 +2022,16 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     projIrr: r.leveredIrr, equityMultiple: r.equityMultiple || null, avgCoc: r.avgCashOnCash,
     exitCap: m.exitCapPct, holdYears: m.holdYears, stabilizedYield: r.stabilizedYieldOnCostPct,
     equityRequired: Math.round(r.equity), totalCapitalization: Math.round(r.totalBasis),
+  }
+  const saveScenario = (name: string) => {
+    const snap: UwScenario = { name, model: { ...m, mode: 'tenant', scenarios: undefined }, savedAt: new Date().toISOString() }
+    const next: UnderwritingModel = { ...m, mode: 'tenant', scenarios: [...(m.scenarios ?? []).filter(s => s.name !== name), snap] }
+    setM(next); onSaveModel(next, computed); setSaved(true)
+  }
+  const loadScenario = (model: UnderwritingModel) => { setM({ ...model, scenarios: m.scenarios }); setSaved(false) }
+  const deleteScenario = (name: string) => {
+    const next: UnderwritingModel = { ...m, scenarios: (m.scenarios ?? []).filter(s => s.name !== name) }
+    setM(next); onSaveModel(next, computed)
   }
   const recCell: CSSProperties = { ...sgCell, textAlign: 'right', color: 'var(--text-muted)' }
 
@@ -2032,6 +2175,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
         <UwSensitivity exitCaps={exitCaps} rows={growths} irr={irrGrid} baseCol={m.exitCapPct} baseRow={roll.marketRentGrowthPct} />
       </div>
 
+      <UwScenarioPanel mode="tenant" current={m} scenarios={m.scenarios ?? []} busy={busy} onSaveScenario={saveScenario} onLoad={loadScenario} onDelete={deleteScenario} />
       <UwSaveBar busy={busy} saved={saved} onSave={() => { onSaveModel({ ...m, mode: 'tenant' }, computed); setSaved(true) }} />
     </div>
   )

@@ -125,7 +125,10 @@ export interface UnderwritingModel {
   opex?: UwOpex
   // LP/GP promote (v3.4) — splits the levered CF into LP vs GP returns
   promote?: UwPromote
+  // named saved cases (bear/base/bull) for side-by-side compare — snapshots of the model (their own .scenarios stripped)
+  scenarios?: UwScenario[]
 }
+export interface UwScenario { name: string; model: UnderwritingModel; savedAt?: string }
 export interface UwPromoteTier { hurdleIrr: number | null; gpPct: number }
 export interface UwPromote { lpEquityPct: number; prefRate: number; tiers: UwPromoteTier[] }
 export interface UwRefi { yearsFromClose: number; ltvPct: number; ratePct: number; amortYears: number; ioYears: number; costPct: number; capPct: number }
