@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useQuery } from '../hooks/useQuery'
 import { supabase } from '../lib/supabase'
@@ -130,10 +130,100 @@ function PropertyCard({ property, rows }: { property: string; rows: ReportRow[] 
   )
 }
 
+// Multi-select property picker: check one property or any combination. Live —
+// toggling a box updates the filter immediately (no Apply step). Mirrors the
+// header's property picker idiom (click-outside to close).
+function PropertyMultiSelect({ options, selected, onToggle, onClear }: {
+  options: string[]
+  selected: Set<string>
+  onToggle: (name: string) => void
+  onClear: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const count = selected.size
+  const active = count > 0
+  const label = count === 0 ? 'All properties'
+    : count === 1 ? [...selected][0]
+    : `${count} properties`
+
+  return (
+    <div ref={boxRef} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: active ? 'var(--accent-dim)' : 'var(--surface-2)',
+          border: active ? '1px solid var(--accent)' : '1px solid var(--border-2)',
+          borderRadius: 6, color: active ? 'var(--accent)' : 'var(--text-muted)',
+          fontSize: 13, padding: '7px 12px', cursor: 'pointer', whiteSpace: 'nowrap',
+          maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis',
+        }}
+      >
+        {label} ▾
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, width: 320, maxHeight: 420,
+          overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border-2)',
+          borderRadius: 10, boxShadow: '0 8px 30px rgba(0,0,0,0.45)', zIndex: 50, padding: 8,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 6px 8px' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Pick one property or any combination</span>
+            <button
+              onClick={onClear}
+              style={{ fontSize: 10.5, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              Clear
+            </button>
+          </div>
+          {options.map(name => (
+            <label
+              key={name}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 6,
+                cursor: 'pointer', fontSize: 12.5,
+                color: selected.has(name) ? 'var(--text)' : 'var(--text-muted)',
+                background: selected.has(name) ? 'var(--surface-2)' : 'transparent',
+              }}
+            >
+              <input type="checkbox" checked={selected.has(name)} onChange={() => onToggle(name)} />
+              <span style={{ flex: 1, minWidth: 0 }}>{name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function MonthlyReportsPage() {
   const reports = useMonthlyReports()
   const [q, setQ] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const rows = reports.data ?? []
+
+  // All property names present in the library — the dropdown's options.
+  const allProps = useMemo(
+    () => [...new Set(rows.map(r => r.property_name))].sort((a, b) => a.localeCompare(b)),
+    [rows],
+  )
+
+  const toggleProp = (name: string) => setSelected(prev => {
+    const next = new Set(prev)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    return next
+  })
 
   const groups = useMemo(() => {
     const byProp = new Map<string, ReportRow[]>()
@@ -144,9 +234,10 @@ export function MonthlyReportsPage() {
     }
     const needle = q.trim().toLowerCase()
     return [...byProp.entries()]
+      .filter(([name]) => selected.size === 0 || selected.has(name))
       .filter(([name]) => !needle || name.toLowerCase().includes(needle))
       .sort((a, b) => a[0].localeCompare(b[0]))
-  }, [rows, q])
+  }, [rows, q, selected])
 
   return (
     <div style={{ padding: '24px 32px', maxWidth: 900 }}>
@@ -169,13 +260,19 @@ export function MonthlyReportsPage() {
 
       {!reports.loading && rows.length > 0 && (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+            <PropertyMultiSelect
+              options={allProps}
+              selected={selected}
+              onToggle={toggleProp}
+              onClear={() => setSelected(new Set())}
+            />
             <input
               value={q}
               onChange={e => setQ(e.target.value)}
-              placeholder="Filter by property…"
+              placeholder="Search by property…"
               style={{
-                flex: 1, maxWidth: 320, fontSize: 13, padding: '7px 12px', borderRadius: 6,
+                flex: 1, minWidth: 180, maxWidth: 320, fontSize: 13, padding: '7px 12px', borderRadius: 6,
                 border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)',
               }}
             />
