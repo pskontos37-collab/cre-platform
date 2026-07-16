@@ -21,6 +21,12 @@ import {
 // recent slice — thousands of DOM rows would stall the page.
 const MAX_DRILL_ROWS = 2000
 
+// Preview counts for the side-by-side list widgets — collapse to a short
+// preview with a "Show N more" toggle so a busy property doesn't render one
+// long scroll (same pattern as Recent Documents).
+const VENDOR_SPEND_PREVIEW = 8
+const DUPLICATES_PREVIEW = 6
+
 function TruncationNote({ shown, total, what }: { shown: number; total: number; what: string }) {
   return (
     <div style={{ padding: '6px 16px', fontSize: 11, color: 'var(--amber, #d97706)', borderBottom: '1px solid var(--border)' }}>
@@ -45,6 +51,7 @@ export function FinancialsPage() {
   }, [properties, propertyId])
 
   const [vendorWindow, setVendorWindow] = useState<SpendWindow>('90d')
+  const [vendorsExpanded, setVendorsExpanded] = useState(false)
   const [docWindow, setDocWindow] = useState<SpendWindow>('30d')
   // Statement month (null = latest GL month); reset when switching property.
   const [stmtPeriod, setStmtPeriod] = useState<{ year: number; month: number } | null>(null)
@@ -147,22 +154,32 @@ export function FinancialsPage() {
           {!vendors.loading && !vendors.error && (vendors.data ?? []).length === 0 && (
             <EmptyState title="No vendor data" subtitle={vendorWindow === 'all' ? 'Load invoices for this property' : `No AP activity in this window (${SPEND_WINDOW_LABEL[vendorWindow].toLowerCase()})`} />
           )}
-          {!vendors.loading && (vendors.data ?? []).length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {vendors.data!.map((v, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0',
-                  borderBottom: i < vendors.data!.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>
-                    {cleanVendor(v.vendor)}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{v.invoice_count} inv</span>
-                    <span style={{ fontSize: 12, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{usd(v.total_spend)}</span>
+          {!vendors.loading && (vendors.data ?? []).length > 0 && (() => {
+            const allVendors = vendors.data!
+            const shownVendors = vendorsExpanded ? allVendors : allVendors.slice(0, VENDOR_SPEND_PREVIEW)
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {shownVendors.map((v, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0',
+                    borderBottom: i < shownVendors.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>
+                      {cleanVendor(v.vendor)}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{v.invoice_count} inv</span>
+                      <span style={{ fontSize: 12, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{usd(v.total_spend)}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+                <ExpandToggle
+                  expanded={vendorsExpanded}
+                  onToggle={() => setVendorsExpanded(e => !e)}
+                  collapsedCount={VENDOR_SPEND_PREVIEW}
+                  totalCount={allVendors.length}
+                />
+              </div>
+            )
+          })()}
         </Widget>
 
         <DuplicatesWidget
@@ -292,10 +309,12 @@ function DuplicatesWidget({ propertyId, flags, loading, error, dismissedKeys, on
   userEmail: string | null
 }) {
   const [showDismissed, setShowDismissed] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const all = flags ?? []
   const active = all.filter(f => !dismissedKeys.has(dupFlagKey(f)))
   const dismissed = all.filter(f => dismissedKeys.has(dupFlagKey(f)))
+  const shownActive = expanded ? active : active.slice(0, DUPLICATES_PREVIEW)
 
   async function act(flag: DuplicateFlag, kind: 'dismiss' | 'restore') {
     if (!propertyId) return
@@ -318,15 +337,21 @@ function DuplicatesWidget({ propertyId, flags, loading, error, dismissedKeys, on
       )}
       {!loading && active.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {active.map((d, i) => (
+          {shownActive.map((d, i) => (
             <DuplicateFlagRow
               key={dupFlagKey(d)}
               flag={d}
-              last={i === active.length - 1}
+              last={i === shownActive.length - 1}
               busy={busyKey === dupFlagKey(d)}
               action={{ label: 'Dismiss', title: 'Mark reviewed — not a duplicate payment', run: () => act(d, 'dismiss') }}
             />
           ))}
+          <ExpandToggle
+            expanded={expanded}
+            onToggle={() => setExpanded(e => !e)}
+            collapsedCount={DUPLICATES_PREVIEW}
+            totalCount={active.length}
+          />
         </div>
       )}
       {!loading && dismissed.length > 0 && (
