@@ -107,6 +107,13 @@ const MAX_REINDEX_PAGES  = Number(Deno.env.get('MAX_REINDEX_PAGES')  ?? 300)
 const OCR_MODEL     = Deno.env.get('OCR_MODEL')     ?? 'claude-haiku-4-5-20251001'
 const OCR_MAX_PAGES = Number(Deno.env.get('OCR_MAX_PAGES') ?? 100)   // Claude PDF page cap; larger → deferred
 const OCR_MAX_TOKENS = Number(Deno.env.get('OCR_MAX_TOKENS') ?? 8000)
+// OpenAI OCR (?ocrProvider=openai) — a second provider so OCR stays available
+// when the Anthropic API is overloaded. Uses OpenAI's Responses API with the PDF
+// as a native file input (input_file), so OpenAI rasterizes server-side. This
+// avoids rendering pages to bitmaps inside the memory-constrained edge worker,
+// which OOMed (WORKER_RESOURCE_LIMIT) on larger scans.
+const OCR_PROVIDER_DEFAULT = (Deno.env.get('OCR_PROVIDER') ?? 'claude').toLowerCase()
+const OCR_OPENAI_MODEL = Deno.env.get('OCR_OPENAI_MODEL') ?? 'gpt-4o'
 
 // Postgres text columns cannot store NUL; pdfjs emits NUL/C0 controls for some
 // glyphs. Strip them (keep tab/newline/CR) so inserts don't fail wholesale.
@@ -290,6 +297,48 @@ function mergeExtractions(
   return merged
 }
 
+// OpenAI OCR via the Responses API with a native PDF file input — OpenAI
+// rasterizes server-side, so nothing is rendered in the edge worker (no MuPDF,
+// no OOM). Emits the same "=== PAGE n ===" markers the Claude path does, so the
+// downstream page-split / chunk / insert code is identical. Works while
+// api.anthropic.com is returning overloaded_error (different provider).
+async function ocrViaOpenAI(bytes: Uint8Array, apiKey: string, ocrPrompt: string): Promise<{ full: string; truncated: boolean }> {
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OCR_OPENAI_MODEL,
+      max_output_tokens: OCR_MAX_TOKENS,
+      input: [{
+        role: 'user',
+        content: [
+          { type: 'input_text', text: ocrPrompt },
+          { type: 'input_file', filename: 'document.pdf', file_data: `data:application/pdf;base64,${toBase64(bytes)}` },
+        ],
+      }],
+    }),
+  })
+  const d = await r.json()
+  if (!r.ok) throw new Error('OpenAI OCR error: ' + JSON.stringify(d))
+  // Walk output[].content[]: gather output_text and flag a structured refusal.
+  let full = ''
+  let refused = false
+  for (const item of (d.output ?? []) as Array<{ content?: Array<{ type?: string; text?: string }> }>) {
+    for (const c of (item.content ?? [])) {
+      if (c.type === 'output_text' && typeof c.text === 'string') full += c.text
+      else if (c.type === 'refusal') refused = true
+    }
+  }
+  if (!full && typeof d.output_text === 'string') full = d.output_text
+  // Vision models sometimes decline to transcribe a page (safety). Never store
+  // "I'm sorry, I can't..." as corpus text — treat it as empty so nothing writes.
+  if (refused || (/^\s*(i'?m sorry|i can'?t|i cannot|i'?m unable|i'?m not able)\b/i.test(full) && full.length < 300)) {
+    return { full: '', truncated: false }
+  }
+  const truncated = d.status === 'incomplete' || d.incomplete_details?.reason === 'max_output_tokens'
+  return { full, truncated }
+}
+
 serve(async (req) => {
   const CORS = corsHeaders(req)
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
@@ -460,21 +509,35 @@ serve(async (req) => {
 - Begin each page with a line "=== PAGE n ===" (n = the page number) so the text can be located.
 - Preserve dollar amounts, dates, section numbers, defined terms, and party names exactly as written.
 - If a page is blank or unreadable, still emit its "=== PAGE n ===" line followed by "[no legible text]".`
-      const aRes = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: OCR_MODEL, max_tokens: OCR_MAX_TOKENS,
-          messages: [{ role: 'user', content: [
-            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: toBase64(bytes) } },
-            { type: 'text', text: ocrPrompt },
-          ] }],
-        }),
-      })
-      const aData = await aRes.json()
-      if (!aRes.ok) throw new Error('OCR API error: ' + JSON.stringify(aData))
-      const truncated = aData.stop_reason === 'max_tokens'
-      const full = (aData.content ?? []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('')
+      // Provider: ?ocrProvider=openai routes to GPT-4o vision (works during an
+      // Anthropic overload); default is Claude native-PDF vision (existing path).
+      const ocrProvider = (url.searchParams.get('ocrProvider') ?? OCR_PROVIDER_DEFAULT).toLowerCase()
+      let full = ''
+      let truncated = false
+      let usedModel = OCR_MODEL
+      if (ocrProvider === 'openai') {
+        const oaiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
+        if (!oaiKey) throw new Error('OPENAI_API_KEY secret not set')
+        usedModel = OCR_OPENAI_MODEL
+        const res = await ocrViaOpenAI(bytes, oaiKey, ocrPrompt)
+        full = res.full; truncated = res.truncated
+      } else {
+        const aRes = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: OCR_MODEL, max_tokens: OCR_MAX_TOKENS,
+            messages: [{ role: 'user', content: [
+              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: toBase64(bytes) } },
+              { type: 'text', text: ocrPrompt },
+            ] }],
+          }),
+        })
+        const aData = await aRes.json()
+        if (!aRes.ok) throw new Error('OCR API error: ' + JSON.stringify(aData))
+        truncated = aData.stop_reason === 'max_tokens'
+        full = (aData.content ?? []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('')
+      }
 
       // Split on the page markers for attribution; fall back to one page-1 block.
       const pages: { page: number; text: string }[] = []
@@ -516,7 +579,7 @@ serve(async (req) => {
       await sb.from('documents').update({ is_indexed: true }).eq('id', reindexDocId)
       return new Response(JSON.stringify({
         success: true, ocr: true, document_id: reindexDocId, page_count: pageCount,
-        text_chunks: rows.length, model: OCR_MODEL, truncated,
+        text_chunks: rows.length, model: usedModel, provider: ocrProvider, truncated,
       }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
