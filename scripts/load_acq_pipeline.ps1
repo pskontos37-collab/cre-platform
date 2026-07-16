@@ -126,7 +126,7 @@ foreach($s in $sheetDeals){
   $p=@{}
   $curBucket = $BUCKET[[string]$e.stage]
   if($curBucket -ne $s.stage){          # different bucket -> sheet stage wins
-    if([string]$e.stage -ne $s.stage){ $p['stage']=$s.stage; $p['probability']=[decimal]$PROB[$s.stage] }
+    if([string]$e.stage -ne $s.stage){ $p['stage']=$s.stage; $p['probability']=[decimal]$PROB[$s.stage]; $p['stage_changed_at']=(Get-Date).ToUniversalTime().ToString('o') }
   }
   foreach($f in @('city','state','market')){ if($s.$f -and [string]$e.$f -ne [string]$s.$f){ $p[$f]=$s.$f } }
   function _d($v){ if($null -eq $v){ return [decimal]0 }; return [decimal]$v }
@@ -150,7 +150,7 @@ foreach($e in $existing){
   if($seen.ContainsKey($nk)){ continue }
   if($e.created_by){ continue }                       # in-app deals are never auto-retired
   if($ACTIVE -notcontains [string]$e.stage){ continue }
-  Patch $e.id @{ stage='passed'; probability=0; lost_reason=("Dropped from the weekly pipeline summary (" + [IO.Path]::GetFileName($Path) + ")") }
+  Patch $e.id @{ stage='passed'; probability=0; stage_changed_at=(Get-Date).ToUniversalTime().ToString('o'); lost_reason=("Dropped from the weekly pipeline summary (" + [IO.Path]::GetFileName($Path) + ")") }
   Write-Output ("  - retired (passed): {0}" -f $e.name); $retired++
 }
 

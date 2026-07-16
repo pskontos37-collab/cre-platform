@@ -215,9 +215,9 @@ function AcqAlerts({ deals, onOpen }: { deals: Deal[]; onOpen: (id: string) => v
           title={x => `${x.d.name} · ${STAGE_LABEL[x.d.stage]}${x.d.bidText ? ` · bid ${x.d.bidText}` : ''} · target close ${x.d.targetCloseDate}`} />
       )}
       {stalled.length > 0 && (
-        <AlertRow icon="⚠" label={`No recent activity (${stalled.length})`} chips={stalled} onOpen={onOpen}
-          metric={x => `${x.days}d idle`} color={() => 'var(--text-muted)'}
-          title={x => `${x.d.name} · ${STAGE_LABEL[x.d.stage]} · last updated ${x.d.updatedAt.slice(0, 10)}`} />
+        <AlertRow icon="⚠" label={`Aging in stage (${stalled.length})`} chips={stalled} onOpen={onOpen}
+          metric={x => `${x.days}d in stage`} color={() => 'var(--text-muted)'}
+          title={x => `${x.d.name} · ${STAGE_LABEL[x.d.stage]} since ${(x.d.stageChangedAt ?? x.d.updatedAt).slice(0, 10)}`} />
       )}
     </div>
   )

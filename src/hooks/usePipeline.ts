@@ -179,6 +179,7 @@ export interface Deal {
   folderPath: string | null
   folderFiles: { name: string; dir: boolean }[] | null
   ddPropertyId: string | null
+  stageChangedAt: string | null
   createdAt: string
   updatedAt: string
   lps: DealLp[]
@@ -244,7 +245,7 @@ const DEAL_SELECT =
   'gla_sf, year_built, stage, deal_source, broker, seller, partner, ask_price, price_text, ' +
   'going_in_cap, equity_required, total_capitalization, probability, target_close_date, bid_text, thesis, ' +
   'proj_irr, equity_multiple, avg_coc, hold_years, exit_cap, stabilized_yield, lost_reason, underwriting_model, ' +
-  'lead_member_id, analyst_member_id, property_id, transaction_id, folder_path, folder_files, dd_property_id, created_at, updated_at, ' +
+  'lead_member_id, analyst_member_id, property_id, transaction_id, folder_path, folder_files, dd_property_id, stage_changed_at, created_at, updated_at, ' +
   'property:property_id(name), lead:lead_member_id(full_name, initials), analyst:analyst_member_id(full_name, initials), ' +
   'pipeline_deal_lps(id, partner_id, status, soft_amount, committed_amount, notes, capital_partners(name))'
 
@@ -270,6 +271,7 @@ function mapDeal(r: any): Deal {
     lostReason: r.lost_reason ?? null, propertyId: r.property_id ?? null, propertyName: r.property?.name ?? null,
     transactionId: r.transaction_id ?? null, folderPath: r.folder_path ?? null, folderFiles: r.folder_files ?? null,
     ddPropertyId: r.dd_property_id ?? null,
+    stageChangedAt: r.stage_changed_at ?? null,
     createdAt: r.created_at, updatedAt: r.updated_at, lps,
   }
 }
@@ -437,6 +439,7 @@ export async function updateDeal(id: string, patch: DealPatch): Promise<void> {
   }
   if (patch.stage !== undefined) {
     row.stage = patch.stage
+    row.stage_changed_at = new Date().toISOString()   // reset the in-stage clock
     if (patch.probability === undefined) row.probability = STAGE_PROB[patch.stage]
   }
   if (patch.probability !== undefined) row.probability = patch.probability

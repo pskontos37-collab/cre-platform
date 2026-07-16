@@ -5,7 +5,8 @@
 import { isActiveStage, type Stage } from '../hooks/usePipeline'
 
 export const DEADLINE_SOON_DAYS = 45   // surface target closes within this window (or overdue)
-export const STALE_DAYS = 21           // active deals with no edit in this long are flagged
+export const STALE_DAYS = 21           // active deals sitting this long in one stage are flagged
+
 const DAY_MS = 86400000
 
 export interface AlertDeal {
@@ -14,11 +15,14 @@ export interface AlertDeal {
   stage: Stage
   targetCloseDate: string | null
   updatedAt: string
+  stageChangedAt?: string | null   // when the deal entered its current stage
   bidText?: string | null
 }
 export interface AlertItem<T> { d: T; days: number }
 
-/** Split active deals into upcoming/overdue close deadlines and no-recent-activity (stalled). */
+/** Split active deals into upcoming/overdue close deadlines and aging-in-stage (stalled).
+ *  Stalled = days in the current stage (stage_changed_at); falls back to updatedAt
+ *  for rows predating the stage_changed_at backfill. */
 export function computeAcqAlerts<T extends AlertDeal>(deals: T[], now: number): { deadlines: AlertItem<T>[]; stalled: AlertItem<T>[] } {
   const active = deals.filter(d => isActiveStage(d.stage))
   const deadlines = active
@@ -27,7 +31,7 @@ export function computeAcqAlerts<T extends AlertDeal>(deals: T[], now: number): 
     .filter(x => x.days <= DEADLINE_SOON_DAYS)
     .sort((a, b) => a.days - b.days)
   const stalled = active
-    .map(d => ({ d, days: Math.round((now - new Date(d.updatedAt).getTime()) / DAY_MS) }))
+    .map(d => ({ d, days: Math.round((now - new Date(d.stageChangedAt ?? d.updatedAt).getTime()) / DAY_MS) }))
     .filter(x => x.days >= STALE_DAYS)
     .sort((a, b) => b.days - a.days)
   return { deadlines, stalled }

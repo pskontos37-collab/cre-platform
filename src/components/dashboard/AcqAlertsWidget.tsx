@@ -24,6 +24,7 @@ interface DealRow {
   stage: Stage
   target_close_date: string | null
   updated_at: string
+  stage_changed_at: string | null
   bid_text: string | null
 }
 
@@ -35,7 +36,7 @@ export function AcqAlertsWidget(_props: AcqAlertsWidgetProps) {
     if (!canView) return []
     const { data, error } = await supabase
       .from('pipeline_deals')
-      .select('id, name, stage, target_close_date, updated_at, bid_text')
+      .select('id, name, stage, target_close_date, updated_at, stage_changed_at, bid_text')
       .limit(1000)
     if (error) throw new Error(error.message)
     return (data ?? []) as DealRow[]
@@ -44,7 +45,8 @@ export function AcqAlertsWidget(_props: AcqAlertsWidgetProps) {
   const alerts = useMemo(() => {
     const rows: AlertDeal[] = (deals.data ?? []).map(r => ({
       id: r.id, name: r.name, stage: r.stage,
-      targetCloseDate: r.target_close_date, updatedAt: r.updated_at, bidText: r.bid_text,
+      targetCloseDate: r.target_close_date, updatedAt: r.updated_at,
+      stageChangedAt: r.stage_changed_at, bidText: r.bid_text,
     }))
     return computeAcqAlerts(rows, Date.now())
   }, [deals.data])
@@ -78,7 +80,7 @@ export function AcqAlertsWidget(_props: AcqAlertsWidgetProps) {
           <Hero label="Deals needing attention" value={flagged.toLocaleString()} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1, background: 'var(--border)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginTop: 12 }}>
             {cell(`Close in ${DEADLINE_SOON_DAYS}d / overdue`, deadlines.length, overdue > 0 ? 'var(--red)' : 'var(--amber)')}
-            {cell(`No activity ${STALE_DAYS}d+`, stalled.length, 'var(--text-muted)')}
+            {cell(`In stage ${STALE_DAYS}d+`, stalled.length, 'var(--text-muted)')}
           </div>
           {top.length > 0 && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -93,7 +95,7 @@ export function AcqAlertsWidget(_props: AcqAlertsWidgetProps) {
             </div>
           )}
           <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 10, lineHeight: 1.5 }}>
-            Active pipeline deals with an approaching close or no recent activity.
+            Active pipeline deals with an approaching close or aging in one stage.
           </div>
         </>
       )}
