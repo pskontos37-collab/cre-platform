@@ -2187,7 +2187,7 @@ const sgHead: CSSProperties = { padding: '4px 9px', fontSize: 10.5, color: 'var(
 const sgCell: CSSProperties = { padding: '4px 9px', border: '1px solid var(--border)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
 // controlled numeric input for the underwriting model (local text, commit on blur)
 function MInput({ label, kind, value, onChange, disabled }: { label: string; kind: 'usd' | 'pct' | 'yr'; value: number; onChange: (v: number) => void; disabled?: boolean }) {
-  const disp = kind === 'pct' ? String(+(value * 100).toFixed(2)) : kind === 'usd' ? String(Math.round(value)) : String(value)
+  const disp = kind === 'pct' ? String(+(value * 100).toFixed(2)) : kind === 'usd' ? String(+value.toFixed(2)) : String(value)
   const [t, setT] = useState(disp)
   const commit = () => {
     const n = Number(t.replace(/[,$\s]/g, ''))
