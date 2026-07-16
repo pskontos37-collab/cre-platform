@@ -249,6 +249,10 @@ if ($seed) {
   $tp = @(); foreach ($x in @($seed.asset_type, $seed.risk_profile)) { if ($x) { $tp += $ti.ToTitleCase((([string]$x) -replace '_',' ')) } }
   if ($tp.Count) { $ds['propertyType'] = ($tp -join ' - ') }
 }
+# On a -FolderPath run with no pipeline deal, still give the sheet a property
+# name (the exec table and every section need it); the doc extractions can
+# override it if a document states a fuller legal name.
+if (Is-Empty $ds['propertyName']) { $ds['propertyName'] = $DealName }
 
 # ---------------------------------------------------------------------------
 # Classify, (optionally) extract, merge
