@@ -26,6 +26,7 @@ export const PAGES: PageDef[] = [
   { key: 'ask',         path: '/ask',         label: 'Ask AI',      icon: '✨', group: 'workspace' },
   { key: 'pipeline',    path: '/pipeline',    label: 'Pipeline',    icon: '📈', restricted: true, group: 'acquisitions' },
   { key: 'diligence',   path: '/diligence',   label: 'Diligence',   icon: '🔎', restricted: true, group: 'acquisitions' },
+  { key: 'ppm',         path: '/ppm',         label: 'PPM',         icon: '📃', restricted: true, group: 'acquisitions' },
   { key: 'properties',  path: '/properties',  label: 'Properties',  icon: '🏢', group: 'portfolio' },
   { key: 'siteplans',   path: '/siteplans',   label: 'Site Plans',  icon: '🗺', group: 'portfolio' },
   { key: 'financials',  path: '/financials',  label: 'Financials',  icon: '📊', restricted: true, group: 'portfolio' },

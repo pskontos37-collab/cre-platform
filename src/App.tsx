@@ -32,6 +32,7 @@ import { ServiceAgreementBuilderPage } from './pages/ServiceAgreementBuilderPage
 import { BrokeragePage } from './pages/BrokeragePage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { PipelinePage } from './pages/PipelinePage'
+import { PpmBuilderPage } from './pages/PpmBuilderPage'
 import { AdminPage } from './pages/AdminPage'
 import { WorkOrdersPage } from './pages/WorkOrdersPage'
 import { InsurancePage } from './pages/InsurancePage'
@@ -115,6 +116,18 @@ function AppRoutes() {
             <RequirePage pageKey="pipeline">
               <AppLayout>
                 <PipelinePage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ppm"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="ppm">
+              <AppLayout>
+                <PpmBuilderPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
