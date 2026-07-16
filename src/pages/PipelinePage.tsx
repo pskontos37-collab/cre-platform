@@ -23,7 +23,8 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { PdfDownloadButton, sanitizeFilename } from '../reports/PdfDownloadButton'
 import { underwrite, sensitivity, type AcqResult } from '../lib/acqUnderwriting'
 import { underwriteTenant } from '../lib/tenantUnderwriting'
-import type { UwLeaseLine, UwRollover, UwOpex, UwRefi } from '../hooks/usePipeline'
+import { computePromote, DEFAULT_PROMOTE } from '../lib/acqPromote'
+import type { UwLeaseLine, UwRollover, UwOpex, UwRefi, UwPromote, UwPromoteTier } from '../hooks/usePipeline'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
 // Analytics (funnel · investment-profile matrix · geo · partners), OM Intake
@@ -893,11 +894,40 @@ function MeetingDeckButton({ deals, preparedBy }: { deals: Deal[]; preparedBy: s
 // either format: a branded PDF or an EDITABLE PowerPoint modeled on the real
 // Investment Summary deck (cover banner, disclaimer, exec summary + property
 // table, rationale, tenancy, SWOT, capital & the ask). Both share one
+// Recompute the LP/GP promote from a saved underwriting model (for the IC memo /
+// Investment Summary). Returns null when the deal has no model or no promote set.
+function promoteForMemo(um: UnderwritingModel | null | undefined) {
+  if (!um || !um.promote) return null
+  const closeDate = new Date().toISOString().slice(0, 10)
+  const r: AcqResult = um.mode === 'tenant'
+    ? underwriteTenant({
+        glaSf: um.glaSf ?? 0, purchasePrice: um.purchasePrice, acqCostsPct: um.acqCostsPct, capexUpfront: um.capexUpfront,
+        holdYears: um.holdYears, exitCapPct: um.exitCapPct, sellingCostsPct: um.sellingCostsPct,
+        ltvPct: um.ltvPct, loanRatePct: um.loanRatePct, amortYears: um.amortYears,
+        ioYears: um.ioYears, loanFeePct: um.loanFeePct, refi: um.refi ?? null, closeDate,
+        leases: um.leases ?? [], rollover: um.rollover ?? D_ROLL, opex: um.opex ?? D_OPEX,
+      })
+    : underwrite({
+        purchasePrice: um.purchasePrice, acqCostsPct: um.acqCostsPct, capexUpfront: um.capexUpfront,
+        inPlaceNoi: um.inPlaceNoi, noiGrowthPct: um.noiGrowthPct, holdYears: um.holdYears,
+        exitCapPct: um.exitCapPct, sellingCostsPct: um.sellingCostsPct,
+        ltvPct: um.ltvPct, loanRatePct: um.loanRatePct, amortYears: um.amortYears,
+        ioYears: um.ioYears, loanFeePct: um.loanFeePct, refi: um.refi ?? null, closeDate,
+      })
+  const p = computePromote(r.leveredFlows, um.promote)
+  return {
+    lpEquityPct: um.promote.lpEquityPct, prefRate: um.promote.prefRate,
+    lpIrr: p.lpIrr, lpEm: p.lpEm, gpIrr: p.gpIrr, gpEm: p.gpEm,
+    gpPromote: p.gpPromote, gpPromotePctOfProfit: p.gpPromotePctOfProfit,
+  }
+}
+
 // AI-narrative fetch shape (ic-memo fn).
 function InvestmentSummaryButtons({ deal, preparedBy }: { deal: Deal; preparedBy: string }) {
   const buildInput = async () => {
     const memo = await generateIcMemo(deal.id)
     return {
+      promote: promoteForMemo(deal.underwritingModel),
       deal: {
         name: deal.name, assetType: deal.assetType, riskProfile: deal.riskProfile, subType: deal.subType,
         submarket: deal.submarket, city: deal.city, state: deal.state, glaSf: deal.glaSf, yearBuilt: deal.yearBuilt,
@@ -1037,6 +1067,56 @@ function UwReconciliation({ deal, modelNoi }: { deal: Deal; modelNoi: number }) 
     </div>
   )
 }
+// LP/GP promote: split the levered CF through the waterfall. Tier 1 is pari-passu
+// to the pref; each promote tier gives the GP a larger share above its hurdle.
+// UI convention: a hurdle of 0 means "residual / top tier" (stored as null).
+function UwPromotePanel({ r, promote, onChange, busy }: { r: AcqResult; promote: UwPromote | undefined; onChange: (p: UwPromote) => void; busy: boolean }) {
+  const p = promote ?? DEFAULT_PROMOTE
+  const pr = useMemo(() => computePromote(r.leveredFlows, p), [r.leveredFlows, p])
+  const gpEquityPct = Math.max(0, 1 - p.lpEquityPct)
+  const em = (x: number | null) => (x != null && isFinite(x) ? `${x.toFixed(2)}x` : '—')
+  const setTop = (patch: Partial<UwPromote>) => onChange({ ...p, ...patch })
+  const setTier = (i: number, patch: Partial<UwPromoteTier>) => onChange({ ...p, tiers: p.tiers.map((t, j) => (j === i ? { ...t, ...patch } : t)) })
+  const addTier = () => onChange({ ...p, tiers: [...p.tiers, { hurdleIrr: null, gpPct: 0.3 }] })
+  const delTier = (i: number) => onChange({ ...p, tiers: p.tiers.filter((_, j) => j !== i) })
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '11px 12px', display: 'flex', flexDirection: 'column', gap: 11 }}>
+      <SectionLabel2>LP / GP promote — {Math.round(p.lpEquityPct * 100)}/{Math.round(gpEquityPct * 100)} co-invest · {pct(p.prefRate)} pref pari-passu</SectionLabel2>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: 8 }}>
+        <Fact label="LP IRR" value={pct(pr.lpIrr)} tint={uwIrrColor(pr.lpIrr)} />
+        <Fact label="LP multiple" value={em(pr.lpEm)} />
+        <Fact label="LP profit" value={fmtM(pr.lpCash - pr.lpEquity)} />
+        <Fact label="GP IRR" value={pct(pr.gpIrr)} tint={uwIrrColor(pr.gpIrr)} />
+        <Fact label="GP multiple" value={em(pr.gpEm)} />
+        <Fact label="GP promote" value={fmtM(pr.gpPromote)} tint={pr.gpPromote > 0 ? '#2e8b57' : 'var(--text)'} />
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
+        GP earns {pct(pr.gpPromotePctOfProfit)} of profit as promote (deal levered IRR {pct(pr.dealLeveredIrr)}). LP equity {fmtM(pr.lpEquity)} · GP equity {fmtM(pr.gpEquity)}.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+        <MInput label="LP equity share" kind="pct" value={p.lpEquityPct} onChange={v => setTop({ lpEquityPct: Math.min(1, Math.max(0, v)) })} disabled={busy} />
+        <MInput label="Pref (pari-passu)" kind="pct" value={p.prefRate} onChange={v => setTop({ prefRate: Math.max(0, v) })} disabled={busy} />
+      </div>
+      <div>
+        <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 6 }}>Promote tiers (above pref · 0 hurdle = residual)</div>
+        <table style={{ borderCollapse: 'collapse', fontSize: 11.5 }}>
+          <thead><tr>{['Tier', 'To LP IRR', 'GP share', ''].map((h, i) => <th key={i} style={{ ...sgHead, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {p.tiers.map((t, i) => (
+              <tr key={i}>
+                <td style={{ ...sgCell, textAlign: 'left', color: 'var(--text-muted)' }}>{t.hurdleIrr == null ? 'Residual' : `Tier ${i + 1}`}</td>
+                <td style={sgCell}><input value={t.hurdleIrr != null ? +(t.hurdleIrr * 100).toFixed(2) : ''} placeholder="residual" disabled={busy} onChange={e => setTier(i, { hurdleIrr: e.target.value === '' || Number(e.target.value) <= 0 ? null : (Number(e.target.value) || 0) / 100 })} style={{ ...gridInput, textAlign: 'right', width: 66 }} /></td>
+                <td style={sgCell}><input value={+(t.gpPct * 100).toFixed(2)} disabled={busy} onChange={e => setTier(i, { gpPct: Math.min(1, Math.max(0, (Number(e.target.value) || 0) / 100)) })} style={{ ...gridInput, textAlign: 'right', width: 60 }} /></td>
+                <td style={sgCell}><button style={miniX} disabled={busy} onClick={() => delTier(i)} title="Remove">✕</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button style={{ ...ghostBtn, marginTop: 8 }} disabled={busy} onClick={addTier}>+ Add tier</button>
+      </div>
+    </div>
+  )
+}
 function UwSensitivity({ exitCaps, rows, irr, baseCol, baseRow }: { exitCaps: number[]; rows: number[]; irr: (number | null)[][]; baseCol: number; baseRow: number }) {
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -1106,10 +1186,12 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     exitCapPct: um?.exitCapPct ?? deal.exitCap ?? deal.goingInCap ?? 0.065, sellingCostsPct: um?.sellingCostsPct ?? 0.02,
     ltvPct: um?.ltvPct ?? 0.6, loanRatePct: um?.loanRatePct ?? 0.065, amortYears: um?.amortYears ?? 30,
     ioYears: um?.ioYears ?? 0, loanFeePct: um?.loanFeePct ?? 0, refi: um?.refi ?? null,
+    promote: um?.promote ?? DEFAULT_PROMOTE,
   }
   const [m, setM] = useState<UnderwritingModel>(seed)
   const [saved, setSaved] = useState(false)
   const set = (k: keyof UnderwritingModel) => (v: number) => { setM(p => ({ ...p, [k]: v })); setSaved(false) }
+  const setPromote = (promote: UwPromote) => { setM(p => ({ ...p, promote })); setSaved(false) }
   const today = new Date().toISOString().slice(0, 10)
   const r = useMemo(() => underwrite({ ...m, closeDate: today, refi: m.refi }), [m, today])
   const exitCaps = useMemo(() => [-0.005, -0.0025, 0, 0.0025, 0.005].map(d => +(m.exitCapPct + d).toFixed(4)).filter(x => x > 0), [m.exitCapPct])
@@ -1146,6 +1228,7 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
         </div>
       </div>
       <UwRefiEditor refi={m.refi ?? null} onChange={refi => { setM(p => ({ ...p, refi })); setSaved(false) }} busy={busy} />
+      <UwPromotePanel r={r} promote={m.promote} onChange={setPromote} busy={busy} />
       <div>
         <SectionLabel2>Levered IRR — exit cap (cols) &times; NOI growth (rows)</SectionLabel2>
         <UwSensitivity exitCaps={exitCaps} rows={growths} irr={grid.leveredIrr} baseCol={m.exitCapPct} baseRow={m.noiGrowthPct} />
@@ -1168,6 +1251,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     ioYears: um?.ioYears ?? 0, loanFeePct: um?.loanFeePct ?? 0, refi: um?.refi ?? null,
     mode: 'tenant', glaSf: um?.glaSf ?? deal.glaSf ?? 0,
     leases: um?.leases ?? [], rollover: { ...D_ROLL, ...(um?.rollover ?? {}) }, opex: { ...D_OPEX, ...(um?.opex ?? {}) },
+    promote: um?.promote ?? DEFAULT_PROMOTE,
   }
   const [m, setM] = useState<UnderwritingModel>(seed)
   const [saved, setSaved] = useState(false)
@@ -1322,6 +1406,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
       </div>
 
       <UwRefiEditor refi={m.refi ?? null} onChange={refi => { setM(p => ({ ...p, refi })); setSaved(false) }} busy={busy} />
+      <UwPromotePanel r={r} promote={m.promote} onChange={promote => { setM(p => ({ ...p, promote })); setSaved(false) }} busy={busy} />
 
       <div>
         <SectionLabel2>Levered IRR — exit cap (cols) &times; market-rent growth (rows)</SectionLabel2>

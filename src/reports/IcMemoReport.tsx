@@ -37,6 +37,12 @@ export interface IcMemoInput {
     lps: { partnerName: string; status: string; soft: number | null; committed: number | null }[]
     tenants: { name: string; sf: number | null; expiration: string | null }[]
   }
+  promote?: {
+    lpEquityPct: number; prefRate: number
+    lpIrr: number | null; lpEm: number | null
+    gpIrr: number | null; gpEm: number | null
+    gpPromote: number; gpPromotePctOfProfit: number
+  } | null
   memo: {
     headline?: string
     executive_summary?: string
@@ -78,7 +84,7 @@ function Para({ children }: { children: string }) {
 }
 function Divider() { return <View style={{ borderTopWidth: 0.75, borderTopColor: RULE, marginVertical: 12 }} /> }
 
-function IcMemoDoc({ deal, memo, preparedBy, generatedAt }: IcMemoInput) {
+function IcMemoDoc({ deal, memo, preparedBy, generatedAt, promote }: IcMemoInput) {
   const profile = `${RISK_LABEL[deal.riskProfile] ?? deal.riskProfile} ${ASSET_LABEL[deal.assetType] ?? deal.assetType}`
   const loc = [deal.city, deal.state].filter(Boolean).join(', ')
   const committed = deal.lps.reduce((a, l) => a + (l.committed ?? 0), 0)
@@ -164,6 +170,20 @@ function IcMemoDoc({ deal, memo, preparedBy, generatedAt }: IcMemoInput) {
           <Metric label="Soft-circled" value={fmt(soft)} />
           <Metric label="Remaining gap" value={fmt(gap)} tint={gap > 0 ? '#c25b52' : GREEN} />
         </View>
+        {promote ? (
+          <>
+            <Text style={{ fontSize: 7, letterSpacing: 0.8, color: TEXT_FAINT, fontFamily: 'Helvetica-Bold', marginBottom: 4 }}>
+              {`LP / GP PROMOTE — ${Math.round(promote.lpEquityPct * 100)}/${Math.round((1 - promote.lpEquityPct) * 100)} CO-INVEST, ${pct(promote.prefRate)} PREF, ${pct(promote.gpPromotePctOfProfit)} OF PROFIT TO GP`}
+            </Text>
+            <View style={{ flexDirection: 'row', marginBottom: 10 }}>
+              <Metric label="LP IRR" value={pct(promote.lpIrr)} tint={GREEN} />
+              <Metric label="LP multiple" value={promote.lpEm != null ? `${promote.lpEm.toFixed(2)}x` : '—'} />
+              <Metric label="GP IRR" value={pct(promote.gpIrr)} tint={GREEN} />
+              <Metric label="GP multiple" value={promote.gpEm != null ? `${promote.gpEm.toFixed(2)}x` : '—'} />
+              <Metric label="GP promote" value={fmt(promote.gpPromote)} />
+            </View>
+          </>
+        ) : null}
         {deal.lps.length > 0 ? (
           <>
             <TableHeader cols={['Capital partner', 'Status', 'Soft-circled', 'Committed']} widths={['40%', '24%', '18%', '18%']} />

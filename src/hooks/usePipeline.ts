@@ -121,7 +121,11 @@ export interface UnderwritingModel {
   leases?: UwLeaseLine[]
   rollover?: UwRollover
   opex?: UwOpex
+  // LP/GP promote (v3.4) — splits the levered CF into LP vs GP returns
+  promote?: UwPromote
 }
+export interface UwPromoteTier { hurdleIrr: number | null; gpPct: number }
+export interface UwPromote { lpEquityPct: number; prefRate: number; tiers: UwPromoteTier[] }
 export interface UwRefi { yearsFromClose: number; ltvPct: number; ratePct: number; amortYears: number; ioYears: number; costPct: number; capPct: number }
 export interface UwLeaseLine { name: string; sf: number; baseRentPsf: number; annualBumpPct: number; termRemainingYears: number; recovery: 'nnn' | 'gross' | 'base_year'; proRataSharePct?: number; baseYearOpexPsf?: number; salesPsf?: number; pctRentRate?: number; breakpointPsf?: number }
 export interface UwRollover { renewalProbPct: number; marketRentPsf: number; marketRentGrowthPct: number; downtimeMonths: number; tiNewPsf: number; tiRenewPsf: number; lcNewPsf: number; lcRenewPsf: number; freeRentMonthsNew: number; releaseTermYears?: number }

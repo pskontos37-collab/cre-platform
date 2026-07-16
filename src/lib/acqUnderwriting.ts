@@ -56,6 +56,9 @@ export interface AcqResult {
   valueAddSpreadPct: number        // stabilized yield-on-cost minus exit cap (development spread)
   dscrByYear: (number | null)[]    // NOI_t / debt service
   debtYieldByYear: (number | null)[] // NOI_t / loan balance_t
+  // dated cash-flow streams (for the LP/GP promote split) — contributions negative, distributions positive
+  leveredFlows: DatedFlow[]        // -equity at close, then levered CF incl. refi + net sale proceeds
+  unleveredFlows: DatedFlow[]      // -total basis at close, then NOI - capital + gross sale
 }
 
 /** Mid-hold cash-out refinance: at `yearsFromClose`, pay off the going-in loan and
@@ -200,6 +203,7 @@ export function computeReturns(inp: ReturnsInput): AcqResult {
     goingInYieldOnCostPct: totalBasis > 0 ? inp.noiByYear[0] / totalBasis : 0,
     valueAddSpreadPct: stabilizedYieldOnCostPct - inp.exitCapPct,
     dscrByYear, debtYieldByYear,
+    leveredFlows: lev, unleveredFlows: unlev,
   }
 }
 
