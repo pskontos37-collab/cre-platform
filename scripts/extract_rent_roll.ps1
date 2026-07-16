@@ -31,9 +31,9 @@ You are an acquisitions analyst at M&J Wilkow. The attached PDF is the RENT ROLL
 
 Rules:
 - One row per tenant/suite. name = tenant name; sf = leased square feet.
-- base_rent_psf = CURRENT annual base rent per SF (if the rent roll shows monthly rent or annual $ total, convert to annual $/SF using SF). Exclude recoveries/CAM from base rent.
+- base_rent_psf = CURRENT annual base rent PER SQUARE FOOT (annual rent / SF). This is NOT the annual total dollar rent. Retail/office base rents are typically ${8}-${60}/SF; if the rent roll shows a monthly amount, x12 then / SF; if it shows an annual total $, divide by SF. Exclude recoveries/CAM. If unsure, leave null rather than putting a total.
 - annual_bump_pct = contractual annual escalation as a decimal (3% -> 0.03); if fixed steps, approximate the average annual rate; null if flat/unknown.
-- term_remaining_years = years from TODAY ($today) to lease expiration (decimal ok); month-to-month -> 0.5; null if unknown.
+- term_remaining_years = years from TODAY ($today) to lease expiration (decimal ok); month-to-month or holdover/expired -> 0.5; NEVER negative; null if unknown.
 - recovery: 'nnn' if tenant reimburses CAM/tax/insurance (triple net), 'gross' if full-service/gross, 'base_year' if base-year stop. Retail is usually nnn.
 - gla_sf = total building GLA if stated. recoverable_opex_psf / non_recoverable_opex_psf = annual $/SF if the rent roll or notes state operating expenses (else null). market_rent_psf = stated market/asking rent if shown.
 - EXTRACT ONLY what the rent roll shows; use null for anything absent. Do NOT invent rents.
@@ -47,7 +47,7 @@ $SCHEMA
     messages=@(@{ role='user'; content=$content }) } | ConvertTo-Json -Depth 12
   [System.IO.File]::WriteAllText($TMP,$body,$enc)
   $resp = & curl.exe -s "https://api.anthropic.com/v1/messages" -H "x-api-key: $ANTH" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" --data-binary "@$TMP" | ConvertFrom-Json
-  if($resp.error){ throw ("anthropic: " + $resp.error.message) }
+  if($resp.error){ $em = if($resp.error.message -is [string]){ $resp.error.message } else { ($resp.error | ConvertTo-Json -Compress -Depth 6) }; throw ("anthropic: " + $em) }
   $tu = $resp.content | Where-Object { $_.type -eq 'tool_use' } | Select-Object -First 1
   if(-not $tu){ throw "no tool_use in response" }
   return $tu.input
@@ -73,27 +73,42 @@ foreach($d in $deals){
   if(-not $Apply){ continue }
 
   try { $r = Extract-RentRoll $doc $d.name } catch { Write-Output ("    !! extraction failed: {0}" -f $_.Exception.Message); $fail++; continue }
+  $RENT_CEIL = 200   # no retail/office base rent exceeds ~$200/SF; above = a mis-parsed total
   $leases = @()
   foreach($t in @($r.leases)){
     if(-not $t.name -or $null -eq $t.sf){ continue }
-    $leases += @{ name=[string]$t.name; sf=[double]$t.sf; baseRentPsf=[double]($t.base_rent_psf); annualBumpPct=[double]($(if($null -ne $t.annual_bump_pct){$t.annual_bump_pct}else{0.03})); termRemainingYears=[double]($(if($null -ne $t.term_remaining_years){$t.term_remaining_years}else{5})); recovery=(Norm-Recovery ([string]$t.recovery)) }
+    $sf = [double]$t.sf
+    $rent = [double]($t.base_rent_psf)
+    if($sf -gt 0 -and $rent -gt $RENT_CEIL){ $rent = $rent / $sf }   # looks like an annual total -> per SF
+    if($rent -gt $RENT_CEIL -or $rent -lt 0){ $rent = 0 }             # still implausible -> unknown (analyst fills)
+    $term = [double]($(if($null -ne $t.term_remaining_years){$t.term_remaining_years}else{5}))
+    if($term -lt 0){ $term = 0.5 }
+    $bump = [double]($(if($null -ne $t.annual_bump_pct){$t.annual_bump_pct}else{0.03}))
+    if($bump -lt 0 -or $bump -gt 0.15){ $bump = 0.03 }
+    $leases += @{ name=[string]$t.name; sf=$sf; baseRentPsf=[math]::Round($rent,2); annualBumpPct=$bump; termRemainingYears=$term; recovery=(Norm-Recovery ([string]$t.recovery)) }
   }
   if($leases.Count -eq 0){ Write-Output "    -> no lease lines extracted"; continue }
 
   $gla = $(if($null -ne $r.gla_sf -and [double]$r.gla_sf -gt 0){[double]$r.gla_sf}elseif($null -ne $d.gla_sf){[double]$d.gla_sf}else{ ($leases | Measure-Object -Property sf -Sum).Sum })
-  $avgInPlace = if($leases.Count){ (($leases | ForEach-Object { $_.baseRentPsf }) | Measure-Object -Average).Average }else{0}
-  $mkt = $(if($null -ne $r.market_rent_psf -and [double]$r.market_rent_psf -gt 0){[double]$r.market_rent_psf}else{[math]::Round($avgInPlace,2)})
+  # market rent = SF-weighted average of the (corrected, non-zero) in-place rents
+  $paid = @($leases | Where-Object { $_.baseRentPsf -gt 0 })
+  $sumSf = ($paid | ForEach-Object { $_.sf } | Measure-Object -Sum).Sum
+  $sumRent = ($paid | ForEach-Object { $_.sf * $_.baseRentPsf } | Measure-Object -Sum).Sum
+  $avgInPlace = if($sumSf -gt 0){ $sumRent / $sumSf }else{0}
+  $mkt = $(if($null -ne $r.market_rent_psf -and [double]$r.market_rent_psf -gt 0 -and [double]$r.market_rent_psf -le $RENT_CEIL){[double]$r.market_rent_psf}else{[math]::Round($avgInPlace,2)})
   $recOpex = $(if($null -ne $r.recoverable_opex_psf){[double]$r.recoverable_opex_psf}else{0})
   $nonRec = $(if($null -ne $r.non_recoverable_opex_psf){[double]$r.non_recoverable_opex_psf}else{0})
 
-  $model = @{
+  # NB: local must NOT be named $model — that collides (case-insensitive) with the
+  # [string]$Model param and its type constraint coerces the hashtable to a string.
+  $uwm = @{
     purchasePrice=[double]($(if($d.ask_price){$d.ask_price}else{0})); acqCostsPct=0.02; capexUpfront=0; inPlaceNoi=0; noiGrowthPct=0.03;
     holdYears=5; exitCapPct=[double]($(if($d.going_in_cap){$d.going_in_cap}else{0.065})); sellingCostsPct=0.02;
     ltvPct=0.6; loanRatePct=0.065; amortYears=30; mode='tenant'; glaSf=[double]$gla; leases=$leases;
     rollover=@{ renewalProbPct=0.7; marketRentPsf=$mkt; marketRentGrowthPct=0.03; downtimeMonths=6; tiNewPsf=30; tiRenewPsf=10; lcNewPsf=15; lcRenewPsf=5; freeRentMonthsNew=3 };
     opex=@{ recoverableOpexPsf=$recOpex; nonRecoverableOpexPsf=$nonRec; opexGrowthPct=0.03; generalVacancyPct=0; creditLossPct=0.005; capitalReservePsf=0.25; otherIncomePsf=0 }
   }
-  $patch = @{ underwriting_model=$model; updated_at=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 12
+  $patch = @{ underwriting_model=$uwm; updated_at=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 12
   [System.IO.File]::WriteAllText($TMP,$patch,$enc)
   $pc = & curl.exe -s -o NUL -w "%{http_code}" -X PATCH "$BASE/rest/v1/pipeline_deals?id=eq.$($d.id)" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP"
   if([int]$pc -ge 200 -and [int]$pc -lt 300){ Write-Output ("    -> POPULATED {0} tenants (GLA {1:N0}, mkt ${2}/sf)" -f $leases.Count, $gla, $mkt); $done++ }
