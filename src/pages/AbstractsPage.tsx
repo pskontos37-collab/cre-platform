@@ -104,6 +104,8 @@ export function AbstractsPage() {
   const [genError, setGenError] = useState<string | null>(null)
   const [view, setView] = useState<'tenant' | 'clause'>('tenant')
   const [clause, setClause] = useState('co_tenancy')
+  // Focus mode: collapse the tenant rail so a single abstract reads near-full-width.
+  const [listCollapsed, setListCollapsed] = useState(false)
 
   const byTenant = useMemo(() => {
     const m = new Map<string, AbstractRow>()
@@ -202,7 +204,7 @@ export function AbstractsPage() {
   const selectedAbstract = selected ? byTenant.get(selected.toLowerCase()) : null
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 1100 }}>
+    <div style={{ padding: '24px 32px', maxWidth: listCollapsed && view === 'tenant' ? 'none' : 1100 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
         <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Lease Abstracts</span>
         <AccuracyChip />
@@ -231,6 +233,14 @@ export function AbstractsPage() {
           <ModeButton label="By tenant" active={view === 'tenant'} onClick={() => setView('tenant')} />
           <ModeButton label="Clause matrix" active={view === 'clause'} onClick={() => setView('clause')} />
         </div>
+        {view === 'tenant' && selectedAbstract && (
+          <button onClick={() => setListCollapsed(c => !c)}
+            title={listCollapsed ? 'Show the tenant list' : 'Hide the tenant list for a wider, near-full-screen abstract'}
+            style={{ fontSize: 12, padding: '5px 12px', borderRadius: 20, cursor: 'pointer',
+              border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+            {listCollapsed ? '❯ Show tenants' : '❮ Focus abstract'}
+          </button>
+        )}
         <GenerateAllButton
           tenants={tenants.data ?? []}
           byTenant={byTenant}
@@ -264,7 +274,8 @@ export function AbstractsPage() {
       <RefreshLogBanner onJump={t => { setSelected(t); setView('tenant') }} />
 
       {view === 'tenant' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: listCollapsed ? '1fr' : '320px 1fr', gap: 16 }}>
+          {!listCollapsed && (
           <Widget title="Tenants" chip={tenants.data ? `${tenants.data.length} active` : undefined}>
             {tenants.loading && <WidgetSkeleton rows={10} />}
             {tenants.error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{tenants.error}</div>}
@@ -297,6 +308,7 @@ export function AbstractsPage() {
               })}
             </div>
           </Widget>
+          )}
 
           <div>
             {!selectedAbstract && (
@@ -522,12 +534,23 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
   const a = applyOverrides(row.abstract, row.overrides) ?? {}
   // Click-to-provision links search the abstract's own source documents.
   const srcIds: string[] = row.source_doc_ids ?? []
+  // Parse open items once (severity + optional field tag + stable footnote #),
+  // and expose a keyword matcher so applicable sections above can footnote the
+  // exact item below. Matches the item's [field] tag first, then its text.
+  const openItems = parseOpenItems(a.open_items ?? [])
+  const footnotesFor = (keywords: string[]): number[] =>
+    openItems.filter(p => {
+      const hay = `${p.field ?? ''} ${p.text}`.toLowerCase()
+      return keywords.some(k => hay.includes(k.toLowerCase()))
+    }).map(p => p.n)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
           {row.human_verified && <span style={{ color: 'var(--green, #22c55e)', fontWeight: 700 }}>🔒 Human-verified · </span>}
-          Generated {new Date(row.generated_at).toLocaleString()} · {row.source_doc_ids?.length ?? 0} source documents{row.human_verified ? '' : ' · verify against the source lease before relying on it'}
+          Generated {new Date(row.generated_at).toLocaleString()} · {srcIds.length > 0
+            ? <a href="#abstract-source-docs" onClick={e => scrollToId(e, 'abstract-source-docs')} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{srcIds.length} source documents ↓</a>
+            : '0 source documents'}{row.human_verified ? '' : ' · verify against the source lease before relying on it'}
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={onVerify} disabled={verifying || busy}
@@ -542,9 +565,13 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
         </div>
       </div>
 
+      <TriagePanel qa={row.qa} openItems={openItems} />
+
       <ReviewPanel row={row} onSaved={onSaved} reviewerId={reviewerId} />
 
-      {row.qa && <QaPanel qa={row.qa} status={row.qa_status} at={row.qa_at} sourceDocIds={row.source_doc_ids ?? []} />}
+      {row.qa && <div id="abstract-verification"><QaPanel qa={row.qa} status={row.qa_status} at={row.qa_at} sourceDocIds={row.source_doc_ids ?? []} /></div>}
+
+      <div id="abstract-source-docs"><SourceDocsPanel docIds={srcIds} /></div>
 
       <Widget title={`${a.trade_name ?? row.tenant_name} — Lease Abstract`} chip={a.suite ? `Suite ${a.suite}` : undefined}>
         <Grid>
@@ -552,8 +579,8 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
           <Fact k="Tenant legal name" v={a.tenant_legal_name} />
           <Fact k="Suite" v={a.suite} />
           <Fact k="Square footage" v={a.square_footage?.toLocaleString?.() ?? a.square_footage} />
-          <Fact k="Rent commencement" v={a.term?.rent_commencement} sub={a.term?.rcd_basis} />
-          <Fact k="Expiration" v={a.term?.expiration} sub={a.term?.expiration_basis} />
+          <Fact k="Rent commencement" v={a.term?.rent_commencement} sub={a.term?.rcd_basis} foot={footnotesFor(['rent commencement', 'rcd', 'commencement'])} />
+          <Fact k="Expiration" v={a.term?.expiration} sub={a.term?.expiration_basis} foot={footnotesFor(['expiration', 'term end', 'lease exp'])} />
           <Fact k="Term (yrs)" v={a.term?.term_years} />
           <Fact k="Guarantor" v={a.guarantor?.exists ? `${a.guarantor.name ?? 'Yes'}${a.guarantor.section ? ` [${a.guarantor.section}]` : ''}` : 'None'} />
           {(a.term?.original_commencement || a.term?.current_term_start) && (<>
@@ -584,14 +611,14 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
                 rows={a.lease_documents.map((d: any) => [d.type, d.date, d.signed, d.notes])} />}
       </Widget>
 
-      <Widget title="Base / minimum rent">
+      <Widget title="Base / minimum rent" chip={<Footnote nums={footnotesFor(['rent schedule', 'base rent', 'current-term rent', 'psf', 'annual rent', 'monthly'])} />}>
         {(a.base_rent_schedule ?? []).length === 0
           ? <MissingNote what="No rent schedule found in the reviewed documents" />
           : <MiniTable head={['Start', 'End', '$ PSF', 'Monthly', 'Annual']}
               rows={a.base_rent_schedule.map((r: any) => [r.start, r.end, r.psf, fmtMoney(r.monthly), fmtMoney(r.annual)])} />}
       </Widget>
 
-      <Widget title="Options" chip={(a.options ?? [])[0]?.section}>
+      <Widget title="Options" chip={<>{(a.options ?? [])[0]?.section ?? ''}<Footnote nums={footnotesFor(['option', 'notice by', 'notice deadline', 'renewal'])} /></>}>
         {(a.options ?? []).length === 0
           ? <MissingNote what="No renewal/extension options found" />
           : (a.options ?? []).some((o: any) => o.status || o.notice_by)
@@ -618,7 +645,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
       </Widget>
 
       <Widget title="Reimbursements — CAM / RET / Insurance" chip={a.cam?.section}>
-        <LongFact k="CAM methodology" v={a.cam?.methodology} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="CAM methodology" v={a.cam?.methodology} src={{ citation: a.cam?.section, docIds: srcIds }} foot={footnotesFor(['cam', 'common area', 'reimburs'])} />
         <LongFact k="CAM exact language" v={a.cam?.details_exact_language} src={{ citation: a.cam?.section, docIds: srcIds }} />
         <LongFact k="Pro-rata share calc / denominator" v={a.cam?.prorata_share_calc} src={{ citation: a.cam?.section, docIds: srcIds }} />
         <LongFact k="Definition of shopping center" v={a.cam?.shopping_center_definition} src={{ citation: a.cam?.section, docIds: srcIds }} />
@@ -632,7 +659,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
 
       <Widget title="Key clauses">
         <LongFact k={`Co-tenancy ${a.co_tenancy?.section ? `[${a.co_tenancy.section}]` : ''}`} v={a.co_tenancy?.exists ? a.co_tenancy.exact_language_and_remedies : 'None'}
-          src={{ quote: a.co_tenancy?.exact_language_and_remedies, citation: a.co_tenancy?.section, docIds: srcIds }} />
+          src={{ quote: a.co_tenancy?.exact_language_and_remedies, citation: a.co_tenancy?.section, docIds: srcIds }} foot={footnotesFor(['co-tenancy', 'cotenancy', 'co tenancy'])} />
         <LongFact k="Replacement tenants" v={a.co_tenancy?.replacement_tenants_permitted}
           src={{ citation: a.co_tenancy?.section, docIds: srcIds }} />
         <LongFact k={`Exclusives — tenant's own protection ${a.exclusives?.section ? `[${a.exclusives.section}]` : ''}`}
@@ -641,7 +668,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
                a.exclusives.remedies ? `REMEDIES: ${a.exclusives.remedies}` : null,
                a.exclusives.conditions ? `CONDITIONS: ${a.exclusives.conditions}` : null].filter(Boolean).join('\n')
             : 'None'}
-          src={{ quote: a.exclusives?.exact_language, citation: a.exclusives?.section, docIds: srcIds }} />
+          src={{ quote: a.exclusives?.exact_language, citation: a.exclusives?.section, docIds: srcIds }} foot={footnotesFor(['exclusive'])} />
         {a.use_restrictions_on_tenant !== undefined && (
           <LongFact k={`Use restrictions ON tenant (others' exclusives) ${a.use_restrictions_on_tenant?.source_exhibit ? `[${a.use_restrictions_on_tenant.source_exhibit}]` : a.use_restrictions_on_tenant?.section ? `[${a.use_restrictions_on_tenant.section}]` : ''}`}
             v={a.use_restrictions_on_tenant?.exists ? a.use_restrictions_on_tenant.exact_language : 'None'}
@@ -699,15 +726,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
         </Widget>
       )}
 
-      {(a.open_items ?? []).length > 0 && (
-        <Widget title="Open items / missing documents" chip={`${a.open_items.length}`}>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {a.open_items.map((x: string, i: number) => (
-              <li key={i} style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 4 }}>{x}</li>
-            ))}
-          </ul>
-        </Widget>
-      )}
+      {openItems.length > 0 && <OpenItemsPanel items={openItems} sourceDocIds={srcIds} />}
     </div>
   )
 }
@@ -730,6 +749,238 @@ const VERDICT_META: Record<string, { color: string; label: string }> = {
   discrepancy:  { color: 'var(--red, #ef4444)',   label: 'Discrepancy' },
   unsupported:  { color: 'var(--red, #ef4444)',   label: 'Unsupported' },
   needs_source: { color: 'var(--amber)',           label: 'Needs source' },
+}
+
+// ── Open items: severity, footnotes, source links ──────────────────────────
+// The lease-abstract edge fn tags each open item with a de-facto severity via a
+// prefix convention: "DISCREPANCY:" = a conflict/error a human must resolve,
+// "CONFIRM:" = a value to verify against a source outside this request, anything
+// else = an informational gap / missing document. Newer generations may also
+// prepend an optional "[field.path]" tag so the section footnotes can point at
+// the exact item. Kept as strings on the record (PDF-report-safe); parsed here.
+type OpenSeverity = 'discrepancy' | 'confirm' | 'info'
+interface ParsedOpenItem { severity: OpenSeverity; field: string | null; text: string; n: number }
+// CONFIRM + DISCREPANCY are the attention tier (red); MISSING-doc / not-reviewed
+// notes are informational (neutral) so the eye lands on what needs action.
+// Distinct icons keep a discrepancy (hard conflict) legible from a confirm.
+const OPEN_META: Record<OpenSeverity, { color: string; bg: string; icon: string; label: string }> = {
+  discrepancy: { color: 'var(--red, #ef4444)', bg: 'rgba(239,68,68,0.12)', icon: '✗', label: 'Discrepancy' },
+  confirm:     { color: 'var(--red, #ef4444)', bg: 'rgba(239,68,68,0.07)', icon: '⚑', label: 'Confirm' },
+  info:        { color: 'var(--text-muted)',   bg: 'var(--surface-2)',     icon: '○', label: 'Missing / note' },
+}
+function parseOpenItems(items: any[]): ParsedOpenItem[] {
+  return (items ?? []).map((x, i) => {
+    const n = i + 1  // stable footnote number, in the record's original order
+    // Forward-compatible with a structured {severity, field, text} object.
+    if (x && typeof x === 'object') {
+      const sev: OpenSeverity = (['discrepancy', 'confirm', 'info'] as const).includes(x.severity) ? x.severity : 'info'
+      return { severity: sev, field: x.field ?? null, text: String(x.text ?? ''), n }
+    }
+    let rest = String(x ?? '').trim()
+    let severity: OpenSeverity = 'info'
+    const m = /^(DISCREPANCY|CONFIRM)\s*:\s*/i.exec(rest)
+    if (m) { severity = m[1].toUpperCase() === 'DISCREPANCY' ? 'discrepancy' : 'confirm'; rest = rest.slice(m[0].length) }
+    let field: string | null = null
+    const f = /^\[([^\]]+)\]\s*/.exec(rest)
+    if (f) { field = f[1].trim(); rest = rest.slice(f[0].length) }
+    return { severity, field, text: rest, n }
+  })
+}
+// If an open item embeds a verbatim quote (≥25 chars) we can pinpoint it in the
+// PDFs; otherwise the reviewer opens the file from the Source documents panel.
+function quotedFragment(text: string): string | null {
+  const m = /["“]([^"”]{25,})["”]/.exec(text)
+  return m ? m[1] : null
+}
+// Smooth-scroll + brief flash to an anchor id (footnote / triage jump targets).
+function scrollToId(e: React.MouseEvent, id: string) {
+  const el = document.getElementById(id)
+  if (!el) return
+  e.preventDefault()
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const prev = el.style.boxShadow
+  el.style.boxShadow = '0 0 0 2px var(--amber)'
+  setTimeout(() => { el.style.boxShadow = prev }, 1200)
+}
+// Superscript footnote link(s) that jump to the matching open item(s) below.
+function Footnote({ nums }: { nums: number[] }) {
+  if (!nums.length) return null
+  return (
+    <sup style={{ fontSize: 9, marginLeft: 2 }}>
+      {nums.map((n, i) => (
+        <a key={n} href={`#open-item-${n}`} onClick={e => scrollToId(e, `open-item-${n}`)}
+          title="See the matching open item below"
+          style={{ color: 'var(--amber)', fontWeight: 700, textDecoration: 'none', marginLeft: i ? 3 : 0 }}>
+          [{n}]
+        </a>
+      ))}
+    </sup>
+  )
+}
+// Jump link used in-line where a field is empty ("see open items ↓").
+function OpenItemsJump() {
+  return (
+    <a href="#abstract-open-items" onClick={e => scrollToId(e, 'abstract-open-items')}
+      style={{ color: 'var(--amber)', textDecoration: 'none', fontWeight: 600 }}>see Open items ↓</a>
+  )
+}
+
+// Open a document's signed PDF in a new tab.
+async function openDocPdf(storagePath: string | null) {
+  if (!storagePath) return
+  const { data } = await supabase.storage.from('documents').createSignedUrl(storagePath, 3600)
+  if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+}
+interface DocMeta { id: string; title: string | null; file_name: string | null; storage_path: string | null; tenant_id: string | null; property_id: string | null }
+function DocRow({ d, used }: { d: DocMeta; used?: boolean }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 6px', borderRadius: 6 }}>
+      {used !== undefined && (
+        <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap',
+          color: used ? 'var(--accent)' : 'var(--text-faint)', background: used ? 'var(--accent-dim)' : 'var(--surface-2)' }}>
+          {used ? 'used' : 'not used'}
+        </span>
+      )}
+      <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        title={d.title ?? d.file_name ?? ''}>{d.title ?? d.file_name ?? 'Untitled document'}</span>
+      <button onClick={() => void openDocPdf(d.storage_path)} disabled={!d.storage_path}
+        title={d.storage_path ? 'Open the source PDF' : 'No stored file for this document'}
+        style={{ fontSize: 10, fontWeight: 600, padding: '2px 10px', borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: d.storage_path ? 'var(--accent)' : 'var(--text-faint)', cursor: d.storage_path ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>
+        Open PDF ↗
+      </button>
+    </div>
+  )
+}
+// The abstract's underlying source files, each opening the signed PDF in a new
+// tab. This is the reliable way into a document when the quote-locator can't
+// pinpoint a passage (scanned wording differs from indexed text ~40% of the
+// corpus). "Browse all documents" opens the tenant's WHOLE folder — including
+// files the abstractor did NOT use as a source — so a reviewer can check a
+// discrepancy against a document the abstract may have missed.
+function SourceDocsPanel({ docIds }: { docIds: string[] }) {
+  const [showAll, setShowAll] = useState(false)
+  const sources = useQuery<DocMeta[]>(async () => {
+    if (!docIds.length) return []
+    const { data, error } = await supabase.from('documents')
+      .select('id, title, file_name, storage_path, tenant_id, property_id').in('id', docIds)
+    if (error) throw new Error(error.message)
+    return (data ?? []) as DocMeta[]
+  }, [docIds.join(',')])
+  const tenantId = (sources.data ?? []).map(d => d.tenant_id).find(Boolean) ?? null
+  const propertyId = (sources.data ?? []).map(d => d.property_id).find(Boolean) ?? null
+  const scope: 'tenant' | 'property' | null = tenantId ? 'tenant' : propertyId ? 'property' : null
+  // The tenant's full document set, loaded only when the reviewer expands it.
+  const all = useQuery<DocMeta[]>(async () => {
+    if (!showAll || !scope) return []
+    let q = supabase.from('documents').select('id, title, file_name, storage_path, tenant_id, property_id')
+    q = scope === 'tenant' ? q.eq('tenant_id', tenantId) : q.eq('property_id', propertyId)
+    const { data, error } = await q.limit(500)
+    if (error) throw new Error(error.message)
+    return ((data ?? []) as DocMeta[]).sort((a, b) =>
+      (a.title ?? a.file_name ?? '').localeCompare(b.title ?? b.file_name ?? ''))
+  }, [showAll, scope, tenantId, propertyId])
+  if (!docIds.length) return null
+  const srcSet = new Set(docIds)
+  return (
+    <Widget title="Source documents" chip={`${docIds.length}`}>
+      {sources.loading && <WidgetSkeleton rows={3} />}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {(sources.data ?? []).map(d => <DocRow key={d.id} d={d} />)}
+      </div>
+      {scope && (
+        <button onClick={() => setShowAll(s => !s)}
+          style={{ marginTop: 8, fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+          {showAll ? 'Hide all documents ▴' : `Browse all ${scope} documents ▾`}
+        </button>
+      )}
+      {showAll && scope && (
+        <div style={{ marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>
+            Every document filed under this {scope} — including files not used to build this abstract. Check a discrepancy against anything the abstractor may have missed.
+          </div>
+          {all.loading && <WidgetSkeleton rows={4} />}
+          {!all.loading && (all.data ?? []).length === 0 && <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>No other documents on file.</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 320, overflowY: 'auto' }}>
+            {(all.data ?? []).map(d => <DocRow key={d.id} d={d} used={srcSet.has(d.id)} />)}
+          </div>
+        </div>
+      )}
+    </Widget>
+  )
+}
+
+// Open items, color-graded by severity (discrepancies first, then confirms, then
+// informational gaps) and numbered so the section footnotes above can point here.
+// A verbatim quote inside an item gets a click-to-source link.
+function OpenItemsPanel({ items, sourceDocIds }: { items: ParsedOpenItem[]; sourceDocIds: string[] }) {
+  const order: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
+  const sorted = [...items].sort((a, b) => order[a.severity] - order[b.severity])
+  const counts = { discrepancy: 0, confirm: 0, info: 0 } as Record<OpenSeverity, number>
+  items.forEach(p => counts[p.severity]++)
+  const chip = [
+    counts.discrepancy ? `${counts.discrepancy} discrepancy` : null,
+    counts.confirm ? `${counts.confirm} confirm` : null,
+    `${items.length} total`,
+  ].filter(Boolean).join(' · ')
+  return (
+    <div id="abstract-open-items">
+      <Widget title="Open items / missing documents" chip={chip}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {sorted.map(p => {
+            const m = OPEN_META[p.severity]
+            const q = quotedFragment(p.text)
+            return (
+              <div key={p.n} id={`open-item-${p.n}`}
+                style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '6px 8px', borderRadius: 6, background: m.bg }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: m.color, minWidth: 16 }}>{p.n}.</span>
+                <span style={{ fontSize: 11, color: m.color }} title={m.label}>{m.icon}</span>
+                <span style={{ fontSize: 12, color: p.severity !== 'info' ? 'var(--text)' : 'var(--text-muted)', flex: 1, lineHeight: 1.45, fontWeight: p.severity === 'discrepancy' ? 600 : p.severity === 'confirm' ? 500 : 400 }}>
+                  {p.field && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 6 }}>{p.field}</span>}
+                  {p.text}
+                  {q && <SourceLink quote={q} citation={p.field ?? ''} sourceDocIds={sourceDocIds} />}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </Widget>
+    </div>
+  )
+}
+
+// "Needs a human" triage: one always-open box at the top consolidating every
+// signal a reviewer must resolve — QA field flags, arithmetic failures, MRI
+// conflicts, and discrepancy/confirm open items — each linking down to its
+// detail. Renders nothing on a clean abstract.
+function TriagePanel({ qa, openItems }: { qa: any; openItems: ParsedOpenItem[] }) {
+  const checks: any[] = Array.isArray(qa?.field_checks) ? qa.field_checks : []
+  const flagged = checks.filter(c => c?.verdict && c.verdict !== 'confirmed')
+  const arith: any[] = (Array.isArray(qa?.arithmetic) ? qa.arithmetic : []).filter((a: any) => a?.ok === false)
+  const mri: any[] = Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : []
+  const oiAction = openItems.filter(p => p.severity !== 'info')
+  const total = flagged.length + arith.length + mri.length + oiAction.length
+  if (!total) return null
+  const Row = ({ color, tag, text, id }: { color: string; tag: string; text: string; id: string }) => (
+    <a href={`#${id}`} onClick={e => scrollToId(e, id)}
+      style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '5px 8px', borderRadius: 6, textDecoration: 'none' }}>
+      <span style={{ fontSize: 10, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: 78, whiteSpace: 'nowrap' }}>{tag}</span>
+      <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
+      <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>→</span>
+    </a>
+  )
+  return (
+    <div style={{ border: '1px solid var(--red, #ef4444)', background: 'rgba(239,68,68,0.06)', borderRadius: 12, padding: '10px 14px' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red, #ef4444)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+        Needs a human — {total} item{total === 1 ? '' : 's'}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {flagged.map((c, i) => <Row key={`f${i}`} color={VERDICT_META[c.verdict]?.color ?? 'var(--red, #ef4444)'} tag={VERDICT_META[c.verdict]?.label ?? c.verdict} text={`${c.field}${c.note ? ` — ${c.note}` : ''}`} id="abstract-verification" />)}
+        {arith.map((x, i) => <Row key={`a${i}`} color="var(--red, #ef4444)" tag="Arithmetic" text={`${x.check}${x.detail ? ` — ${x.detail}` : ''}`} id="abstract-verification" />)}
+        {mri.map((x, i) => <Row key={`m${i}`} color="var(--accent)" tag="MRI conflict" text={`${x.field} — abstract ${String(x.abstract_value ?? '—')} vs MRI ${String(x.mri_value ?? '—')}`} id="abstract-verification" />)}
+        {oiAction.map(p => <Row key={`o${p.n}`} color={OPEN_META[p.severity].color} tag={OPEN_META[p.severity].label} text={`${p.field ? `${p.field}: ` : ''}${p.text}`} id={`open-item-${p.n}`} />)}
+      </div>
+    </div>
+  )
 }
 
 // Renders the verification verdict: headline status + confidence, then the
@@ -1165,10 +1416,10 @@ function ReviewPanel({ row, onSaved, reviewerId }: { row: AbstractRow; onSaved: 
 function Grid({ children }: { children: React.ReactNode }) {
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px 16px' }}>{children}</div>
 }
-function Fact({ k, v, wide, sub }: { k: string; v: any; wide?: boolean; sub?: string | null }) {
+function Fact({ k, v, wide, sub, foot }: { k: string; v: any; wide?: boolean; sub?: string | null; foot?: number[] }) {
   return (
     <div style={{ gridColumn: wide ? '1 / -1' : undefined }}>
-      <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{k}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{k}<Footnote nums={foot ?? []} /></div>
       <div style={{ fontSize: 13, color: 'var(--text)' }}>{v == null || v === '' ? '—' : String(v)}</div>
       {sub ? <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 1, lineHeight: 1.35 }}>{sub}</div> : null}
     </div>
@@ -1177,9 +1428,10 @@ function Fact({ k, v, wide, sub }: { k: string; v: any; wide?: boolean; sub?: st
 // Every template field renders — an empty field says so explicitly rather than
 // disappearing (gaps also land in the Open Items section). `src` adds a
 // "view in lease ↗" link that pops the provision's actual language in context.
-function LongFact({ k, v, src }: {
+function LongFact({ k, v, src, foot }: {
   k: string; v: any
   src?: { quote?: string | null; citation?: string | null; docIds?: string[] | null }
+  foot?: number[]
 }) {
   const missing = v == null || v === ''
   const quote = src?.quote ?? (typeof v === 'string' ? v : '')
@@ -1188,17 +1440,18 @@ function LongFact({ k, v, src }: {
     <div style={{ marginBottom: 10 }}>
       <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
         {k}
+        <Footnote nums={foot ?? []} />
         {linkable && <SourceLink quote={quote} citation={src?.citation ?? ''} sourceDocIds={src!.docIds!} label="view in lease ↗" />}
       </div>
       <div style={{ fontSize: 12.5, color: missing ? 'var(--text-faint)' : 'var(--text-muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontStyle: missing ? 'italic' : 'normal' }}>
-        {missing ? 'Not found in reviewed documents — see Open items' : String(v)}
+        {missing ? <>Not found in reviewed documents — <OpenItemsJump /></> : String(v)}
       </div>
     </div>
   )
 }
 
 function MissingNote({ what }: { what: string }) {
-  return <div style={{ fontSize: 12, color: 'var(--text-faint)', fontStyle: 'italic' }}>{what} — see Open items</div>
+  return <div style={{ fontSize: 12, color: 'var(--text-faint)', fontStyle: 'italic' }}>{what} — <OpenItemsJump /></div>
 }
 function MiniTable({ head, rows }: { head: string[]; rows: any[][] }) {
   return (

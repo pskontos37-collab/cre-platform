@@ -430,11 +430,12 @@ ABSTRACTION METHOD (firm standard — binding):
 
 GROUNDING — NO FABRICATION: every concrete value must be traceable to a brief (whose quotes came from the document), the raw text, or an attached PDF. Values the documents do not state are null + open item. MRI-sourced values are labeled as such in the *_basis fields.
 
-OPEN-ITEM DISCIPLINE (each entry starts with exactly one prefix):
+OPEN-ITEM DISCIPLINE (each entry starts with exactly one prefix, then an optional bracketed field tag):
 - "MISSING FROM FILE: …" — ONLY for an instrument that reviewed documents reference but that appears NOWHERE in the FILE INVENTORY above. The inventory is the complete file — check it before claiming missing.
 - "NOT FULLY REVIEWED: …" — ONLY for a document listed as "title only in this request" or whose raw text was truncated. Documents with briefs were read in full — never mark them not-fully-reviewed.
 - "CONFIRM: …" — a term needing verification against a source outside this request.
 - "DISCREPANCY: …" — conflicting values between instruments or vs. the MRI cross-check (name both values and both sources).
+- FIELD TAG: when an open item concerns a specific abstract field, put its dotted path in brackets immediately after the prefix so the UI can footnote the field, e.g. "DISCREPANCY: [term.expiration] lease says 2030-01-31 but MRI holds 2031-01-31" or "CONFIRM: [base_rent_schedule] current-term rent not stated in the file". Omit the tag for file-level items (missing documents, not-reviewed).
 
 Call the submit_abstract tool with an object matching this schema exactly (all keys present):
 ${SCHEMA}
