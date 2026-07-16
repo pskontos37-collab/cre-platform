@@ -30,7 +30,7 @@ function Sign([string]$spath){
   return "$BASE/storage/v1$($r.signedURL)"
 }
 
-$SCHEMA = '{"gla_sf":num|null,"recoverable_opex_psf":num|null,"non_recoverable_opex_psf":num|null,"recoverable_opex_total":num|null,"non_recoverable_opex_total":num|null,"total_opex":num|null,"effective_gross_income":num|null,"period":str|null,"confidence":"high"|"medium"|"low"|null,"note":str|null}'
+$SCHEMA = '{"gla_sf":num|null,"recoverable_opex_psf":num|null,"non_recoverable_opex_psf":num|null,"tax_insurance_psf":num|null,"recoverable_opex_total":num|null,"non_recoverable_opex_total":num|null,"tax_insurance_total":num|null,"total_opex":num|null,"effective_gross_income":num|null,"period":str|null,"confidence":"high"|"medium"|"low"|null,"note":str|null}'
 
 function Extract-T12($doc, $dealName){
   $content = @(
@@ -39,11 +39,14 @@ function Extract-T12($doc, $dealName){
 You are an acquisitions analyst at M&J Wilkow. The attached PDF is the T-12 / trailing operating statement for the deal: $dealName. Extract the annual operating expenses split into RECOVERABLE vs NON-RECOVERABLE for a bottoms-up underwrite. Today is $today.
 
 Definitions:
-- RECOVERABLE (reimbursable under NNN leases): common area maintenance (CAM), repairs & maintenance, common-area utilities, landscaping, snow, security, parking-lot, management fee IF the leases reimburse it, real estate TAXES, and property INSURANCE. These are the expenses a triple-net tenant pays back.
+- RECOVERABLE (reimbursable under NNN leases): common area maintenance (CAM), repairs & maintenance, common-area utilities, landscaping, snow, security, parking-lot, management fee IF the leases reimburse it, real estate TAXES, and property INSURANCE. These are the expenses a triple-net tenant pays back. This TOTAL recoverable pool splits into two sub-pools:
+    * CONTROLLABLE recoverable = CAM / repairs & maintenance / utilities / landscaping / security / mgmt fee - expenses the landlord controls (subject to recovery caps and admin fees in the leases).
+    * NON-CONTROLLABLE recoverable = real estate TAXES + property INSURANCE only - pass-throughs the landlord does not control (not capped, no admin fee).
 - NON-RECOVERABLE (landlord's own cost): asset/portfolio management fee not billed to tenants, general & administrative, professional/legal/audit fees, non-reimbursable owner costs, leasing costs. Do NOT include capital expenditures, tenant improvements, leasing commissions, or debt service in either bucket (those are below-NOI or capital).
 
 Rules:
 - Report ANNUAL figures for the trailing-12 period. recoverable_opex_total and non_recoverable_opex_total are dollar totals; recoverable_opex_psf and non_recoverable_opex_psf are those totals divided by building GLA ($/SF/yr). If you cannot compute PSF (GLA unknown), give the totals and leave PSF null.
+- tax_insurance_psf / tax_insurance_total = the real-estate TAX + property INSURANCE portion of the recoverable pool ONLY (a subset of recoverable_opex; it must be <= recoverable_opex). This lets the model recover taxes + insurance uncapped. If the statement does not separate taxes/insurance, leave both null.
 - gla_sf = building square footage if the statement states it (else null). total_opex = all operating expenses (recoverable + non-recoverable, excluding capital). effective_gross_income = total revenue net of vacancy if shown.
 - period = the trailing period label (e.g. 'T-12 ending 03/2026') if shown.
 - EXTRACT ONLY what the statement shows; use null for anything absent. Do NOT invent. confidence reflects how cleanly the statement separates recoverable from non-recoverable (many statements do not label it - infer from line items and lower confidence).
@@ -132,8 +135,15 @@ foreach($d in $deals){
   }
   if($recPsf -le 0){ Write-Output ("    -> could not derive a recoverable OpEx figure (confidence {0})" -f $r.confidence); $fail++; continue }
 
+  # split recoverable into CONTROLLABLE (CAM/R&M) vs NON-controllable (tax + insurance).
+  # tax/ins is a subset of the recoverable pool; controllable = recoverable - tax/ins.
+  $taxPsf = Resolve-Psf $r.tax_insurance_psf $r.tax_insurance_total $gla $REC_CEIL
+  if($taxPsf -gt $recPsf){ $taxPsf = $recPsf }
+  $ctrlPsf = [math]::Round([math]::Max(0.0, $recPsf - $taxPsf), 2)
+
   if($null -eq $uwm.opex){ $uwm | Add-Member -NotePropertyName opex -NotePropertyValue ([pscustomobject]@{ opexGrowthPct=0.03; generalVacancyPct=0; creditLossPct=0.005; capitalReservePsf=0.25; otherIncomePsf=0 }) -Force }
-  $uwm.opex | Add-Member -NotePropertyName recoverableOpexPsf -NotePropertyValue $recPsf -Force
+  $uwm.opex | Add-Member -NotePropertyName recoverableOpexPsf -NotePropertyValue $ctrlPsf -Force
+  $uwm.opex | Add-Member -NotePropertyName taxInsurancePsf -NotePropertyValue $taxPsf -Force
   if($nonPsf -gt 0){ $uwm.opex | Add-Member -NotePropertyName nonRecoverableOpexPsf -NotePropertyValue $nonPsf -Force }
 
   $patch = @{ underwriting_model=$uwm; updated_at=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 20
@@ -141,14 +151,14 @@ foreach($d in $deals){
   $pc = & curl.exe -s -o NUL -w "%{http_code}" -X PATCH "$BASE/rest/v1/pipeline_deals?id=eq.$($d.id)" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP"
   if([int]$pc -lt 200 -or [int]$pc -ge 300){ Write-Output "    !! PATCH failed HTTP $pc"; $fail++; continue }
   $impliedRec = [math]::Round($recPsf * $gla, 0)
-  Write-Output ("    -> SET recoverable {0}/sf, non-recov {1}/sf (GLA {2:N0}; ~{3:N0} full-NNN recoveries) [{4}]" -f $recPsf, $nonPsf, $gla, $impliedRec, $r.confidence)
+  Write-Output ("    -> SET controllable {0}/sf + tax/ins {1}/sf (recoverable {2}/sf total), non-recov {3}/sf (GLA {4:N0}; ~{5:N0} full-NNN recoveries) [{6}]" -f $ctrlPsf, $taxPsf, $recPsf, $nonPsf, $gla, $impliedRec, $r.confidence)
   $done++
 
   # audit comment (skip if an [AI] T-12 comment already exists for this deal)
   $prior = & curl.exe -s "$BASE/rest/v1/pipeline_deal_comments?deal_id=eq.$($d.id)&body=like.%5BAI%5D%20Recoverable*&select=id&limit=1" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
   if(-not $prior -or $prior.Count -eq 0){
     $note = $(if($r.note){ ' ' + $r.note } else { '' })
-    $bodyTxt = "[AI] Recoverable OpEx derived from T-12 '$($doc.title)'$(if($r.period){' ('+$r.period+')'}): recoverable `$$recPsf/sf, non-recoverable `$$nonPsf/sf (GLA $([math]::Round($gla)) SF; confidence $($r.confidence)).$note NNN recoveries now flow in the Underwriting tab - review before relying."
+    $bodyTxt = "[AI] Recoverable OpEx derived from T-12 '$($doc.title)'$(if($r.period){' ('+$r.period+')'}): controllable CAM `$$ctrlPsf/sf + tax/insurance `$$taxPsf/sf (recoverable `$$recPsf/sf total), non-recoverable `$$nonPsf/sf (GLA $([math]::Round($gla)) SF; confidence $($r.confidence)).$note Controllable is subject to the recovery cap/admin fee; tax + insurance pass through uncapped. NNN recoveries now flow in the Underwriting tab - review before relying."
     $cj = @{ deal_id=$d.id; body=$bodyTxt; author_id=$null } | ConvertTo-Json
     [System.IO.File]::WriteAllText($TMP,$cj,$enc)
     & curl.exe -s -o NUL -X POST "$BASE/rest/v1/pipeline_deal_comments" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP" | Out-Null

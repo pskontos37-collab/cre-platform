@@ -8,14 +8,17 @@
 //  • At expiry, a BLENDED rollover: renewalProb * (renew at market, no downtime)
 //    + (1-renewalProb) * (new lease at market, with downtime + TI/LC + free rent).
 //    The space re-rolls every releaseTermYears within the hold.
-//  • Recoveries (v3.3 — recovery & income realism):
-//     - NNN tenants reimburse their occupied SF x recoverable OpEx/SF, with an
-//       optional CAM admin-fee markup, an optional controllable-recovery growth
-//       cap (tenant pays capped growth; landlord eats the excess), and an optional
-//       gross-up: during downtime the landlord still recovers as if the tenant's
-//       space were grossUp%-occupied.
-//     - base_year tenants reimburse only the recoverable OpEx GROWTH above their
-//       base-year stop (default = year-1 recoverable level).
+//  • Recoveries (v3.4 — recovery & income realism):
+//     - Recoverable OpEx splits into CONTROLLABLE (CAM / R&M — recoverableOpexPsf)
+//       and NON-CONTROLLABLE (real-estate tax + insurance — taxInsurancePsf). Only
+//       the controllable pool is subject to the recovery cap and the CAM admin fee;
+//       tax + insurance pass through uncapped and un-marked-up (real-lease behavior).
+//       The two pools can grow at different rates (taxes often outpace CAM).
+//     - NNN tenants reimburse their occupied SF x (capped controllable x admin fee
+//       + uncapped tax/insurance), with an optional gross-up: during downtime the
+//       landlord still recovers as if the tenant's space were grossUp%-occupied.
+//     - base_year tenants reimburse only the total recoverable OpEx GROWTH above
+//       their base-year stop (default = year-1 total recoverable level).
 //     - gross tenants pay a gross rent (no separate recovery).
 //  • Percentage rent: a retail tenant with sales and a % rate pays overage on
 //    sales above the (natural or stated) breakpoint; scaled by occupancy.
@@ -24,9 +27,7 @@
 //  • Exit value = forward (year hold+1) NOI / exit cap.
 //
 // NOT modeled (first-pass): monthly granularity; per-tenant base-year stops other
-// than the default; admin fee / caps split by controllable vs tax/insurance (the
-// whole recoverable pool is treated as controllable). Sanity-check against ARGUS
-// before relying on this for a bid.
+// than the default. Sanity-check against ARGUS before relying on this for a bid.
 
 import { computeReturns, type AcqResult, type RefinanceTerms } from './acqUnderwriting'
 
@@ -60,7 +61,9 @@ export interface RolloverAssumptions {
 }
 
 export interface OpexAssumptions {
-  recoverableOpexPsf: number    // CAM + insurance + tax (recoverable), $/SF/yr
+  recoverableOpexPsf: number    // CONTROLLABLE recoverable OpEx (CAM / R&M), $/SF/yr — capped + admin-fee'd
+  taxInsurancePsf?: number      // NON-controllable recoverable (RE tax + insurance), $/SF/yr — uncapped, no admin fee (default 0)
+  taxInsuranceGrowthPct?: number// annual growth for tax + insurance (default = opexGrowthPct)
   nonRecoverableOpexPsf: number // management, non-reimbursables, $/SF/yr
   opexGrowthPct: number         // annual, decimal
   generalVacancyPct: number     // % of EGI, ON TOP of explicit rollover downtime (default 0)
@@ -145,16 +148,21 @@ export interface TenantUnderwriteResult extends AcqResult {
 function propertyYear(m: TenantModelAssumptions, t: number): TenantYearBreakdown {
   const o = m.opex
   const grow = Math.pow(1 + o.opexGrowthPct, t - 1)
-  const recoverableOpex = o.recoverableOpexPsf * m.glaSf * grow        // actual expense (OpEx line)
+  const taxInsGrow = Math.pow(1 + (o.taxInsuranceGrowthPct ?? o.opexGrowthPct), t - 1)
+  const controllableOpex = o.recoverableOpexPsf * m.glaSf * grow       // controllable recoverable (CAM/R&M) expense
+  const taxInsExpense = (o.taxInsurancePsf ?? 0) * m.glaSf * taxInsGrow // real-estate tax + insurance expense
+  const recoverableOpex = controllableOpex + taxInsExpense             // total recoverable expense (OpEx line)
   const nonRecoverableOpex = o.nonRecoverableOpexPsf * m.glaSf * grow
   const otherIncome = (o.otherIncomePsf ?? 0) * m.glaSf * grow
 
-  // recoverable OpEx/SF that tenants are BILLED — capped growth if a controllable
-  // cap is set; landlord still incurs the uncapped `recoverableOpex` above.
+  // $/SF tenants are BILLED. Controllable growth is capped if a controllable cap
+  // is set (landlord absorbs the excess above the cap); tax + insurance always
+  // pass through uncapped and un-admin-fee'd.
   const billGrow = o.recoveryCapPct != null
     ? Math.pow(1 + Math.min(o.opexGrowthPct, o.recoveryCapPct), t - 1)
     : grow
-  const billedPsf = o.recoverableOpexPsf * billGrow
+  const billedCtrlPsf = o.recoverableOpexPsf * billGrow                // controllable billed $/SF (capped), pre admin fee
+  const billedTaxPsf = (o.taxInsurancePsf ?? 0) * taxInsGrow           // tax + insurance billed $/SF (uncapped)
   const adminFee = 1 + Math.max(0, o.adminFeePct ?? 0)
   const grossUp = Math.min(1, Math.max(0, o.grossUpPct ?? 0))
   const salesGrow = Math.pow(1 + (o.salesGrowthPct ?? o.opexGrowthPct), t - 1)
@@ -172,10 +180,12 @@ function propertyYear(m: TenantModelAssumptions, t: number): TenantYearBreakdown
     const billSf = grossUp > 0 ? Math.min(fullSf, Math.max(occSf, grossUp * fullSf)) : occSf
 
     if (l.recovery === 'nnn') {
-      recoveries += billSf * billedPsf * adminFee
+      // controllable is marked up by the admin fee; tax + insurance are not
+      recoveries += billSf * (billedCtrlPsf * adminFee + billedTaxPsf)
     } else if (l.recovery === 'base_year') {
-      const stop = l.baseYearOpexPsf ?? o.recoverableOpexPsf   // yr-1 recoverable by default
-      recoveries += occSf * Math.max(0, billedPsf - stop)      // reimburse growth over the stop
+      // stop = yr-1 TOTAL recoverable (controllable + tax/ins) by default; reimburse growth over it (no admin fee)
+      const stop = l.baseYearOpexPsf ?? (o.recoverableOpexPsf + (o.taxInsurancePsf ?? 0))
+      recoveries += occSf * Math.max(0, (billedCtrlPsf + billedTaxPsf) - stop)
     }
 
     // percentage rent: overage on sales above the (natural or stated) breakpoint

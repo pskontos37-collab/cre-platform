@@ -130,7 +130,7 @@ export interface UwPromote { lpEquityPct: number; prefRate: number; tiers: UwPro
 export interface UwRefi { yearsFromClose: number; ltvPct: number; ratePct: number; amortYears: number; ioYears: number; costPct: number; capPct: number }
 export interface UwLeaseLine { name: string; sf: number; baseRentPsf: number; annualBumpPct: number; termRemainingYears: number; recovery: 'nnn' | 'gross' | 'base_year'; proRataSharePct?: number; baseYearOpexPsf?: number; salesPsf?: number; pctRentRate?: number; breakpointPsf?: number }
 export interface UwRollover { renewalProbPct: number; marketRentPsf: number; marketRentGrowthPct: number; downtimeMonths: number; tiNewPsf: number; tiRenewPsf: number; lcNewPsf: number; lcRenewPsf: number; freeRentMonthsNew: number; releaseTermYears?: number }
-export interface UwOpex { recoverableOpexPsf: number; nonRecoverableOpexPsf: number; opexGrowthPct: number; generalVacancyPct: number; creditLossPct: number; capitalReservePsf: number; otherIncomePsf?: number; adminFeePct?: number; recoveryCapPct?: number; grossUpPct?: number; salesGrowthPct?: number }
+export interface UwOpex { recoverableOpexPsf: number; taxInsurancePsf?: number; taxInsuranceGrowthPct?: number; nonRecoverableOpexPsf: number; opexGrowthPct: number; generalVacancyPct: number; creditLossPct: number; capitalReservePsf: number; otherIncomePsf?: number; adminFeePct?: number; recoveryCapPct?: number; grossUpPct?: number; salesGrowthPct?: number }
 
 export interface Deal {
   id: string

@@ -1841,7 +1841,7 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
 }
 
 const D_ROLL: UwRollover = { renewalProbPct: 0.7, marketRentPsf: 0, marketRentGrowthPct: 0.03, downtimeMonths: 6, tiNewPsf: 30, tiRenewPsf: 10, lcNewPsf: 15, lcRenewPsf: 5, freeRentMonthsNew: 3, releaseTermYears: 7 }
-const D_OPEX: UwOpex = { recoverableOpexPsf: 0, nonRecoverableOpexPsf: 0, opexGrowthPct: 0.03, generalVacancyPct: 0, creditLossPct: 0.005, capitalReservePsf: 0.25, otherIncomePsf: 0 }
+const D_OPEX: UwOpex = { recoverableOpexPsf: 0, taxInsurancePsf: 0, nonRecoverableOpexPsf: 0, opexGrowthPct: 0.03, generalVacancyPct: 0, creditLossPct: 0.005, capitalReservePsf: 0.25, otherIncomePsf: 0 }
 
 function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean; onSaveModel: (m: UnderwritingModel, c: UwComputed) => void }) {
   const um = deal.underwritingModel
@@ -1972,7 +1972,9 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
       <div>
         <SectionLabel2>Operating expenses &amp; financing</SectionLabel2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-          <MInput label="Recoverable OpEx $/SF" kind="usd" value={opex.recoverableOpexPsf} onChange={setOpex('recoverableOpexPsf')} disabled={busy} />
+          <MInput label="Controllable CAM $/SF" kind="usd" value={opex.recoverableOpexPsf} onChange={setOpex('recoverableOpexPsf')} disabled={busy} />
+          <MInput label="Tax + insurance $/SF" kind="usd" value={opex.taxInsurancePsf ?? 0} onChange={setOpex('taxInsurancePsf')} disabled={busy} />
+          <MInput label="Tax/ins growth" kind="pct" value={opex.taxInsuranceGrowthPct ?? opex.opexGrowthPct} onChange={setOpex('taxInsuranceGrowthPct')} disabled={busy} />
           <MInput label="Non-recov OpEx $/SF" kind="usd" value={opex.nonRecoverableOpexPsf} onChange={setOpex('nonRecoverableOpexPsf')} disabled={busy} />
           <MInput label="OpEx growth" kind="pct" value={opex.opexGrowthPct} onChange={setOpex('opexGrowthPct')} disabled={busy} />
           <MInput label="Gen. vacancy" kind="pct" value={opex.generalVacancyPct} onChange={setOpex('generalVacancyPct')} disabled={busy} />
@@ -2000,7 +2002,7 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
           <input type="checkbox" checked={opex.recoveryCapPct != null} disabled={busy}
             onChange={e => setOpex('recoveryCapPct')((e.target.checked ? 0.05 : undefined) as unknown as number)} />
           <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>
-            Cap controllable recovery growth{opex.recoveryCapPct != null ? '' : ' (off)'}
+            Cap controllable recovery growth{opex.recoveryCapPct != null ? ' (tax + insurance stay uncapped)' : ' (off)'}
           </span>
         </label>
         {opex.recoveryCapPct != null &&
