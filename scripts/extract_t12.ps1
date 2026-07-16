@@ -124,7 +124,7 @@ foreach($d in $deals){
   $pc = & curl.exe -s -o NUL -w "%{http_code}" -X PATCH "$BASE/rest/v1/pipeline_deals?id=eq.$($d.id)" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP"
   if([int]$pc -lt 200 -or [int]$pc -ge 300){ Write-Output "    !! PATCH failed HTTP $pc"; $fail++; continue }
   $impliedRec = [math]::Round($recPsf * $gla, 0)
-  Write-Output ("    -> SET recoverable ${0}/sf, non-recov ${1}/sf (GLA {2:N0}; ~${3:N0} full-NNN recoveries) [{4}]" -f $recPsf, $nonPsf, $gla, $impliedRec, $r.confidence)
+  Write-Output ("    -> SET recoverable {0}/sf, non-recov {1}/sf (GLA {2:N0}; ~{3:N0} full-NNN recoveries) [{4}]" -f $recPsf, $nonPsf, $gla, $impliedRec, $r.confidence)
   $done++
 
   # audit comment (skip if an [AI] T-12 comment already exists for this deal)
