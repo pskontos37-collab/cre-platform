@@ -25,6 +25,8 @@ interface AbstractRow {
   locked: boolean
   reviewed_at: string | null
   review_note: string | null
+  field_confidence: any         // abstract-ensemble cross-check (mig 20240110): { fields, disagreements, summary }
+  field_confidence_at: string | null
 }
 
 function useTenantsForProperty(propertyId: string | null) {
@@ -54,7 +56,7 @@ function useAbstracts(propertyId: string | null, bump: number) {
     if (!propertyId) return []
     const { data, error } = await supabase
       .from('lease_abstracts')
-      .select('id, tenant_name, status, abstract, generated_at, source_doc_ids, error, qa, qa_status, qa_at, overrides, human_verified, locked, reviewed_at, review_note')
+      .select('id, tenant_name, status, abstract, generated_at, source_doc_ids, error, qa, qa_status, qa_at, overrides, human_verified, locked, reviewed_at, review_note, field_confidence, field_confidence_at')
       .eq('property_id', propertyId)
     if (error) throw new Error(error.message)
     return (data ?? []) as AbstractRow[]
@@ -159,6 +161,7 @@ export function AbstractsPage() {
   // Per-tenant progress detail during the two-stage generate (briefing N/M → synthesizing).
   const [phase, setPhase] = useState<Record<string, string>>({})
   const [verifying, setVerifying] = useState<Set<string>>(new Set())
+  const [crossChecking, setCrossChecking] = useState<Set<string>>(new Set())
   const [genError, setGenError] = useState<string | null>(null)
   const [view, setView] = useState<'tenant' | 'clause' | 'openitems'>('tenant')
   const [clause, setClause] = useState('co_tenancy')
@@ -245,8 +248,8 @@ export function AbstractsPage() {
       // vanished items, revive reappeared ones) so the worklist stays honest.
       try {
         const { data: fresh } = await supabase.from('lease_abstracts')
-          .select('id, abstract, qa').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
-        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa)
+          .select('id, abstract, qa, field_confidence').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence)
       } catch { /* non-fatal: reconciliation is best-effort */ }
       setBump(b => b + 1)
       setSelected(tenant)
@@ -278,6 +281,40 @@ export function AbstractsPage() {
       setGenError(`Verify ${tenant}: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setVerifying(prev => { const n = new Set(prev); n.delete(tenant); return n })
+    }
+  }
+
+  // Ensemble cross-check: two independent, differently-framed lenses score
+  // agreement with the stored value on the high-stakes fields -> per-field
+  // confidence + disagreements (abstract-ensemble, mig 20240110). Fast (~15s):
+  // both lenses run concurrently on briefs only. Disagreements flow into the
+  // worklist keyed the same as generator/verifier items, so one resolution
+  // clears them together.
+  async function crossCheck(tenant: string) {
+    if (!propertyId || crossChecking.has(tenant)) return
+    setGenError(null)
+    setCrossChecking(prev => new Set(prev).add(tenant))
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${FN_BASE}/abstract-ensemble`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId, tenant }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
+      // Keep the worklist honest: fold the fresh disagreements into the live-key
+      // set (archive resolutions whose disagreement vanished, revive reappeared).
+      try {
+        const { data: fresh } = await supabase.from('lease_abstracts')
+          .select('id, abstract, qa, field_confidence').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence)
+      } catch { /* non-fatal */ }
+      setBump(b => b + 1)
+    } catch (e) {
+      setGenError(`Cross-check ${tenant}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setCrossChecking(prev => { const n = new Set(prev); n.delete(tenant); return n })
     }
   }
 
@@ -426,6 +463,7 @@ export function AbstractsPage() {
             {selectedAbstract && <AbstractView row={selectedAbstract}
               onRegenerate={() => void generate(selectedAbstract.tenant_name)} busy={generating.has(selectedAbstract.tenant_name)}
               onVerify={() => void verify(selectedAbstract.tenant_name)} verifying={verifying.has(selectedAbstract.tenant_name)}
+              onCrossCheck={() => void crossCheck(selectedAbstract.tenant_name)} crossChecking={crossChecking.has(selectedAbstract.tenant_name)}
               onSaved={() => setBump(b => b + 1)} reviewerId={appUser?.id}
               resolutions={resByAbstract.get(selectedAbstract.id) ?? []} propertyId={propertyId} />}
           </div>
@@ -690,8 +728,81 @@ const fmtMoney = (n: number | null | undefined) =>
   n == null ? '—' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 
 // Exported: the /diligence DD workspace renders the same abstract view.
-export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onSaved, reviewerId, resolutions, propertyId }: {
+// ── Ensemble cross-check surface (abstract-ensemble, migration 20240110) ──
+const CONF_COLOR: Record<string, string> = { high: 'var(--green, #22c55e)', medium: 'var(--amber, #f59e0b)', low: 'var(--red, #ef4444)' }
+const CONF_FIELD_LABEL: Record<string, string> = {
+  'exclusives.exists': 'Exclusive — exists',
+  'exclusives.exact_language': 'Exclusive — language',
+  'term.expiration': 'Expiration',
+  'guarantor.name': 'Guarantor',
+  'options': 'Options (notice dates)',
+  'base_rent_schedule': 'Base rent schedule',
+}
+const clip = (s: any, n = 140) => { const t = String(s ?? '—'); return t.length > n ? t.slice(0, n) + '…' : t }
+
+// Compact header pill summarizing the ensemble cross-check outcome.
+function ConfidenceBadge({ fc }: { fc: any }) {
+  if (!fc?.summary) return null
+  const s = fc.summary
+  const [label, color] = s.low > 0 ? [`⚑ ${s.low} low-confidence`, CONF_COLOR.low]
+    : s.medium > 0 ? [`${s.medium} medium-confidence`, CONF_COLOR.medium]
+    : ['✓ Cross-checked', CONF_COLOR.high]
+  return (
+    <span title="Ensemble cross-check: two independent lenses vs the stored value"
+      style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>
+      {label}
+    </span>
+  )
+}
+
+// Per-field confidence chips + disagreement detail. A SEPARATE provenance layer
+// from verification: two independent, differently-framed lenses scored their
+// agreement with the stored value. Disagreements are also actionable rows in the
+// worklist above; here they carry the competing value + citation for adjudication.
+function ConfidencePanel({ fc, at, resByKey }: { fc: any; at: string | null; resByKey: Map<string, Resolution> }) {
+  const entries = Object.entries(fc?.fields ?? {}) as Array<[string, any]>
+  if (!entries.length) return null
+  const disByField = new Map<string, any>((Array.isArray(fc?.disagreements) ? fc.disagreements : []).map((d: any) => [d.field, d]))
+  const hasLow = (fc?.summary?.low ?? 0) > 0
+  return (
+    <details open={hasLow} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+      <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Cross-check confidence{at ? ` · ${new Date(at).toLocaleDateString()}` : ''}
+      </summary>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', margin: '6px 0 10px' }}>
+        Two independent lenses ({(fc?.lenses ?? []).join(' + ') || 'ensemble'}) re-checked each field against the source briefs and MRI; their agreement with the stored value sets the confidence. Low-confidence fields also appear in the worklist above.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 8 }}>
+        {entries.map(([field, info]) => {
+          const color = CONF_COLOR[info?.confidence] ?? 'var(--text-faint)'
+          const d = disByField.get(field)
+          const resolved = resByKey.has(`field:${field.toLowerCase()}`)
+          return (
+            <div key={field} style={{ border: '1px solid var(--border-2)', borderRadius: 6, padding: '6px 8px', background: 'var(--surface-2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--text)' }}>{CONF_FIELD_LABEL[field] ?? field}</span>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color, border: `1px solid ${color}`, borderRadius: 8, padding: '1px 6px' }}>{info?.confidence ?? '—'}</span>
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--text-faint)', marginTop: 3 }}>agreement {info?.agreement ?? '—'}</div>
+              {d && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, textDecoration: resolved ? 'line-through' : 'none', opacity: resolved ? 0.6 : 1 }}>
+                  → cross-check: <b>{clip(d.correct_value)}</b>{d.citation ? <span style={{ color: 'var(--text-faint)' }}> · {d.citation}</span> : null}{resolved ? ' (resolved)' : ''}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {Array.isArray(fc?.lens_errors) && fc.lens_errors.length > 0 && (
+        <div style={{ fontSize: 9, color: 'var(--amber)', marginTop: 8 }}>Lens issues: {fc.lens_errors.join(' · ')}</div>
+      )}
+    </details>
+  )
+}
+
+export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onCrossCheck, crossChecking, onSaved, reviewerId, resolutions, propertyId }: {
   row: AbstractRow; onRegenerate: () => void; busy: boolean; onVerify: () => void; verifying: boolean
+  onCrossCheck?: () => void; crossChecking?: boolean
   onSaved: () => void; reviewerId?: string; resolutions?: Resolution[]; propertyId?: string | null
 }) {
   // Display/export the human-corrected values layered over the AI abstract.
@@ -710,7 +821,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
   // Resolution state: key → resolution, and the worklist that drives the top box.
   const resByKey = new Map<string, Resolution>()
   for (const r of resolutions ?? []) resByKey.set(r.item_key, r)
-  const worklist = buildWorklist(openItems, row.qa, a)
+  const worklist = buildWorklist(openItems, row.qa, a, row.field_confidence)
   const unresolvedRedCount = worklist.filter(w => w.red && !resByKey.has(w.key)).length
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -722,6 +833,14 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
             : '0 source documents'}{row.human_verified ? '' : ' · verify against the source lease before relying on it'}
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <ConfidenceBadge fc={row.field_confidence} />
+          {onCrossCheck && (
+            <button onClick={onCrossCheck} disabled={crossChecking || busy}
+              title="Two independent lenses re-check the high-stakes fields and score their agreement with the stored value"
+              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)', cursor: crossChecking || busy ? 'default' : 'pointer' }}>
+              {crossChecking ? 'Cross-checking…' : row.field_confidence ? 'Re-cross-check' : 'Cross-check'}
+            </button>
+          )}
           <button onClick={onVerify} disabled={verifying || busy}
             style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--accent)', background: 'var(--accent-dim)', color: 'var(--accent)', cursor: verifying || busy ? 'default' : 'pointer' }}>
             {verifying ? 'Verifying (1–2 min)…' : row.qa_status ? 'Re-verify' : 'Verify against source'}
@@ -737,6 +856,8 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onS
       <ResolutionWorklist row={row} worklist={worklist} resByKey={resByKey} reviewerId={reviewerId} propertyId={propertyId ?? null} onSaved={onSaved} sourceDocIds={srcIds} />
 
       <ReviewPanel row={row} onSaved={onSaved} reviewerId={reviewerId} unresolvedRedCount={unresolvedRedCount} />
+
+      {row.field_confidence && <div id="abstract-confidence"><ConfidencePanel fc={row.field_confidence} at={row.field_confidence_at} resByKey={resByKey} /></div>}
 
       {(row.qa || openItems.length > 0) && (
         <details>
@@ -1048,11 +1169,12 @@ async function clearResolution(abstractId: string, itemKey: string) {
 // After a regenerate, an item may vanish (concern gone → archive its resolution)
 // or reappear (un-archive). Keeps the worklist honest across the living-abstracts
 // refresh without deleting the audit trail. Keys computed exactly as buildWorklist.
-async function reconcileResolutions(abstractId: string, abstract: any, qa: any) {
+async function reconcileResolutions(abstractId: string, abstract: any, qa: any, fieldConfidence?: any) {
   const keys = new Set<string>()
   for (const p of parseOpenItems(abstract?.open_items ?? [])) keys.add(keyForOpenItem(p))
   for (const c of (Array.isArray(qa?.field_checks) ? qa.field_checks : [])) if (c?.field && c.verdict !== 'confirmed') keys.add(keyForField(c.field))
   for (const m of (Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : [])) if (m?.field) keys.add(keyForField(m.field))
+  for (const d of (Array.isArray(fieldConfidence?.disagreements) ? fieldConfidence.disagreements : [])) if (d?.field) keys.add(keyForField(d.field))
   const { data } = await supabase.from('abstract_item_resolutions')
     .select('id, item_key, archived').eq('abstract_id', abstractId)
   for (const r of (data ?? []) as Array<{ id: string; item_key: string; archived: boolean }>) {
@@ -1314,10 +1436,10 @@ interface WorkItem {
   isArray: boolean           // field points at an array of rows we can edit inline
   arrayValue: any[] | null
   citation: string | null    // best hint for the "open lease" link
-  sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith'; text: string; jumpId: string }>
+  sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith' | 'ensemble'; text: string; jumpId: string }>
 }
-const ORIGIN_LABEL: Record<string, string> = { open: 'Open item', verify: 'Verify', mri: 'MRI', arith: 'Arithmetic' }
-function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any): WorkItem[] {
+const ORIGIN_LABEL: Record<string, string> = { open: 'Open item', verify: 'Verify', mri: 'MRI', arith: 'Arithmetic', ensemble: 'Cross-check' }
+function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fieldConfidence?: any): WorkItem[] {
   const map = new Map<string, WorkItem>()
   const rank: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
   const ensure = (key: string, field: string | null, kind: 'open_item' | 'qa_check', severity: OpenSeverity, red: boolean) => {
@@ -1356,6 +1478,16 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any): Wo
     w.resolvable = false
     w.sources.push({ origin: 'arith', text: `${x.check}${x.detail ? ` — ${x.detail}` : ''}`, jumpId: 'abstract-verification' })
   })
+  // Ensemble cross-check disagreements (abstract-ensemble): a lens contradicted
+  // the stored value on a high-stakes field. Keyed field:<path> so they merge
+  // with any generator/verifier item about the same field (one resolution clears
+  // all). Marked red — a low-confidence field is an attention item.
+  for (const d of (Array.isArray(fieldConfidence?.disagreements) ? fieldConfidence.disagreements : [])) {
+    if (!d?.field) continue
+    const w = ensure(keyForField(d.field), d.field, 'qa_check', 'discrepancy', true)
+    if (!w.citation && d.citation) w.citation = d.citation
+    w.sources.push({ origin: 'ensemble', text: `${d.field} — stored ${String(d.abstract_value ?? '—')} → cross-check says ${String(d.correct_value ?? '—')}${d.votes ? ` (${d.votes})` : ''}${d.citation ? ` — ${d.citation}` : ''}`, jumpId: 'abstract-confidence' })
+  }
   return [...map.values()].sort((a, b) => rank[a.severity] - rank[b.severity])
 }
 
