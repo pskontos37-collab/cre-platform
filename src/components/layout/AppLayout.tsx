@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
+import { AbstractJobsToaster } from '../abstracts/AbstractJobsToaster'
 
 interface AppLayoutProps {
   children: ReactNode
@@ -16,6 +17,8 @@ export function AppLayout({ children }: AppLayoutProps) {
           {children}
         </main>
       </div>
+      {/* App-wide notifier for abstract upload / re-abstract background jobs. */}
+      <AbstractJobsToaster />
     </div>
   )
 }

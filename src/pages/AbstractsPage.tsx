@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
 import { useQuery } from '../hooks/useQuery'
@@ -6,8 +6,17 @@ import { supabase } from '../lib/supabase'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { AbstractsExportBar } from '../reports/AbstractsExportBar'
+import { createAbstractJob, updateAbstractJob } from '../hooks/useAbstractJobs'
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
+
+// Current-session bearer headers for edge-function calls. Re-read per call: a
+// long-running pipeline can cross a token refresh, and getSession() hands back
+// the current/refreshed token.
+async function authHeadersJson(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession()
+  return { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' }
+}
 
 interface AbstractRow {
   id: string
@@ -284,13 +293,144 @@ export function AbstractsPage() {
     }
   }
 
+  // Upload a document straight from the review surface and re-abstract on the
+  // spot: file it against this tenant, build its text layer (OCR fallback for
+  // scans), brief every not-yet-briefed doc, re-synthesize the abstract, then
+  // re-verify. Progress is written to abstract_jobs so the reviewer can leave
+  // the page and still get a completion alert (AbstractJobsToaster). The run
+  // survives navigation within the app but not a full tab close.
+  async function uploadAndReabstract(tenant: string, file: File) {
+    if (!propertyId || generating.has(tenant)) return
+    if (byTenant.get(tenant.toLowerCase())?.locked) {
+      setGenError(`${tenant}: abstract is locked — unlock it in "Review & correct" before adding documents.`)
+      return
+    }
+    if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) {
+      setGenError(`${tenant}: only PDF documents can be added here.`)
+      return
+    }
+    setGenError(null)
+    setGenerating(prev => new Set(prev).add(tenant))
+    const jobId = await createAbstractJob({ propertyId, tenant, kind: 'upload_reabstract', fileName: file.name, createdBy: appUser?.id })
+    const setBoth = (phaseText: string) => { setPhase(p => ({ ...p, [tenant]: phaseText })); void updateAbstractJob(jobId, { phase: phaseText }) }
+    try {
+      // ── 1. Upload + file the document so the abstractor's matcher finds it.
+      // Tenant name lands in BOTH title and file_path (the two fields the
+      // matcher searches); the synthetic \tenants\ path also earns the folder
+      // score bonus without tripping the non-lease-subfolder filter.
+      setBoth('uploading…')
+      const safeTenant = (tenant.replace(/[^A-Za-z0-9 &._-]/g, '').trim() || 'tenant')
+      const docId = crypto.randomUUID()
+      const key = `p/${propertyId}/abstract-uploads/${safeTenant}/${docId}-${file.name}`.replace(/\s+/g, '_')
+      const { error: upErr } = await supabase.storage.from('documents').upload(key, file, { contentType: file.type || 'application/pdf', upsert: true })
+      if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
+      const { error: docErr } = await supabase.from('documents').insert({
+        id: docId, property_id: propertyId, doc_type: 'lease',
+        title: `${tenant} — ${file.name}`, file_name: file.name,
+        file_path: `abstract-uploads\\tenants\\${safeTenant}\\${file.name}`,
+        mime_type: file.type || 'application/pdf', file_size_bytes: file.size,
+        storage_path: key, upload_date: new Date().toISOString().slice(0, 10),
+        uploaded_by: appUser?.id ?? null, is_indexed: false,
+      })
+      if (docErr) throw new Error(`Filing document failed: ${docErr.message}`)
+      await updateAbstractJob(jobId, { document_id: docId })
+
+      // ── 2. Text layer (verbatim reindex; OCR fallback for scans). ──
+      setBoth('extracting text…')
+      const storagePath = `documents/${key}`
+      const rx = await fetch(`${FN_BASE}/pdf-extract?reindexText=1&documentId=${docId}&storagePath=${encodeURIComponent(storagePath)}&propertyId=${propertyId}`,
+        { method: 'POST', headers: await authHeadersJson() })
+      const rxj = await rx.json().catch(() => ({}))
+      if (!rx.ok || rxj.error) throw new Error(rxj.error ?? `Text extraction failed (${rx.status})`)
+      if (rxj.too_large) throw new Error('Document is too large to process in-app — ingest it with the bulk loader instead.')
+      if (rxj.needs_ocr || (rxj.text_chunks ?? 0) === 0) {
+        setBoth('running OCR (scanned document)…')
+        const ocr = await fetch(`${FN_BASE}/pdf-extract?ocrText=1&documentId=${docId}&storagePath=${encodeURIComponent(storagePath)}&propertyId=${propertyId}`,
+          { method: 'POST', headers: await authHeadersJson() })
+        const ocrj = await ocr.json().catch(() => ({}))
+        if (!ocr.ok || ocrj.error) throw new Error(ocrj.error ?? `OCR failed (${ocr.status})`)
+        if (ocrj.too_large) throw new Error('Document is too large for in-app OCR — use the bulk loader.')
+        if ((ocrj.text_chunks ?? 0) === 0) throw new Error('No readable text found in the document (blank or image-only page).')
+      }
+
+      // ── 3. Brief every not-yet-briefed doc in the tenant's file (incl. the
+      // new upload), then synthesize. Mirrors generate()'s Stage 1/2. ──
+      const planRes = await fetch(`${FN_BASE}/lease-abstract`, {
+        method: 'POST', headers: await authHeadersJson(),
+        body: JSON.stringify({ property_id: propertyId, tenant, plan: true }),
+      })
+      const plan = await planRes.json().catch(() => ({}))
+      if (!planRes.ok || plan.error) throw new Error(plan.error ?? `Planning failed (${planRes.status})`)
+      if (Array.isArray(plan.docs)) {
+        const toBrief = plan.docs.filter((d: any) => d.brief_status !== 'complete')
+        const total = toBrief.length
+        let completed = 0
+        const briefOne = async (d: any) => {
+          let done = false, guard = 0
+          while (!done && guard++ < 15) {
+            const r = await fetch(`${FN_BASE}/doc-brief`, {
+              method: 'POST', headers: await authHeadersJson(),
+              body: JSON.stringify({ document_id: d.id }),
+            })
+            const j = await r.json().catch(() => ({}))
+            if (!r.ok || j.error) break     // non-fatal: synthesis falls back to raw text for this doc
+            done = j.done !== false
+          }
+          completed++
+          setBoth(`briefing ${completed}/${total} document(s)…`)
+        }
+        if (total) setBoth(`briefing ${completed}/${total} document(s)…`)
+        const CONCURRENCY = 8
+        const queue = [...toBrief]
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, async () => {
+          for (let d = queue.shift(); d; d = queue.shift()) await briefOne(d)
+        }))
+      }
+      setBoth('synthesizing abstract…')
+      const synth = await fetch(`${FN_BASE}/lease-abstract`, {
+        method: 'POST', headers: await authHeadersJson(),
+        body: JSON.stringify({ property_id: propertyId, tenant }),
+      })
+      const synthJson = await synth.json().catch(() => ({}))
+      if (!synth.ok || synthJson.error) throw new Error(synthJson.error ?? `Synthesis failed (${synth.status})`)
+      // Reconcile resolutions against the regenerated content, then re-verify.
+      try {
+        const { data: fresh } = await supabase.from('lease_abstracts')
+          .select('id, abstract, qa, field_confidence').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence)
+      } catch { /* non-fatal */ }
+      setBump(b => b + 1)
+      setSelected(tenant)
+
+      // ── 4. Re-verify (best-effort: the abstract already updated). ──
+      setBoth('verifying against source…')
+      try {
+        const vr = await fetch(`${FN_BASE}/abstract-verify`, {
+          method: 'POST', headers: await authHeadersJson(),
+          body: JSON.stringify({ property_id: propertyId, tenant }),
+        })
+        await vr.json().catch(() => ({}))
+      } catch { /* verify is best-effort */ }
+      setBump(b => b + 1)
+
+      await updateAbstractJob(jobId, { status: 'done', phase: 'complete', error: null })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setGenError(`${tenant}: ${msg}`)
+      await updateAbstractJob(jobId, { status: 'error', error: msg })
+    } finally {
+      setPhase(p => { const n = { ...p }; delete n[tenant]; return n })
+      setGenerating(prev => { const n = new Set(prev); n.delete(tenant); return n })
+    }
+  }
+
   // Ensemble cross-check: two independent, differently-framed lenses score
   // agreement with the stored value on the high-stakes fields -> per-field
   // confidence + disagreements (abstract-ensemble, mig 20240110). Fast (~15s):
   // both lenses run concurrently on briefs only. Disagreements flow into the
   // worklist keyed the same as generator/verifier items, so one resolution
   // clears them together.
-  async function crossCheck(tenant: string) {
+  async function crossCheck(tenant: string, autoApply = false) {
     if (!propertyId || crossChecking.has(tenant)) return
     setGenError(null)
     setCrossChecking(prev => new Set(prev).add(tenant))
@@ -299,7 +439,7 @@ export function AbstractsPage() {
       const res = await fetch(`${FN_BASE}/abstract-ensemble`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ property_id: propertyId, tenant }),
+        body: JSON.stringify({ property_id: propertyId, tenant, auto_apply: autoApply }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
@@ -464,6 +604,7 @@ export function AbstractsPage() {
               onRegenerate={() => void generate(selectedAbstract.tenant_name)} busy={generating.has(selectedAbstract.tenant_name)}
               onVerify={() => void verify(selectedAbstract.tenant_name)} verifying={verifying.has(selectedAbstract.tenant_name)}
               onCrossCheck={() => void crossCheck(selectedAbstract.tenant_name)} crossChecking={crossChecking.has(selectedAbstract.tenant_name)}
+              onUploadDoc={(file) => void uploadAndReabstract(selectedAbstract.tenant_name, file)}
               onSaved={() => setBump(b => b + 1)} reviewerId={appUser?.id}
               resolutions={resByAbstract.get(selectedAbstract.id) ?? []} propertyId={propertyId} />}
           </div>
@@ -772,6 +913,14 @@ function ConfidencePanel({ fc, at, resByKey }: { fc: any; at: string | null; res
       <div style={{ fontSize: 10, color: 'var(--text-faint)', margin: '6px 0 10px' }}>
         Two independent lenses ({(fc?.lenses ?? []).join(' + ') || 'ensemble'}) re-checked each field against the source briefs and MRI; their agreement with the stored value sets the confidence. Low-confidence fields also appear in the worklist above.
       </div>
+      {Array.isArray(fc?.auto_applied) && fc.auto_applied.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--green, #22c55e)', border: '1px solid var(--green, #22c55e)', borderRadius: 6, padding: '6px 8px', marginBottom: 10 }}>
+          <b>Auto-applied {fc.auto_applied.length} unanimous fix{fc.auto_applied.length > 1 ? 'es' : ''}</b> (reversible — logged in the worklist):
+          {fc.auto_applied.map((a: any, i: number) => (
+            <div key={i} style={{ color: 'var(--text-muted)', marginTop: 2 }}>{a.field}: {clip(a.from, 60)} → <b>{clip(a.to, 60)}</b>{a.citation ? <span style={{ color: 'var(--text-faint)' }}> · {a.citation}</span> : null}</div>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 8 }}>
         {entries.map(([field, info]) => {
           const color = CONF_COLOR[info?.confidence] ?? 'var(--text-faint)'
@@ -800,11 +949,16 @@ function ConfidencePanel({ fc, at, resByKey }: { fc: any; at: string | null; res
   )
 }
 
-export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onCrossCheck, crossChecking, onSaved, reviewerId, resolutions, propertyId }: {
+export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onCrossCheck, crossChecking, onAutoFix, onUploadDoc, onSaved, reviewerId, resolutions, propertyId }: {
   row: AbstractRow; onRegenerate: () => void; busy: boolean; onVerify: () => void; verifying: boolean
-  onCrossCheck?: () => void; crossChecking?: boolean
+  onCrossCheck?: () => void; crossChecking?: boolean; onAutoFix?: () => void
+  onUploadDoc?: (file: File) => void
   onSaved: () => void; reviewerId?: string; resolutions?: Resolution[]; propertyId?: string | null
 }) {
+  // Hidden picker shared by the header button and the worklist rows: pick a PDF
+  // -> hand it to onUploadDoc (upload + re-abstract on the spot).
+  const fileRef = useRef<HTMLInputElement>(null)
+  const pickUpload = onUploadDoc ? () => fileRef.current?.click() : undefined
   // Display/export the human-corrected values layered over the AI abstract.
   const a = applyOverrides(row.abstract, row.overrides) ?? {}
   // Click-to-provision links search the abstract's own source documents.
@@ -841,6 +995,13 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
               {crossChecking ? 'Cross-checking…' : row.field_confidence ? 'Re-cross-check' : 'Cross-check'}
             </button>
           )}
+          {onAutoFix && !row.locked && (
+            <button onClick={onAutoFix} disabled={crossChecking || busy}
+              title="Cross-check and AUTO-APPLY corrections only where both lenses unanimously agree on the same cited value (dates, guarantor). Contested items still go to the worklist. Reversible."
+              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--green, #22c55e)', background: 'transparent', color: 'var(--green, #22c55e)', cursor: crossChecking || busy ? 'default' : 'pointer' }}>
+              {crossChecking ? '…' : 'Auto-fix'}
+            </button>
+          )}
           <button onClick={onVerify} disabled={verifying || busy}
             style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--accent)', background: 'var(--accent-dim)', color: 'var(--accent)', cursor: verifying || busy ? 'default' : 'pointer' }}>
             {verifying ? 'Verifying (1–2 min)…' : row.qa_status ? 'Re-verify' : 'Verify against source'}
@@ -850,10 +1011,21 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
             style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: row.locked ? 'not-allowed' : 'pointer', opacity: row.locked ? 0.5 : 1 }}>
             {busy ? 'Regenerating…' : row.locked ? '🔒 Regenerate' : 'Regenerate'}
           </button>
+          {pickUpload && (
+            <>
+              <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) onUploadDoc!(f); e.target.value = '' }} />
+              <button onClick={pickUpload} disabled={busy || row.locked}
+                title={row.locked ? 'Locked — unlock in Review & correct to add documents' : 'Upload a missing lease/amendment and re-run the abstract on the spot (runs in the background)'}
+                style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--accent)', background: 'var(--accent)', color: '#fff', cursor: busy || row.locked ? 'default' : 'pointer', opacity: busy || row.locked ? 0.5 : 1 }}>
+                {busy ? 'Working…' : '＋ Upload document'}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      <ResolutionWorklist row={row} worklist={worklist} resByKey={resByKey} reviewerId={reviewerId} propertyId={propertyId ?? null} onSaved={onSaved} sourceDocIds={srcIds} />
+      <ResolutionWorklist row={row} worklist={worklist} resByKey={resByKey} reviewerId={reviewerId} propertyId={propertyId ?? null} onSaved={onSaved} sourceDocIds={srcIds} onRequestUpload={pickUpload} uploadBusy={busy} />
 
       <ReviewPanel row={row} onSaved={onSaved} reviewerId={reviewerId} unresolvedRedCount={unresolvedRedCount} />
 
@@ -1558,11 +1730,107 @@ function ArrayRowEditor({ row, field, rows, reviewerId, itemKey, kind, onSaved, 
   )
 }
 
+// "Discuss with AI" (abstract-discuss edge fn): the reviewer explains a
+// discrepancy in plain English; the AI re-reads the abstract's SOURCE documents
+// and returns a GROUNDED finding (agree / correct / insufficient) with a
+// verbatim citation — it must justify against the documents, not merely accept
+// the assertion, so it will push back when the documents disagree. Applying
+// writes the value as a human override + a 'corrected' resolution (this does
+// NOT retrain the model; it re-checks and records a human-authored correction).
+function DiscussPanel({ row, field, itemKey, kind, currentValue, reviewerId, propertyId, onClose, onSaved }: {
+  row: AbstractRow; field: string; itemKey: string; kind: 'open_item' | 'qa_check'; currentValue: string
+  reviewerId?: string; propertyId: string | null; onClose: () => void; onSaved: () => void
+}) {
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [finding, setFinding] = useState<any>(null)
+
+  async function ask() {
+    if (!note.trim() || !propertyId) return
+    setBusy(true); setErr(null); setFinding(null)
+    try {
+      const res = await fetch(`${FN_BASE}/abstract-discuss`, {
+        method: 'POST', headers: await authHeadersJson(),
+        body: JSON.stringify({ property_id: propertyId, tenant: row.tenant_name, field, current_value: currentValue, note: note.trim() }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
+      setFinding(json.finding ?? null)
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  async function applyCorrection() {
+    const cv = finding?.corrected_value
+    if (cv == null || String(cv).trim() === '') return
+    setApplying(true); setErr(null)
+    try {
+      let v: any = String(cv).trim()
+      if (v !== '' && /^-?\d/.test(v) && !Number.isNaN(Number(v))) v = Number(v)
+      await saveFieldOverride(row, field, v, reviewerId)
+      const cite = finding?.citation ? ` [${finding.citation}]` : ''
+      await upsertResolution(row.id, itemKey, kind, 'corrected', `AI-verified: ${String(cv)}${cite}`, reviewerId)
+      onSaved()
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setApplying(false) }
+  }
+
+  const VERDICT_UI: Record<string, { label: string; color: string }> = {
+    corrects: { label: 'Documents support a correction', color: 'var(--amber)' },
+    agrees: { label: 'Stored value is supported', color: 'var(--green, #22c55e)' },
+    insufficient: { label: 'Documents do not settle it', color: 'var(--text-muted)' },
+  }
+  const vui = finding?.verdict ? VERDICT_UI[finding.verdict as string] : undefined
+  const hasProposed = finding?.corrected_value != null && String(finding.corrected_value).trim() !== ''
+
+  return (
+    <div style={{ marginTop: 6, borderLeft: '2px solid var(--accent)', paddingLeft: 10 }}>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 4 }}>
+        Explain the discrepancy for <b>{field}</b> (stored: {currentValue || '—'}). The AI re-reads the source documents and answers grounded in them — it will push back if the documents disagree.
+      </div>
+      <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
+        placeholder="e.g. The expiration is 2036 per the Third Amendment §2, not 2031 — the renewal option was exercised."
+        style={{ ...RES_INPUT, resize: 'vertical', fontFamily: 'inherit' }} />
+      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <button onClick={() => void ask()} disabled={busy || applying || !note.trim() || !propertyId}
+          style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+          {busy ? 'Checking documents…' : finding ? 'Ask again' : 'Ask AI'}
+        </button>
+        <button onClick={onClose} disabled={busy || applying}
+          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Close</button>
+      </div>
+      {err && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 5 }}>{err}</div>}
+      {finding && (
+        <div style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', borderRadius: 8, padding: '8px 10px' }}>
+          {vui && <div style={{ fontSize: 11, fontWeight: 700, color: vui.color, marginBottom: 3 }}>
+            {vui.label}{finding.confidence ? ` · ${finding.confidence} confidence` : ''}{typeof finding.agrees_with_reviewer === 'boolean' ? (finding.agrees_with_reviewer ? ' · matches your point' : ' · differs from your point') : ''}
+          </div>}
+          {finding.explanation && <div style={{ color: 'var(--text)', lineHeight: 1.45 }}>{finding.explanation}</div>}
+          {finding.source_quote && <div style={{ marginTop: 5, fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)', borderLeft: '2px solid var(--border-2)', paddingLeft: 8 }}>“{finding.source_quote}”</div>}
+          {finding.citation && <div style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-faint)' }}>{finding.citation}</div>}
+          {hasProposed && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Proposed value: <b style={{ color: 'var(--text)' }}>{String(finding.corrected_value)}</b></span>
+              <button onClick={() => void applyCorrection()} disabled={applying}
+                style={{ fontSize: 11, fontWeight: 600, padding: '3px 11px', borderRadius: 6, border: 'none', background: 'var(--green, #22c55e)', color: '#fff', cursor: 'pointer' }}>
+                {applying ? 'Applying…' : 'Apply correction'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // One worklist row: either the resolved view (status + note + undo) or the
 // source line(s) + the four resolution verbs with an inline form.
-function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sourceDocIds }: {
+function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sourceDocIds, onRequestUpload, uploadBusy }: {
   row: AbstractRow; w: WorkItem; resolution?: Resolution
   reviewerId?: string; propertyId: string | null; onSaved: () => void; sourceDocIds: string[]
+  onRequestUpload?: () => void; uploadBusy?: boolean
 }) {
   const [mode, setMode] = useState<null | ResStatus>(null)
   const [note, setNote] = useState('')
@@ -1570,6 +1838,7 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sour
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [editRows, setEditRows] = useState(false)
+  const [discussing, setDiscussing] = useState(false)
   const color = w.red ? OPEN_META[w.severity].color : 'var(--text-muted)'
 
   if (resolution) {
@@ -1623,16 +1892,22 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sour
         <div><LeaseFileLink citation={w.citation} sourceDocIds={sourceDocIds} label="open lease ↗" /></div>
       </div>
       {w.resolvable ? (
-        editRows && w.field && w.arrayValue ? (
+        discussing && w.field ? (
+          <DiscussPanel row={row} field={w.field} itemKey={w.key} kind={w.kind} currentValue={w.currentValue}
+            reviewerId={reviewerId} propertyId={propertyId}
+            onClose={() => setDiscussing(false)} onSaved={() => { setDiscussing(false); onSaved() }} />
+        ) : editRows && w.field && w.arrayValue ? (
           <ArrayRowEditor row={row} field={w.field} rows={w.arrayValue} reviewerId={reviewerId}
             itemKey={w.key} kind={w.kind} onSaved={() => { setEditRows(false); onSaved() }} onCancel={() => setEditRows(false)} />
         ) : mode === null ? (
           <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
             {w.correctable && <button style={VERB_BTN} onClick={() => { setMode('corrected'); setVal(w.currentValue) }}>Correct</button>}
             {w.isArray && <button style={VERB_BTN} onClick={() => setEditRows(true)}>Edit rows</button>}
+            {w.field && propertyId && <button style={VERB_BTN} onClick={() => setDiscussing(true)} title="Explain the discrepancy; the AI re-reads the source documents and proposes a grounded correction">💬 Discuss with AI</button>}
             <button style={VERB_BTN} onClick={() => setMode('accepted')}>Accept</button>
             <button style={VERB_BTN} onClick={() => setMode('waived')}>Waive</button>
             <button style={VERB_BTN} onClick={() => setMode('needs_doc')}>Needs doc</button>
+            {onRequestUpload && <button style={{ ...VERB_BTN, borderColor: 'var(--accent)', color: 'var(--accent)' }} disabled={uploadBusy} onClick={onRequestUpload} title="Upload the missing lease/amendment and re-run the abstract on the spot">⬆ Upload doc &amp; re-run</button>}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 }}>
@@ -1660,9 +1935,10 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sour
 // The single passthrough: one always-open box consolidating everything a
 // reviewer must resolve. Red (discrepancy/confirm/verify/MRI) leads and gates
 // locking; missing-document / note items follow; resolved items fold away.
-function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, onSaved, sourceDocIds }: {
+function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, onSaved, sourceDocIds, onRequestUpload, uploadBusy }: {
   row: AbstractRow; worklist: WorkItem[]; resByKey: Map<string, Resolution>
   reviewerId?: string; propertyId: string | null; onSaved: () => void; sourceDocIds: string[]
+  onRequestUpload?: () => void; uploadBusy?: boolean
 }) {
   const [showResolved, setShowResolved] = useState(false)
   if (!worklist.length) return null
@@ -1671,6 +1947,7 @@ function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, o
   const red = unresolved.filter(w => w.red)
   const info = unresolved.filter(w => !w.red)
   const hot = red.length > 0
+  const rowProps = { row, reviewerId, propertyId, onSaved, sourceDocIds, onRequestUpload, uploadBusy }
   return (
     <div style={{ border: `1px solid ${hot ? 'var(--red, #ef4444)' : 'var(--border)'}`, background: hot ? 'rgba(239,68,68,0.06)' : 'var(--surface)', borderRadius: 12, padding: '10px 14px' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: hot ? 'var(--red, #ef4444)' : 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
@@ -1679,11 +1956,11 @@ function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, o
       {red.length === 0 && info.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--green, #22c55e)', fontWeight: 600 }}>✓ All items resolved.</div>
       )}
-      {red.map(w => <WorklistRow key={w.key} row={row} w={w} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} sourceDocIds={sourceDocIds} />)}
+      {red.map(w => <WorklistRow key={w.key} w={w} {...rowProps} />)}
       {info.length > 0 && (
         <div style={{ marginTop: red.length ? 8 : 0 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Missing documents / notes</div>
-          {info.map(w => <WorklistRow key={w.key} row={row} w={w} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} sourceDocIds={sourceDocIds} />)}
+          {info.map(w => <WorklistRow key={w.key} w={w} {...rowProps} />)}
         </div>
       )}
       {resolved.length > 0 && (
@@ -1692,7 +1969,7 @@ function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, o
             style={{ fontSize: 11, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
             {showResolved ? '▾' : '▸'} {resolved.length} resolved
           </button>
-          {showResolved && resolved.map(w => <WorklistRow key={w.key} row={row} w={w} resolution={resByKey.get(w.key)} reviewerId={reviewerId} propertyId={propertyId} onSaved={onSaved} sourceDocIds={sourceDocIds} />)}
+          {showResolved && resolved.map(w => <WorklistRow key={w.key} w={w} resolution={resByKey.get(w.key)} {...rowProps} />)}
         </div>
       )}
     </div>
