@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Widget, WidgetSkeleton } from '../ui/Widget'
 import { Badge } from '../ui/Badge'
 import { EmptyState } from '../ui/EmptyState'
@@ -40,6 +40,17 @@ export function CAMReconWidget({ propertyIds, propertyNames, previewCount }: CAM
   // Row ids optimistically hidden while their status update is in flight.
   const [completing, setCompleting] = useState<Set<string>>(new Set())
   const [saveError, setSaveError] = useState<string | null>(null)
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Arm a button for its confirming second click. Auto-disarms after 4s so a
+  // stale "Confirm" state can't linger — but never on mouseleave (the armed
+  // label is wider, so the button reflows under the cursor and would instantly
+  // fire mouseleave, disarming before the second click could land).
+  function arm(key: string) {
+    setConfirmKey(key)
+    if (confirmTimer.current) clearTimeout(confirmTimer.current)
+    confirmTimer.current = setTimeout(() => setConfirmKey(null), 4000)
+  }
 
   async function commitComplete(ids: string[]) {
     if (!ids.length) return
@@ -140,8 +151,7 @@ export function CAMReconWidget({ propertyIds, propertyNames, previewCount }: CAM
                     {group.label}
                   </div>
                   <button
-                    onClick={() => (confirmKey === groupConfirm ? commitComplete(group.allIds) : setConfirmKey(groupConfirm))}
-                    onMouseLeave={() => confirmKey === groupConfirm && setConfirmKey(null)}
+                    onClick={() => (confirmKey === groupConfirm ? commitComplete(group.allIds) : arm(groupConfirm))}
                     title={`Mark all ${group.allIds.length} reconciliations in ${group.label} complete`}
                     style={{
                       fontSize: 9.5,
@@ -205,8 +215,7 @@ export function CAMReconWidget({ propertyIds, propertyNames, previewCount }: CAM
                       {STATUS_LABEL[row.status] ?? row.status}
                     </Badge>
                     <button
-                      onClick={() => (confirmKey === row.id ? commitComplete([row.id]) : setConfirmKey(row.id))}
-                      onMouseLeave={() => confirmKey === row.id && setConfirmKey(null)}
+                      onClick={() => (confirmKey === row.id ? commitComplete([row.id]) : arm(row.id))}
                       title="Close out this reconciliation and remove it from the board"
                       style={{
                         fontSize: 9.5,
@@ -235,8 +244,7 @@ export function CAMReconWidget({ propertyIds, propertyNames, previewCount }: CAM
             const gc = `group:${g.key}`
             return (
               <button
-                onClick={() => (confirmKey === gc ? commitComplete(g.allIds) : setConfirmKey(gc))}
-                onMouseLeave={() => confirmKey === gc && setConfirmKey(null)}
+                onClick={() => (confirmKey === gc ? commitComplete(g.allIds) : arm(gc))}
                 title={`Mark all ${g.allIds.length} reconciliations in ${g.label} complete`}
                 style={{
                   marginTop: 3,
