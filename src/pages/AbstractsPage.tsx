@@ -1588,7 +1588,7 @@ const CITE_ORDINALS: Array<[string, string]> = [
 ]
 const CITE_TYPES = ['amendment', 'amend', 'amd', 'supplement', 'guaranty', 'snda', 'subordination',
   'estoppel', 'commencement', 'memorandum', 'assignment', 'exercise', 'renewal notice', 'termination']
-function rankDocsByCitation(docs: Array<{ id: string; title: string | null; file_name: string | null }>, citation: string) {
+function rankDocsByCitation<T extends { id: string; title: string | null; file_name: string | null }>(docs: T[], citation: string): T[] {
   const cit = (citation || '').toLowerCase()
   const citOrds = CITE_ORDINALS.filter(([a, b]) => cit.includes(a) || cit.includes(b))
   const score = (d: any) => {

@@ -829,7 +829,9 @@ export interface UploadedOm { storagePath: string; documentId: string | null; ti
  * file a `documents` row so the OM is retained + linkable. Returns the storage
  * path to hand to extractOm({ storagePath }).
  */
-export async function uploadOmPdf(file: File, createdBy: string | null): Promise<UploadedOm> {
+// createdBy is accepted for call-site symmetry with the other pipeline helpers
+// but not recorded here — the documents insert below carries no uploader column.
+export async function uploadOmPdf(file: File, _createdBy: string | null): Promise<UploadedOm> {
   const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80)
   const uid = (globalThis.crypto?.randomUUID?.() ?? String(Date.now()))
   const path = `pipeline/om/${uid}-${safe}`

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { xirr, type DatedFlow } from '../lib/waterfall'
+import { xirr } from '../lib/waterfall'
 import type { DealRow } from './useDeals'
 
 export interface InvestorReturn {
