@@ -32,7 +32,21 @@ const MODEL = Deno.env.get('BRIEF_MODEL') ?? Deno.env.get('ABSTRACT_MODEL') ?? '
 // per-segment briefs would itself exceed the wall on giant instruments).
 const SEGMENT_CHARS = 60_000
 const SEGMENT_MAX_TOKENS = 8_000
-const TIME_BUDGET_MS = 100_000    // leave headroom inside the 150s wall
+// Stage 1.5: brief a giant document's segments CONCURRENTLY within one
+// invocation instead of one-at-a-time across resumable calls. Concurrent fetches
+// don't add wall-clock (they overlap), so a multi-segment base lease finishes in
+// ~one segment's time instead of the sum. Each segment result is persisted AS IT
+// COMPLETES (serialized write), so a 150s wall-kill still makes progress and the
+// caller's resume finishes the rest. SOFT_DEADLINE stops launching new segment
+// calls with headroom before the wall.
+const SEGMENT_CONCURRENCY = Number(Deno.env.get('BRIEF_SEG_CONCURRENCY') ?? 4)   // segments of ONE doc at once
+const SEGMENT_OVERLAP = 2_000     // look-back chars so a boundary-spanning clause/rent row stays whole in >=1 segment (merge dedupes the overlap)
+// A worker only STARTS a new segment while under this deadline; one segment runs
+// ~100-120s, so keeping this low guarantees a started segment finishes before the
+// 150s wall. Effect: each invocation briefs one concurrent WAVE of up to
+// SEGMENT_CONCURRENCY segments (the common giant doc = 3-4 segments = one wave =
+// one invocation). Bigger docs persist the wave and resume for the next.
+const SOFT_DEADLINE_MS = 30_000
 
 async function anthropicJson(key: string, model: string, content: any[], maxTokens: number): Promise<any> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -178,15 +192,6 @@ function mergeBriefs(segs: any[]): any {
   }
 }
 
-// Compact context passed to later segments: enough to interpret continuations
-// (e.g. a rent table spanning a segment boundary) without re-sending everything.
-function priorContextOf(segs: any[]): string {
-  return segs.map((s, i) =>
-    `seg ${i + 1}: ${s?.instrument_name ?? '?'} | parties: ${s?.parties?.landlord ?? '?'} / ${s?.parties?.tenant ?? '?'} | ` +
-    `${(s?.rent_effects ?? []).length} rent rows, ${(s?.clauses ?? []).map((c: any) => c?.clause).filter(Boolean).join(', ') || 'no clauses yet'}`
-  ).join('\n').slice(0, 4000)
-}
-
 serve(async (req) => {
   const CORS = corsHeaders(req)
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
@@ -242,12 +247,14 @@ serve(async (req) => {
     const segTotal = Math.max(1, Math.ceil(fullText.length / SEGMENT_CHARS))
     // Resume only when the prior run saw the SAME text AND the same segment
     // boundaries (segments_total match — SEGMENT_CHARS changes invalidate
-    // partials); otherwise start over.
+    // partials); otherwise start over. segs is POSITIONAL (index i = segment i)
+    // and may have holes while segments brief concurrently.
     const resume = existing && existing.text_chars === fullText.length
       && existing.segments_total === segTotal && !body.force
-    let segs: any[] = resume && Array.isArray(existing!.segments) ? existing!.segments : []
-    let segDone = resume ? Math.min(existing!.segments_done ?? 0, segTotal) : 0
-    if (segs.length !== segDone) { segs = segs.slice(0, segDone) }
+    const segs: any[] = new Array(segTotal).fill(null)
+    if (resume && Array.isArray(existing!.segments)) {
+      for (let i = 0; i < segTotal; i++) if (existing!.segments[i]) segs[i] = existing!.segments[i]
+    }
 
     const docMeta = `title: ${doc.title ?? doc.file_name}\nfile: ${doc.file_path ?? ''}\ncorpus doc_type tag: ${doc.doc_type ?? '?'}\ntotal text: ${fullText.length.toLocaleString()} chars in ${segTotal} segment(s)`
 
@@ -265,30 +272,50 @@ serve(async (req) => {
       }
     }
 
-    // ── 4. Walk segments inside the time budget ──
-    while (segDone < segTotal && Date.now() - t0 < TIME_BUDGET_MS) {
-      const segText = fullText.slice(segDone * SEGMENT_CHARS, (segDone + 1) * SEGMENT_CHARS)
-      const seg = await callWithTerseRetry(
-        SEGMENT_PROMPT(docMeta, segDone, segTotal, priorContextOf(segs), segText), SEGMENT_MAX_TOKENS)
-      segs.push(seg)
-      segDone++
-      await sb.from('doc_briefs').upsert({
-        document_id: documentId,
-        property_id: doc.property_id,
-        segments: segs,
-        segments_done: segDone,
-        segments_total: segTotal,
-        text_chars: fullText.length,
-        status: 'in_progress',
-        model: MODEL,
-        error: null,
+    // ── 4. Brief the missing segments CONCURRENTLY (bounded pool). Segments are
+    // independent given verbatim-only extraction + the overlap window, and the
+    // deterministic merge dedupes any overlap. Each result is persisted as it
+    // completes through a SERIALIZED write chain (single invocation → no
+    // cross-writer race), so a wall-kill still advances and resume finishes. ──
+    let persistChain: Promise<any> = Promise.resolve()
+    const persistProgress = () => {
+      persistChain = persistChain.then(() => sb.from('doc_briefs').upsert({
+        document_id: documentId, property_id: doc.property_id,
+        segments: segs, segments_done: segs.filter(Boolean).length, segments_total: segTotal,
+        text_chars: fullText.length, status: 'in_progress', model: MODEL, error: null,
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'document_id' })
+      }, { onConflict: 'document_id' }))
+      return persistChain
     }
+    const missing = [...Array(segTotal).keys()].filter(i => !segs[i])
+    let segErr: string | null = null
+    const worker = async () => {
+      while (missing.length && Date.now() - t0 < SOFT_DEADLINE_MS) {
+        const i = missing.shift()!                 // shift() is synchronous — no inter-worker race
+        // Overlap look-back so a clause/rent row straddling a boundary is whole
+        // in this segment too (merge dedupes). No prior-segment context: segments
+        // run concurrently and extraction is verbatim-only.
+        const start = Math.max(0, i * SEGMENT_CHARS - (i > 0 ? SEGMENT_OVERLAP : 0))
+        const segText = fullText.slice(start, (i + 1) * SEGMENT_CHARS)
+        try {
+          segs[i] = await callWithTerseRetry(SEGMENT_PROMPT(docMeta, i, segTotal, '', segText), SEGMENT_MAX_TOKENS)
+          await persistProgress()
+        } catch (e) {
+          // Leave this index for a resume retry; record only a genuinely
+          // non-transient error to surface if NOTHING completes.
+          const m = e instanceof Error ? e.message : String(e)
+          if (!/truncated at max_tokens|overloaded|rate_limit|\b529\b|Anthropic API error/i.test(m)) segErr = m
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(SEGMENT_CONCURRENCY, Math.max(1, missing.length)) }, worker))
+    await persistChain   // flush any in-flight serialized writes
 
-    if (segDone < segTotal) {
+    const doneCount = segs.filter(Boolean).length
+    if (doneCount < segTotal) {
+      if (doneCount === 0 && segErr) throw new Error('segment briefing failed: ' + segErr)
       return new Response(JSON.stringify({
-        success: true, done: false, segments_done: segDone, segments_total: segTotal,
+        success: true, done: false, segments_done: doneCount, segments_total: segTotal,
       }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
@@ -302,7 +329,7 @@ serve(async (req) => {
       chain_role: typeof brief?.chain_role === 'string' ? brief.chain_role : null,
       brief,
       segments: null,          // partials no longer needed once merged
-      segments_done: segDone,
+      segments_done: doneCount,
       segments_total: segTotal,
       text_chars: fullText.length,
       status: 'complete',
@@ -314,7 +341,7 @@ serve(async (req) => {
     if (upErr) throw new Error('save failed: ' + upErr.message)
 
     return new Response(JSON.stringify({
-      success: true, done: true, segments_done: segDone, segments_total: segTotal, brief,
+      success: true, done: true, segments_done: doneCount, segments_total: segTotal, brief,
     }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   } catch (err: unknown) {
