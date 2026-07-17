@@ -11,7 +11,8 @@
 param(
   [string]$PropertyId = '',          # limit to one property (default: all abstracts)
   [string[]]$Tenants = @(),          # limit to specific tenant names
-  [int]$Shard = 0, [int]$Of = 1
+  [int]$Shard = 0, [int]$Of = 1,
+  [int]$Throttle = 8                  # concurrent doc-brief calls per tenant (docs are independent)
 )
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -38,6 +39,46 @@ function PostJson($url, $obj) {
   return @{ code = $code; json = $json }
 }
 
+# One document briefed to completion inside a background job. Giant instruments
+# resume across several calls (done=false -> repost) IN ORDER within the doc;
+# parallelism is only ever ACROSS docs (no segment races). Idempotent: the edge
+# fn skips docs whose brief is already complete and whose text is unchanged.
+$BriefJob = {
+  param($docId, $docTitle, $BASE, $KEY, $UA, $scriptRoot)
+  $enc = New-Object System.Text.UTF8Encoding($false)
+  $tmp = "$scriptRoot\_brief_body_job_$docId.json"
+  [System.IO.File]::WriteAllText($tmp, (@{ document_id = $docId } | ConvertTo-Json -Compress), $enc)
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $done = $false; $guard = 0
+  while (-not $done -and $guard -lt 15) {
+    $guard++
+    $out = (& curl.exe -s -w "`n%{http_code}" -X POST "$BASE/functions/v1/doc-brief" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -A $UA --data-binary "@$tmp" --max-time 285) -join "`n"
+    $code = ($out -split "`n")[-1]
+    $json = if ($out.Length -gt $code.Length) { $out.Substring(0, $out.Length - $code.Length - 1) } else { '' }
+    if ($code -ne '200') { Start-Sleep -Seconds 10; continue }   # transient 429/529 -> backoff, retry same doc
+    try { $o = $json | ConvertFrom-Json; $done = ($o.done -ne $false) } catch { $done = $true }
+  }
+  Remove-Item $tmp -ErrorAction SilentlyContinue
+  $sw.Stop()
+  [pscustomobject]@{ title = $docTitle; ok = $done; secs = [math]::Round($sw.Elapsed.TotalSeconds) }
+}
+
+# Collect finished jobs: log each, receive+remove it, drop it from the live list.
+# Iterates a snapshot so removing from $jobs mid-loop is safe.
+function Reap($jobs, $need) {
+  foreach ($j in @($jobs | Where-Object { $_.State -ne 'Running' })) {
+    $res = Receive-Job $j -ErrorAction SilentlyContinue
+    Remove-Job $j -Force -ErrorAction SilentlyContinue
+    [void]$jobs.Remove($j)
+    $script:reaped++
+    if ($res -and $null -ne $res.ok) {
+      Log ("  doc {0}/{1} {2} {3}s :: {4}" -f $script:reaped, $need.Count, ($(if ($res.ok) { 'OK' } else { 'GAVE UP' })), $res.secs, $res.title)
+    } else {
+      Log ("  doc {0}/{1} NO RESULT (job error)" -f $script:reaped, $need.Count)
+    }
+  }
+}
+
 $q = "$BASE/rest/v1/lease_abstracts?select=property_id,tenant_name&order=property_id,tenant_name"
 if ($PropertyId) { $q += "&property_id=eq.$PropertyId" }
 $rows = Invoke-RestMethod -Uri $q -Headers $H -UserAgent $UA -TimeoutSec 60
@@ -58,24 +99,21 @@ foreach ($r in $todo) {
   $docs = @()
   try { $docs = @(($plan.json | ConvertFrom-Json).docs) } catch {}
   $need = @($docs | Where-Object { $_.brief_status -ne 'complete' })
-  Log ("{0}/{1} {2}: {3} docs in file, {4} need briefs" -f $i, $todo.Count, $r.tenant_name, $docs.Count, $need.Count)
-  $d = 0
+  Log ("{0}/{1} {2}: {3} docs in file, {4} need briefs (throttle {5})" -f $i, $todo.Count, $r.tenant_name, $docs.Count, $need.Count, $Throttle)
+  # Bounded-concurrency pool ACROSS this tenant's docs: up to $Throttle brief at
+  # once instead of one-at-a-time. Wall-clock collapses from sum-of-docs to
+  # ~ceil(docs/throttle) x slowest-doc. Reap frees slots + drops finished jobs.
+  $script:reaped = 0
+  $jobs = [System.Collections.ArrayList]::new()
   foreach ($doc in $need) {
-    $d++
-    if (-not $doc -or -not $doc.id) { Log ("  doc {0}/{1} SKIP null id (plan parse problem)" -f $d, $need.Count); continue }
-    $done = $false; $guard = 0; $sw = [Diagnostics.Stopwatch]::StartNew()
-    while (-not $done -and $guard -lt 15) {
-      $guard++
-      $res = PostJson "$BASE/functions/v1/doc-brief" @{ document_id = $doc.id }
-      if ($res.code -ne '200') {
-        Log ("  doc {0}/{1} FAIL http={2} :: {3} :: {4}" -f $d, $need.Count, $res.code, $doc.title, ($res.json -replace '\s+', ' ').Substring(0, [Math]::Min(160, $res.json.Length)))
-        Start-Sleep -Seconds 10   # transient API errors (429/529) - backoff, then retry same doc
-        continue
-      }
-      try { $o = $res.json | ConvertFrom-Json; $done = ($o.done -ne $false) } catch { $done = $true }
+    if (-not $doc -or -not $doc.id) { $script:reaped++; Log ("  doc {0}/{1} SKIP null id (plan parse problem)" -f $script:reaped, $need.Count); continue }
+    while ((@($jobs | Where-Object { $_.State -eq 'Running' })).Count -ge $Throttle) {
+      Start-Sleep -Milliseconds 400
+      Reap $jobs $need
     }
-    $sw.Stop()
-    Log ("  doc {0}/{1} {2} {3}s :: {4}" -f $d, $need.Count, ($(if ($done) { 'OK' } else { 'GAVE UP' })), [math]::Round($sw.Elapsed.TotalSeconds), $doc.title)
+    $jb = Start-Job -ScriptBlock $BriefJob -ArgumentList $doc.id, $doc.title, $BASE, $KEY, $UA, $PSScriptRoot
+    [void]$jobs.Add($jb)
   }
+  while ($jobs.Count -gt 0) { Start-Sleep -Milliseconds 400; Reap $jobs $need }   # drain remaining
 }
 Log 'brief batch complete'

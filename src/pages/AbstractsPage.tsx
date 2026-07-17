@@ -201,11 +201,16 @@ export function AbstractsPage() {
       const plan = await planRes.json().catch(() => ({}))
       if (planRes.ok && Array.isArray(plan.docs)) {
         const toBrief = plan.docs.filter((d: any) => d.brief_status !== 'complete')
-        let n = 0
-        for (const d of toBrief) {
-          n++
-          setPhase(p => ({ ...p, [tenant]: `briefing doc ${n}/${toBrief.length}…` }))
-          // Giant instruments brief across several resumable calls (done=false).
+        const total = toBrief.length
+        const CONCURRENCY = 8          // docs are independent -> brief up to K at once
+        let completed = 0, inFlight = 0
+        const report = () =>
+          setPhase(p => ({ ...p, [tenant]: `briefing ${completed}/${total} (${inFlight} in flight)…` }))
+        // Brief a single document to completion. Giant instruments resume across
+        // several calls (done=false -> repost); those stay in-order WITHIN a doc,
+        // so parallelism is only ever across docs (no segment races).
+        const briefOne = async (d: any) => {
+          inFlight++; report()
           let done = false, guard = 0
           while (!done && guard++ < 15) {
             const r = await fetch(`${FN_BASE}/doc-brief`, {
@@ -216,7 +221,16 @@ export function AbstractsPage() {
             if (!r.ok || j.error) break     // non-fatal: synthesis falls back to raw text for this doc
             done = j.done !== false
           }
+          inFlight--; completed++; report()
         }
+        // Bounded-concurrency pool: collapses Stage-1 wall-clock from sum-of-docs
+        // (the old one-at-a-time loop) to ~ceil(docs/CONCURRENCY) x slowest-doc.
+        if (total) report()
+        const queue = [...toBrief]
+        const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, async () => {
+          for (let d = queue.shift(); d; d = queue.shift()) await briefOne(d)
+        })
+        await Promise.all(workers)
       }
       // ── Stage 2: synthesize the abstract from the briefs. ──
       setPhase(p => ({ ...p, [tenant]: 'synthesizing…' }))
