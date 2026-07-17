@@ -13,7 +13,7 @@ const RED = '#b3261e'
 const AMBER = '#8a6d3b'
 
 export interface AgreementAbstractReportInput {
-  kind: 'rea' | 'jv'
+  kind: 'rea' | 'jv' | 'pma'
   name: string
   abstract: any
   qa?: any | null
@@ -30,7 +30,7 @@ const str = (v: any): string | null => (typeof v === 'string' && v.trim() ? v : 
 
 export function AgreementAbstractReport({ kind, name, abstract, qa, qaStatus, qaAt, generatedAt }: AgreementAbstractReportInput) {
   const a = abstract && typeof abstract === 'object' ? abstract : {}
-  const kindLabel = kind === 'jv' ? 'Joint-Venture Operating Agreement' : 'Reciprocal Easement / Recorded Instrument'
+  const kindLabel = kind === 'jv' ? 'Joint-Venture Operating Agreement' : kind === 'pma' ? 'Property Management Agreement' : 'Reciprocal Easement / Recorded Instrument'
   const qaBits = [
     qaStatus ? `verification: ${qaStatus}` : null,
     qaAt ? `checked ${new Date(qaAt).toLocaleDateString('en-US')}` : null,
@@ -44,7 +44,7 @@ export function AgreementAbstractReport({ kind, name, abstract, qa, qaStatus, qa
       subtitle={[kindLabel, qaBits].filter(Boolean).join('  ·  ')}
       metaRight={[`Generated ${generatedAt}`]}
     >
-      {kind === 'jv' ? <JvBody a={a} /> : <ReaBody a={a} />}
+      {kind === 'jv' ? <JvBody a={a} /> : kind === 'pma' ? <PmaBody a={a} /> : <ReaBody a={a} />}
       <OpenItems items={Array.isArray(a.open_items) ? a.open_items : []} />
       <Verification qa={qa} />
 
@@ -392,6 +392,134 @@ function JvBody({ a }: { a: any }) {
       )}
 
       {str(a.reporting_tax) ? <Section label="Reporting & tax"><Para text={str(a.reporting_tax)} /></Section> : null}
+
+      <AmendmentChain chain={a.amendment_chain} />
+      <CriticalDates dates={a.critical_dates} />
+    </View>
+  )
+}
+
+// ── PMA body ──────────────────────────────────────────────────────────────────
+
+function PmaBody({ a }: { a: any }) {
+  const term = a.term && typeof a.term === 'object' ? a.term : null
+  const termn = a.termination && typeof a.termination === 'object' ? a.termination : null
+  const fees = a.fees && typeof a.fees === 'object' ? a.fees : null
+  const reimb = a.reimbursables && typeof a.reimbursables === 'object' ? a.reimbursables : null
+  const budget = a.budget && typeof a.budget === 'object' ? a.budget : null
+  const appr = a.approvals && typeof a.approvals === 'object' ? a.approvals : null
+  const msa = appr?.manager_spending_authority && typeof appr.manager_spending_authority === 'object' ? appr.manager_spending_authority : null
+  const ownerReq: any[] = Array.isArray(appr?.owner_approval_required) ? appr.owner_approval_required : []
+  const majors: string[] = Array.isArray(appr?.major_decisions) ? appr.major_decisions : []
+  const reporting: any[] = Array.isArray(a.reporting) ? a.reporting : []
+  const otherFees: any[] = Array.isArray(fees?.other) ? fees.other : []
+
+  return (
+    <View>
+      {str(a.manager) ? <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: TEXT, marginTop: 2 }}>{pdfSafe(a.manager)}{str(a.sub_manager) ? <Text style={{ fontFamily: 'Helvetica', color: TEXT_FAINT }}>{pdfSafe(`  (sub-manager: ${a.sub_manager})`)}</Text> : null}</Text> : null}
+      <Text style={{ fontSize: 7.5, color: TEXT_MUTED, marginTop: 1 }}>
+        {pdfSafe([str(a.owner) ? `owner: ${a.owner}` : null, str(a.effective_date) ? `effective ${a.effective_date}` : null, term && str(term.end) ? `term to ${term.end}` : null].filter(Boolean).join('   ·   '))}
+      </Text>
+
+      {(msa || ownerReq.length > 0 || majors.length > 0) && (
+        <View style={{ marginTop: 8, backgroundColor: '#eef1f3', borderWidth: 0.75, borderColor: RULE, borderRadius: 3, paddingVertical: 5, paddingHorizontal: 8 }}>
+          <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', letterSpacing: 1.2, color: WILKOW, marginBottom: 3 }}>APPROVALS & SPENDING AUTHORITY</Text>
+
+          {msa && (str(msa.routine_limit) || str(msa.emergency) || str(msa.single_expenditure_limit) || str(msa.annual_or_aggregate_limit) || str(msa.contract_term_or_size_limit) || str(msa.quote)) ? (
+            <View style={{ marginBottom: (ownerReq.length > 0 || majors.length > 0) ? 5 : 0 }}>
+              <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: TEXT_FAINT, marginBottom: 1 }}>MANAGER MAY COMMIT WITHOUT OWNER APPROVAL</Text>
+              <Field label="Routine" value={msa.routine_limit} />
+              <Field label="Emergency" value={msa.emergency} />
+              <Field label="Single expenditure" value={msa.single_expenditure_limit} />
+              <Field label="Annual / aggregate" value={msa.annual_or_aggregate_limit} />
+              <Field label="Contract term / size" value={msa.contract_term_or_size_limit} />
+              <Quote text={str(msa.quote)} cite={str(msa.section)} />
+            </View>
+          ) : null}
+
+          {ownerReq.length > 0 && (
+            <View style={{ marginBottom: majors.length > 0 ? 5 : 0 }}>
+              <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: TEXT_FAINT, marginBottom: 1 }}>{pdfSafe(`REQUIRES OWNER APPROVAL (${ownerReq.length})`)}</Text>
+              {ownerReq.map((r, i) => (
+                <View key={i} wrap={false} style={{ marginBottom: 2.5 }}>
+                  <Text style={{ fontSize: 7.5, lineHeight: 1.5 }}>
+                    <Text style={{ fontFamily: 'Helvetica-Bold', color: TEXT }}>{pdfSafe(str(r.matter) ?? '')}</Text>
+                    {str(r.threshold) ? <Text style={{ fontFamily: 'Helvetica-Bold', color: AMBER }}>{pdfSafe(`  ${r.threshold}`)}</Text> : null}
+                    {str(r.category) ? <Text style={{ color: TEXT_FAINT }}>{pdfSafe(`  ${String(r.category).replace(/_/g, ' ')}`)}</Text> : null}
+                  </Text>
+                  {str(r.scope) ? <Text style={{ fontSize: 7, color: TEXT_MUTED, lineHeight: 1.45 }}>{pdfSafe(r.scope)}</Text> : null}
+                  <Quote text={str(r.quote)} cite={str(r.section)} />
+                </View>
+              ))}
+            </View>
+          )}
+
+          {majors.length > 0 && (
+            <View>
+              <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: TEXT_FAINT, marginBottom: 1 }}>{pdfSafe(`MAJOR DECISIONS RESERVED TO OWNER (${majors.length})`)}</Text>
+              {majors.map((d, i) => <Text key={i} style={{ fontSize: 7, color: TEXT_MUTED, lineHeight: 1.4 }}>{pdfSafe(`•  ${d}`)}</Text>)}
+            </View>
+          )}
+
+          {str(appr?.notes) ? <Text style={{ fontSize: 7, color: TEXT_MUTED, lineHeight: 1.45, marginTop: 3 }}>{pdfSafe(appr.notes)}</Text> : null}
+        </View>
+      )}
+
+      {fees && (
+        <Section label="Fees">
+          {fees.management && (fees.management.pct != null || str(fees.management.base) || str(fees.management.minimum)) ? (
+            <Text style={{ fontSize: 7.5, color: TEXT_MUTED, lineHeight: 1.5, marginBottom: 1.5 }}>
+              <Text style={{ fontFamily: 'Helvetica-Bold', color: TEXT }}>Management  </Text>
+              {pdfSafe([fees.management.pct != null ? `${fees.management.pct}%` : null, str(fees.management.base), str(fees.management.minimum) ? `min ${fees.management.minimum}` : null].filter(Boolean).join('  ·  '))}
+            </Text>
+          ) : null}
+          {fees.construction && (fees.construction.pct != null || str(fees.construction.basis)) ? (
+            <Text style={{ fontSize: 7.5, color: TEXT_MUTED, lineHeight: 1.5, marginBottom: 1.5 }}>
+              <Text style={{ fontFamily: 'Helvetica-Bold', color: TEXT }}>Construction  </Text>
+              {pdfSafe([fees.construction.pct != null ? `${fees.construction.pct}%` : null, str(fees.construction.basis)].filter(Boolean).join('  ·  '))}
+            </Text>
+          ) : null}
+          {fees.leasing && str(fees.leasing.terms) ? <Field label="Leasing" value={fees.leasing.terms} /> : null}
+          {otherFees.map((f, i) => (
+            <Text key={i} style={{ fontSize: 7, color: TEXT_MUTED, lineHeight: 1.45, marginBottom: 1 }}><Text style={{ fontFamily: 'Helvetica-Bold' }}>{pdfSafe(`${str(f.fee) ?? ''}: `)}</Text>{pdfSafe(str(f.terms) ?? '')}</Text>
+          ))}
+        </Section>
+      )}
+
+      {termn && (termn.for_convenience?.notice_days != null || str(termn.for_convenience?.who) || str(termn.for_cause) || str(termn.on_sale) || str(termn.fees_on_termination)) ? (
+        <Section label="Termination">
+          {termn.for_convenience && (str(termn.for_convenience.who) || termn.for_convenience.notice_days != null) ? (
+            <Field label="For convenience" value={[str(termn.for_convenience.who), termn.for_convenience.notice_days != null ? `${termn.for_convenience.notice_days} days notice` : null].filter(Boolean).join('  ·  ')} />
+          ) : null}
+          <Field label="For cause" value={termn.for_cause} />
+          <Field label="On sale" value={termn.on_sale} />
+          <Field label="Termination fees" value={termn.fees_on_termination} />
+        </Section>
+      ) : null}
+
+      {budget && (str(budget.approval) || str(budget.variance_authority)) ? (
+        <Section label="Budget">
+          <Field label="Approval" value={budget.approval} />
+          <Field label="Permitted variance" value={budget.variance_authority} />
+        </Section>
+      ) : null}
+
+      {reimb && (str(reimb.included) || str(reimb.excluded)) ? (
+        <Section label="Reimbursables">
+          <Field label="Included" value={reimb.included} />
+          <Field label="Excluded" value={reimb.excluded} />
+        </Section>
+      ) : null}
+
+      {reporting.length > 0 && (
+        <Section label="Reporting">
+          {reporting.map((r, i) => (
+            <Text key={i} style={{ fontSize: 7, color: TEXT_MUTED, lineHeight: 1.45, marginBottom: 1 }}>
+              <Text style={{ fontFamily: 'Helvetica-Bold', color: TEXT }}>{pdfSafe(str(r.report) ?? '')}</Text>{str(r.due) ? pdfSafe(` — due ${r.due}`) : null}
+            </Text>
+          ))}
+        </Section>
+      )}
 
       <AmendmentChain chain={a.amendment_chain} />
       <CriticalDates dates={a.critical_dates} />

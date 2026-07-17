@@ -10,7 +10,7 @@ import { useState, type ReactNode, type CSSProperties } from 'react'
 // independent verification verdict.
 
 export function AgreementAbstractPanel({ kind, abstract }: {
-  kind: 'rea' | 'jv'; abstract: any
+  kind: 'rea' | 'jv' | 'pma'; abstract: any
 }) {
   const [open, setOpen] = useState(false)
   if (!abstract || typeof abstract !== 'object') return null
@@ -24,7 +24,7 @@ export function AgreementAbstractPanel({ kind, abstract }: {
           Verified abstract
         </span>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          {kind === 'jv' ? 'operating-agreement synthesis' : 'recorded-instrument synthesis'}
+          {kind === 'jv' ? 'operating-agreement synthesis' : kind === 'pma' ? 'management-agreement synthesis' : 'recorded-instrument synthesis'}
         </span>
         {openItems.length > 0 && (
           <span style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 7px', borderRadius: 9, color: 'var(--amber)', background: 'rgba(245,158,11,0.12)' }}>
@@ -37,7 +37,7 @@ export function AgreementAbstractPanel({ kind, abstract }: {
       </button>
       {open && (
         <div style={{ padding: '12px 14px', background: 'var(--surface)' }}>
-          {kind === 'jv' ? <JvBody a={abstract} /> : <ReaBody a={abstract} />}
+          {kind === 'jv' ? <JvBody a={abstract} /> : kind === 'pma' ? <PmaBody a={abstract} /> : <ReaBody a={abstract} />}
           {openItems.length > 0 && <OpenItems items={openItems} />}
         </div>
       )}
@@ -368,6 +368,161 @@ function JvBody({ a }: { a: any }) {
       )}
 
       <MiscFields fields={[['Reporting & tax', a.reporting_tax]]} />
+      <AmendmentChain chain={a.amendment_chain} />
+      <CriticalDates dates={a.critical_dates} />
+    </>
+  )
+}
+
+// ── PMA body ──────────────────────────────────────────────────────────────────
+
+function PmaBody({ a }: { a: any }) {
+  const term = a.term && typeof a.term === 'object' ? a.term : null
+  const termn = a.termination && typeof a.termination === 'object' ? a.termination : null
+  const fees = a.fees && typeof a.fees === 'object' ? a.fees : null
+  const reimb = a.reimbursables && typeof a.reimbursables === 'object' ? a.reimbursables : null
+  const budget = a.budget && typeof a.budget === 'object' ? a.budget : null
+  const appr = a.approvals && typeof a.approvals === 'object' ? a.approvals : null
+  const msa = appr?.manager_spending_authority && typeof appr.manager_spending_authority === 'object' ? appr.manager_spending_authority : null
+  const ownerReq: any[] = Array.isArray(appr?.owner_approval_required) ? appr.owner_approval_required : []
+  const majors: string[] = Array.isArray(appr?.major_decisions) ? appr.major_decisions : []
+  const duties: any[] = Array.isArray(a.duties) ? a.duties : []
+  const reporting: any[] = Array.isArray(a.reporting) ? a.reporting : []
+  const otherFees: any[] = Array.isArray(fees?.other) ? fees.other : []
+
+  return (
+    <>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{str(a.manager)}{str(a.sub_manager) && <span style={{ fontWeight: 500, color: 'var(--text-faint)' }}> (sub-manager: {a.sub_manager})</span>}</div>
+        {[str(a.owner) && `owner: ${a.owner}`, str(a.effective_date) && `effective ${a.effective_date}`, term && str(term.end) && `term to ${term.end}`].filter(Boolean).join('  ·  ')}
+      </div>
+
+      {/* Owner-control heart of the PMA — surfaced first. */}
+      {(msa || ownerReq.length > 0 || majors.length > 0 || str(appr?.notes)) && (
+        <div style={{ marginBottom: 14, padding: '10px 12px', background: 'var(--accent-soft, rgba(59,130,246,0.09))', border: '1px solid var(--border-2)', borderRadius: 8 }}>
+          <div style={{ ...sectionLbl, color: 'var(--accent)', marginBottom: 6 }}>Approvals & spending authority</div>
+
+          {msa && (str(msa.routine_limit) || str(msa.emergency) || str(msa.single_expenditure_limit) || str(msa.annual_or_aggregate_limit) || str(msa.contract_term_or_size_limit) || str(msa.quote)) && (
+            <div style={{ marginBottom: ownerReq.length > 0 || majors.length > 0 ? 10 : 0 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 650, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 3 }}>Manager may commit without owner approval</div>
+              <Field label="Routine limit" value={str(msa.routine_limit)} />
+              <Field label="Emergency" value={str(msa.emergency)} />
+              <Field label="Single expenditure" value={str(msa.single_expenditure_limit)} />
+              <Field label="Annual / aggregate" value={str(msa.annual_or_aggregate_limit)} />
+              <Field label="Contract term / size" value={str(msa.contract_term_or_size_limit)} />
+              <Quote text={str(msa.quote)} cite={str(msa.section)} />
+            </div>
+          )}
+
+          {ownerReq.length > 0 && (
+            <div style={{ marginBottom: majors.length > 0 ? 10 : 0 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 650, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 4 }}>Requires owner approval ({ownerReq.length})</div>
+              {ownerReq.map((r, i) => (
+                <Card key={i}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{str(r.matter)}</span>
+                    {str(r.threshold) && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--amber)' }}>{r.threshold}</span>}
+                    {str(r.category) && <span style={{ fontSize: 9.5, color: 'var(--text-faint)' }}>{String(r.category).replace(/_/g, ' ')}</span>}
+                  </div>
+                  {str(r.scope) && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{r.scope}</div>}
+                  <Quote text={str(r.quote)} cite={str(r.section)} />
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {majors.length > 0 && (
+            <div>
+              <div style={{ fontSize: 9.5, fontWeight: 650, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 3 }}>Major decisions reserved to owner ({majors.length})</div>
+              <ul style={{ margin: 0, paddingLeft: 16 }}>
+                {majors.map((d, i) => <li key={i} style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 1 }}>{d}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {str(appr?.notes) && <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 8 }}>{appr.notes}</div>}
+        </div>
+      )}
+
+      {fees && (
+        <Section label="Fees">
+          {fees.management && (str(fees.management.pct != null ? `${fees.management.pct}%` : null) || str(fees.management.base) || str(fees.management.minimum)) && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+              <b style={{ color: 'var(--text)' }}>Management: </b>
+              {[fees.management.pct != null ? `${fees.management.pct}%` : null, str(fees.management.base), str(fees.management.minimum) && `min ${fees.management.minimum}`].filter(Boolean).join(' · ')}
+              {str(fees.management.section) && <span style={{ color: 'var(--text-faint)' }}> — {fees.management.section}</span>}
+            </div>
+          )}
+          {fees.construction && (fees.construction.pct != null || str(fees.construction.basis)) && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+              <b style={{ color: 'var(--text)' }}>Construction: </b>
+              {[fees.construction.pct != null ? `${fees.construction.pct}%` : null, str(fees.construction.basis)].filter(Boolean).join(' · ')}
+            </div>
+          )}
+          {fees.leasing && str(fees.leasing.terms) && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}><b style={{ color: 'var(--text)' }}>Leasing: </b>{fees.leasing.terms}</div>
+          )}
+          {otherFees.map((f, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}>
+              <b>{str(f.fee)}:</b> {str(f.terms)}{str(f.section) && <span style={{ color: 'var(--text-faint)' }}> — {f.section}</span>}
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {termn && (str(termn.for_convenience?.notice_days != null ? String(termn.for_convenience.notice_days) : null) || str(termn.for_convenience?.who) || str(termn.for_cause) || str(termn.on_sale) || str(termn.fees_on_termination)) && (
+        <Section label="Termination">
+          {termn.for_convenience && (str(termn.for_convenience.who) || termn.for_convenience.notice_days != null) && (
+            <Field label="For convenience" value={[str(termn.for_convenience.who), termn.for_convenience.notice_days != null ? `${termn.for_convenience.notice_days} days notice` : null].filter(Boolean).join(' · ')} />
+          )}
+          <Field label="For cause" value={str(termn.for_cause)} />
+          <Field label="On sale" value={str(termn.on_sale)} />
+          <Field label="Termination fees" value={str(termn.fees_on_termination)} />
+        </Section>
+      )}
+
+      {budget && (str(budget.approval) || str(budget.variance_authority)) && (
+        <Section label="Budget">
+          <Field label="Approval" value={str(budget.approval)} />
+          <Field label="Permitted variance" value={str(budget.variance_authority)} />
+          {str(budget.section) && <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{budget.section}</div>}
+        </Section>
+      )}
+
+      {reimb && (str(reimb.included) || str(reimb.excluded)) && (
+        <Section label="Reimbursables">
+          <Field label="Included" value={str(reimb.included)} />
+          <Field label="Excluded" value={str(reimb.excluded)} />
+        </Section>
+      )}
+
+      {reporting.length > 0 && (
+        <Section label="Reporting">
+          {reporting.map((r, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 2 }}>
+              <b style={{ color: 'var(--text)' }}>{str(r.report)}</b>{str(r.due) && ` — due ${r.due}`}{str(r.section) && <span style={{ color: 'var(--text-faint)' }}> · {r.section}</span>}
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {duties.length > 0 && (
+        <Section label={`Duties (${duties.length})`}>
+          {duties.map((d, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 2 }}>
+              {str(d.duty)}{str(d.standard) && <span style={{ color: 'var(--text-faint)' }}> — {d.standard}</span>}{str(d.section) && <span style={{ color: 'var(--text-faint)' }}> · {d.section}</span>}
+            </div>
+          ))}
+        </Section>
+      )}
+
+      <MiscFields fields={[
+        ['Banking', a.banking?.accounts],
+        ['Insurance', a.insurance_indemnity?.manager_insurance],
+        ['Indemnities', a.insurance_indemnity?.indemnities],
+        ['Affiliate transactions', a.affiliate_transactions],
+      ]} />
+
       <AmendmentChain chain={a.amendment_chain} />
       <CriticalDates dates={a.critical_dates} />
     </>

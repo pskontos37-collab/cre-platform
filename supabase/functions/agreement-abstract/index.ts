@@ -99,6 +99,7 @@ const PMA_SCHEMA = `{
  "fees": {"management": {"pct": num|null, "base": str|null, "minimum": str|null, "section": str|null}, "construction": {"pct": num|null, "basis": str|null, "section": str|null}, "leasing": {"terms": str|null, "section": str|null}, "other": [{"fee": str, "terms": str, "section": str}]},
  "reimbursables": {"included": str|null, "excluded": str|null, "section": str|null},
  "duties": [{"duty": str, "standard": str|null, "section": str}],
+ "approvals": {"manager_spending_authority": {"routine_limit": str|null, "emergency": str|null, "single_expenditure_limit": str|null, "annual_or_aggregate_limit": str|null, "contract_term_or_size_limit": str|null, "quote": str|null, "section": str|null}, "owner_approval_required": [{"matter": str, "category": "operating_expense"|"capital_expense"|"contract"|"leasing"|"legal"|"personnel"|"budget"|"other"|str, "threshold": str|null, "scope": str|null, "quote": str|null, "section": str}], "major_decisions": [str], "notes": str|null},
  "budget": {"approval": str|null, "variance_authority": str|null, "section": str|null},
  "banking": {"accounts": str|null, "section": str|null},
  "reporting": [{"report": str, "due": str, "section": str}],
@@ -272,7 +273,12 @@ ${kind === 'rea'
 6. CONTROL & EXIT: major-decision list (as enumerated), manager removal, transfer/ROFR/ROFO, buy-sell/forced-sale, and capital-call failure remedies (dilution formulas verbatim).`
   : `4. FEES: capture every fee with its percentage, base (e.g. gross receipts definition), minimums, and section — plus reimbursables and their exclusions. The structured cross-check payload below holds the tracker's current values; abstract the DOCUMENTED values and flag disagreements as "DISCREPANCY: …" open items.
 5. TERMINATION: who may terminate, on what notice, for what causes, on sale, and any termination fees.
-6. REPORTING & BUDGET: report due dates and the manager's spending/variance authority.`}
+6. APPROVALS & SPENDING AUTHORITY (do this thoroughly — it is the owner-control heart of the PMA): distinguish what the MANAGER may do on its own from what requires OWNER (or JV/lender) sign-off, in terms of BOTH scope AND expense.
+   - approvals.manager_spending_authority: the dollar limits and scope of what the manager may commit WITHOUT prior owner approval — the routine/per-item cap, emergency-repair authority (and its notice obligation), any single-expenditure limit, annual/aggregate limits, and contract term/size caps. Quote the operative sentence and cite the section.
+   - approvals.owner_approval_required: ENUMERATE every matter the agreement makes subject to owner approval — one entry per matter, with its dollar/percentage THRESHOLD (e.g. "capital expenditures > $10,000", "any non-budgeted expense", "leases > 5,000 sf or > 5 yr", "service contracts > 1 yr or non-terminable on 30 days") and a plain-English SCOPE, each with a verbatim quote and section. Category-tag each (operating_expense / capital_expense / contract / leasing / legal / personnel / budget / other).
+   - approvals.major_decisions: if the agreement enumerates a list of "major decisions" reserved to the owner/JV, list them.
+   - A budget line-item variance that itself triggers owner approval (e.g. "5% over a budget line") belongs in BOTH budget.variance_authority AND as an owner_approval_required entry (category budget). Anything requiring approval that is NOT stated with a dollar figure still goes in owner_approval_required with threshold=null and the scope described.
+   - Also capture REPORTING (report due dates in reporting[]) and the BUDGET submission/approval process and permitted variance (budget{}).`}
 7. GROUNDING — NO FABRICATION: every value traces to a brief, raw text, or attached PDF; silent items are null + open item ("MISSING FROM FILE:" only for instruments referenced but absent from the inventory; "CONFIRM:"/"DISCREPANCY:" as in the lease standard).
 
 Call submit_abstract with an object matching this schema exactly (all keys present; fields at the TOP LEVEL of the tool input, no wrapper key):

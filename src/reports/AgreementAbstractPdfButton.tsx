@@ -5,7 +5,7 @@ import { PdfDownloadButton } from './PdfDownloadButton'
 // of the main bundle. Disabled until the agreement has a generated abstract.
 
 export function AgreementAbstractPdfButton({ kind, name, abstract, qa, qaStatus, qaAt }: {
-  kind: 'rea' | 'jv'
+  kind: 'rea' | 'jv' | 'pma'
   name: string
   abstract: any
   qa?: any | null

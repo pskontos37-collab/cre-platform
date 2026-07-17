@@ -7,6 +7,8 @@ import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DocAbstractsButton, type AbstractDocRef } from '../components/DocAbstractsButton'
 import { AgreementQaBadge, AgreementQaPanel } from '../components/AgreementQaPanel'
+import { AgreementAbstractPanel } from '../components/AgreementAbstractPanel'
+import { AgreementAbstractPdfButton } from '../reports/AgreementAbstractPdfButton'
 
 // Discrete, queryable columns (each is a prompt).
 const NUM_FIELDS: { key: keyof MgmtAgreement; label: string; suffix?: string; pct?: boolean }[] = [
@@ -194,9 +196,22 @@ function AgreementEditor({ agreement, effective, onSaved }: {
           {msg && <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{msg}</span>}
           <AgreementQaBadge status={agreement.qa_status} />
           {agreement.document_id && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>source doc linked</span>}
+          {agreement.abstract && (
+            <AgreementAbstractPdfButton
+              kind="pma"
+              name={`${agreement.manager_name ?? 'Management Agreement'}${agreement.effective_date ? ` (${agreement.effective_date})` : ''}`}
+              abstract={agreement.abstract} qa={agreement.qa} qaStatus={agreement.qa_status} qaAt={agreement.qa_at}
+            />
+          )}
           <button onClick={save} disabled={saving} style={btn}>{saving ? 'Saving…' : 'Save terms'}</button>
         </div>
       </div>
+
+      {/* Verified abstract (agreement-abstract kind=pma): the brief-synthesis
+          of the executed PMA + amendment chain — fees, termination, and the
+          approvals/spending-authority block (what the manager may commit vs.
+          what needs owner sign-off, with scope + expense thresholds). */}
+      {agreement.abstract && <AgreementAbstractPanel kind="pma" abstract={agreement.abstract} />}
 
       {/* Document-verification verdict (agreement-verify kind=pma): the
           abstracted PMA terms audited against the executed agreement, with
