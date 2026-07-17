@@ -181,13 +181,33 @@ serve(async (req) => {
 
     // ── 1. The abstract (human-corrected values applied) ──
     const { data: row, error: rErr } = await sb.from('lease_abstracts')
-      .select('id, abstract, overrides, source_doc_ids, model, locked')
+      .select('id, abstract, overrides, source_doc_ids, model, locked, human_verified')
       .eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
     if (rErr) throw new Error('load abstract failed: ' + rErr.message)
     if (!row || !row.abstract) throw new Error(`No abstract exists for "${tenant}" — generate it first`)
     const auditAbstract = applyOverrides(row.abstract, row.overrides)
     const sourceIds: string[] = Array.isArray(row.source_doc_ids) ? row.source_doc_ids : []
     const highStakes = extractHighStakes(auditAbstract)
+
+    // ── 1a. STICKY HUMAN DECISIONS. A field a human has already ruled on must not
+    // be re-raised as a fresh red flag by a re-run (the "I told you this days ago"
+    // problem). A field is SETTLED if: the abstract is locked/human_verified; OR a
+    // human override exists for it; OR a non-archived resolution (accepted/waived/
+    // corrected) exists for it. When a settled field's lenses now disagree, we
+    // record it as a quiet "reconfirm" — new evidence to re-examine — NEVER a red
+    // disagreement. Genuinely new fields (no prior decision) still flag normally. ──
+    const { data: resRows } = await sb.from('abstract_item_resolutions')
+      .select('item_key, status, archived')
+      .eq('abstract_id', row.id).eq('archived', false)
+    const settledKeys = new Set<string>()
+    const wholeAbstractSettled = row.locked === true || row.human_verified === true
+    for (const p of Object.keys((row.overrides && typeof row.overrides === 'object') ? row.overrides : {})) {
+      settledKeys.add(`field:${p.toLowerCase()}`)
+    }
+    for (const r of (resRows ?? []) as any[]) {
+      if (['accepted', 'waived', 'corrected'].includes(r.status)) settledKeys.add(String(r.item_key).toLowerCase())
+    }
+    const isSettled = (field: string) => wholeAbstractSettled || settledKeys.has(`field:${field.toLowerCase()}`)
 
     // ── 2. Source-doc briefs (100%-of-text extractions — enough for field-scoped
     // cross-checks, and fast: no PDF attachment, keeps us under the edge wall) ──
@@ -278,27 +298,35 @@ ${CHECK_SCHEMA}`
     }
     const fields: Record<string, any> = {}
     const disagreements: any[] = []
+    const reconfirm: any[] = []                                  // settled fields the lenses now dispute (quiet, not red)
     for (const h of highStakes) {
       const votes = byField.get(h.field) ?? []
       const agree = votes.filter(v => v.verdict === 'agree').length
       const disagree = votes.filter(v => v.verdict === 'disagree').length
+      const settled = isSettled(h.field)
       let confidence: string
-      if (votes.length === 0) confidence = 'low'
+      if (settled) confidence = 'settled'                        // a human ruled on it — not a red field
+      else if (votes.length === 0) confidence = 'low'
       else if (disagree > 0) confidence = 'low'
       else if (agree === votes.length) confidence = 'high'
       else if (agree >= 1) confidence = 'medium'
       else confidence = 'low'                                    // all cant_verify
-      fields[h.field] = { abstract_value: h.value, confidence, agreement: `${agree}/${votes.length}`, lenses: votes }
+      fields[h.field] = { abstract_value: h.value, confidence, agreement: `${agree}/${votes.length}`, lenses: votes, settled }
       if (disagree > 0) {
         // Prefer a disagreeing vote whose proposed correct_value actually differs
         // from the stored value (deterministic guard against a lens that says
         // "disagree" but echoes the same value).
         const d = votes.find(v => v.verdict === 'disagree' && v.correct_value != null && norm(v.correct_value) !== norm(h.value))
           ?? votes.find(v => v.verdict === 'disagree')
-        if (d) disagreements.push({
+        if (!d) continue
+        const item = {
           field: h.field, abstract_value: h.value, correct_value: d.correct_value,
           citation: d.citation, quote: d.quote, votes: `${disagree} disagree / ${votes.length} checked`,
-        })
+        }
+        // A field the human already ruled on is NEVER re-raised as a red
+        // disagreement — it becomes a quiet reconfirm (new evidence to re-examine).
+        if (settled) reconfirm.push(item)
+        else disagreements.push(item)
       }
     }
 
@@ -318,6 +346,7 @@ ${CHECK_SCHEMA}`
       for (const h of highStakes) {
         if (!AUTO_APPLY_FIELDS.has(h.field)) continue
         if (h.field in existingOverrides) continue                 // never overwrite a human correction
+        if (isSettled(h.field)) continue                           // never auto-touch a human-settled field
         const votes = byField.get(h.field) ?? []
         if (votes.length < 2) continue                             // need every lens's vote
         const dis = votes.filter(v => v.verdict === 'disagree')
@@ -359,13 +388,16 @@ ${CHECK_SCHEMA}`
       lens_errors: lensErrors,
       fields,
       disagreements,
+      reconfirm,
       auto_applied: autoApplied,
       // Summary counts for portfolio rollups / status chips.
       summary: {
         high: Object.values(fields).filter((f: any) => f.confidence === 'high').length,
         medium: Object.values(fields).filter((f: any) => f.confidence === 'medium').length,
         low: Object.values(fields).filter((f: any) => f.confidence === 'low').length,
+        settled: Object.values(fields).filter((f: any) => f.confidence === 'settled').length,
         disagreements: disagreements.length,
+        reconfirm: reconfirm.length,
         auto_applied: autoApplied.length,
       },
     }
@@ -376,7 +408,7 @@ ${CHECK_SCHEMA}`
       .eq('property_id', propertyId).eq('tenant_name', tenant)
     if (upErr) throw new Error('save failed: ' + upErr.message)
 
-    return new Response(JSON.stringify({ success: true, tenant, property_id: propertyId, summary: fieldConfidence.summary, disagreements, auto_applied: autoApplied, lens_errors: lensErrors }),
+    return new Response(JSON.stringify({ success: true, tenant, property_id: propertyId, summary: fieldConfidence.summary, disagreements, reconfirm, auto_applied: autoApplied, lens_errors: lensErrors }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   } catch (err: unknown) {
