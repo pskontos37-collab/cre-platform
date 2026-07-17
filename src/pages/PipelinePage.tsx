@@ -1713,7 +1713,7 @@ function UwPromotePanel({ r, promote, onChange, busy }: { r: AcqResult; promote:
   const delTier = (i: number) => onChange({ ...p, tiers: p.tiers.filter((_, j) => j !== i) })
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '11px 12px', display: 'flex', flexDirection: 'column', gap: 11 }}>
-      <SectionLabel2>LP / GP promote — {Math.round(p.lpEquityPct * 100)}/{Math.round(gpEquityPct * 100)} co-invest · {pct(p.prefRate)} pref pari-passu</SectionLabel2>
+      <SectionLabel2>LP / GP promote — Equity {Math.round(p.lpEquityPct * 100)}/{Math.round(gpEquityPct * 100)} LP/GP · {pct(p.prefRate)} pref (pari-passu)</SectionLabel2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: 8 }}>
         <Fact label="LP IRR" value={pct(pr.lpIrr)} tint={uwIrrColor(pr.lpIrr)} />
         <Fact label="LP multiple" value={em(pr.lpEm)} />
