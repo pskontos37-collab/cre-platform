@@ -252,6 +252,43 @@ serve(async (req) => {
     }
     const leaseOut = leaseRow ? { ...leaseRow, id: undefined } : null
 
+    // ── 3a. EXCLUSIVES-OWNERSHIP REGISTRY (migration 20240112). Deterministic
+    // ground truth for who holds which exclusive at this property (incl. vacated
+    // tenants). Used to REJECT the recurring misattribution class: a lens
+    // asserting THIS tenant holds an exclusive that actually belongs to another
+    // tenant (e.g. Buy Buy Baby's exclusive filed under J. Crew). ──
+    const { data: registryRows } = await sb.from('property_exclusives')
+      .select('owner_tenant, keywords').eq('property_id', propertyId)
+    const foreignOwners: string[] = []
+    const foreignKeywords: string[] = []
+    for (const e of (registryRows ?? []) as any[]) {
+      if (nm(e.owner_tenant) === tl) continue                     // this tenant's own registry entry
+      const owner = nm(e.owner_tenant)
+      if (owner.length >= 4) foreignOwners.push(owner)
+      for (const kw of (Array.isArray(e.keywords) ? e.keywords : [])) {
+        const k = String(kw).toLowerCase().trim()
+        // Only MULTI-WORD phrases — single common words ("children", "infant")
+        // substring-match legitimate different exclusives (Old Navy's apparel
+        // "for women, men, and children") and cause false rejections.
+        if (k.includes(' ') && k.length >= 6 && k !== tl) foreignKeywords.push(k)
+      }
+    }
+    // Returns a reason string if the disagreement asserts an exclusive for THIS
+    // tenant that the registry / structure says belongs to someone else.
+    const guardExclusive = (field: string, stored: string, d: any): string | null => {
+      if (!field.startsWith('exclusives')) return null
+      const assertsExclusive =
+        (field === 'exclusives.exists' && norm(d.correct_value) === 'true' && norm(stored) !== 'true') ||
+        (field === 'exclusives.exact_language' && d.correct_value != null && String(d.correct_value).trim() !== '' &&
+          (stored == null || norm(stored) === 'null' || norm(stored) === ''))
+      if (!assertsExclusive) return null
+      const hay = `${d.correct_value ?? ''} ${d.quote ?? ''} ${d.citation ?? ''}`.toLowerCase()
+      if (/existing\s+exclusiv/.test(hay)) return 'cites an "Existing Exclusives" exhibit — another tenant\'s protection, not this tenant\'s'
+      for (const o of foreignOwners) if (hay.includes(o)) return `attributes an exclusive registered to another tenant ("${o}")`
+      for (const k of foreignKeywords) if (hay.includes(k)) return `matches a registry exclusive owned by another tenant ("${k}")`
+      return null
+    }
+
     // ── 4. Run the two lenses CONCURRENTLY over the same context ──
     const fieldsBlock = highStakes.map(h => `- ${h.field} = ${h.value}`).join('\n')
     const baseContext = `SOURCE FILE INVENTORY (every document exists and was available):
@@ -299,6 +336,7 @@ ${CHECK_SCHEMA}`
     const fields: Record<string, any> = {}
     const disagreements: any[] = []
     const reconfirm: any[] = []                                  // settled fields the lenses now dispute (quiet, not red)
+    const registryRejected: any[] = []                           // misattributed exclusives killed by the registry guard
     for (const h of highStakes) {
       const votes = byField.get(h.field) ?? []
       const agree = votes.filter(v => v.verdict === 'agree').length
@@ -322,6 +360,17 @@ ${CHECK_SCHEMA}`
         const item = {
           field: h.field, abstract_value: h.value, correct_value: d.correct_value,
           citation: d.citation, quote: d.quote, votes: `${disagree} disagree / ${votes.length} checked`,
+        }
+        // #3 REGISTRY GUARD: a lens asserting THIS tenant holds an exclusive that
+        // the registry/structure says belongs to another tenant is a
+        // misattribution (the J. Crew/Buy Buy Baby class) — reject it outright,
+        // never a red flag. Deterministic, so it can't be re-rolled wrong.
+        const rej = guardExclusive(h.field, h.value, d)
+        if (rej) {
+          fields[h.field].confidence = 'high'
+          fields[h.field].guarded = rej
+          registryRejected.push({ ...item, reason: rej })
+          continue
         }
         // A field the human already ruled on is NEVER re-raised as a red
         // disagreement — it becomes a quiet reconfirm (new evidence to re-examine).
@@ -389,6 +438,7 @@ ${CHECK_SCHEMA}`
       fields,
       disagreements,
       reconfirm,
+      registry_rejected: registryRejected,
       auto_applied: autoApplied,
       // Summary counts for portfolio rollups / status chips.
       summary: {
@@ -398,6 +448,7 @@ ${CHECK_SCHEMA}`
         settled: Object.values(fields).filter((f: any) => f.confidence === 'settled').length,
         disagreements: disagreements.length,
         reconfirm: reconfirm.length,
+        registry_rejected: registryRejected.length,
         auto_applied: autoApplied.length,
       },
     }
@@ -408,7 +459,7 @@ ${CHECK_SCHEMA}`
       .eq('property_id', propertyId).eq('tenant_name', tenant)
     if (upErr) throw new Error('save failed: ' + upErr.message)
 
-    return new Response(JSON.stringify({ success: true, tenant, property_id: propertyId, summary: fieldConfidence.summary, disagreements, reconfirm, auto_applied: autoApplied, lens_errors: lensErrors }),
+    return new Response(JSON.stringify({ success: true, tenant, property_id: propertyId, summary: fieldConfidence.summary, disagreements, reconfirm, registry_rejected: registryRejected, auto_applied: autoApplied, lens_errors: lensErrors }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   } catch (err: unknown) {
