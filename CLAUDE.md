@@ -104,10 +104,10 @@ invoke the edge-function gateway, never PostgREST. Keep it this way: new RPCs ge
 
 ### Waterfall engine
 `src/lib/waterfall.ts` — pure TypeScript, zero database calls, fully testable.
-Tests: `src/lib/__tests__/waterfall.test.ts`
+Tests: `src/lib/__tests__/irrWaterfall.test.ts` (+ `acqPromote.test.ts` for the pipeline promote)
 
-Three engines live here:
-- `computeWaterfall(input)` — the simple single-lump sequential distributor described below.
+Two engines live here (a third, the simple `computeWaterfall` single-lump distributor, was removed
+2026-07-16 — it was unused; the `/waterfall` path is the IRR solver below):
 - `computeIrrWaterfall(input)` / `runIrrWaterfall(...)` — a **true IRR-hurdle solver** over *dated* cash flows.
   It finds the exact distribution that carries the LP to each tier's `hurdle_irr` before the promote steps up,
   using the fact that XNPV is linear in an added cash flow at a fixed rate (`cashToHitIrr` is closed-form, no
