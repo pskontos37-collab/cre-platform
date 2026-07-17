@@ -1,0 +1,31 @@
+{
+  "_comment": "Drive folders watched by the nightly ingest scanner (ingest_scan.ps1). property_id is the destination; category is informational. exclude = subdirectory names (any depth) to skip. include = document-worthy subfolder-name prefixes; when present, ONLY files under a matching subfolder are ingested (keeps operational noise - invoices, utility bills, photos - out of the corpus). enabled:false skips the folder. Later this table moves into a DB table (property_scan_folders) with a UI to link folders at onboarding.",
+  "_include_note": "The include allowlist reflects the high-value subfolder names observed across Gateway/Magnolia/Knightdale retail folders as of 2026-07-17. Adjust per property as needed.",
+  "folders": [
+    { "root": "K:\\Working Files - Magnolia",                              "property_id": "d4f08824-2d88-472d-b7aa-a703310c2aaf", "property_name": "Magnolia Park",            "category": "accounting", "enabled": false, "_note": "accounting-only; covered by GL/rent-roll/budget loaders, not AI doc-abstraction" },
+    { "root": "K:\\Working Files - Gateway Port Chester",                   "property_id": "d5a4ed03-0b60-4168-9208-83822dd24884", "property_name": "Gateway Port Chester",    "category": "accounting", "enabled": false },
+    { "root": "K:\\Working Files - Knightdale Marketplace",                 "property_id": "00000000-0000-0000-0000-000000000012", "property_name": "Knightdale Consolidated", "category": "accounting", "enabled": false },
+
+    { "root": "K:\\RETAIL\\PROPERTY INFORMATION\\Magnolia Park",            "property_id": "d4f08824-2d88-472d-b7aa-a703310c2aaf", "property_name": "Magnolia Park",            "category": "misc",
+      "include": ["legal", "leasing", "lease abstract", "tenant", "service agreement", "estoppel", "correspondence", "appraisal", "loan", "mortgage", "title", "notice", "default", "ground lease", "sales & percentage", "property information", "property takeover", "ownership", "acquisition", "environmental", "certificate", "redevelopment", "site plan", "rent roll", "real estate tax", "amendment", "guaranty", "lod"] },
+    { "root": "K:\\RETAIL\\PROPERTY INFORMATION\\Gateway Port Chester",     "property_id": "d5a4ed03-0b60-4168-9208-83822dd24884", "property_name": "Gateway Port Chester",    "category": "misc",
+      "include": ["legal", "leasing", "lease abstract", "tenant", "service agreement", "estoppel", "correspondence", "appraisal", "loan", "mortgage", "title", "notice", "default", "ground lease", "sales & percentage", "property information", "property takeover", "ownership", "acquisition", "environmental", "certificate", "redevelopment", "site plan", "rent roll", "real estate tax", "amendment", "guaranty", "lod", "pca"] },
+    { "root": "K:\\RETAIL\\PROPERTY INFORMATION\\Knightdale Marketplace",   "property_id": "00000000-0000-0000-0000-000000000012", "property_name": "Knightdale Consolidated", "category": "misc",
+      "include": ["legal", "leasing", "lease abstract", "tenant", "service agreement", "estoppel", "correspondence", "appraisal", "loan", "mortgage", "title", "notice", "default", "ground lease", "sales & percentage", "property information", "property takeover", "ownership", "acquisition", "environmental", "certificate", "redevelopment", "site plan", "rent roll", "real estate tax", "amendment", "guaranty", "lod", "market data"] },
+
+    { "root": "V:\\Gateway (Formerly Port Chester) 2-8-19",                 "property_id": "d5a4ed03-0b60-4168-9208-83822dd24884", "property_name": "Gateway Port Chester",    "category": "executed", "exclude": ["ACCOUNTING"] },
+    { "root": "V:\\Magnolia Park 11-20-14",                                 "property_id": "d4f08824-2d88-472d-b7aa-a703310c2aaf", "property_name": "Magnolia Park",            "category": "executed", "exclude": ["ACCOUNTING"] },
+
+    { "root": "V:\\Knightdale Marketplace 7-15-19",                         "property_id": "00000000-0000-0000-0000-000000000012", "property_name": "Knightdale Consolidated", "category": "executed", "exclude": ["KM-East (fka Shoppes at Midway)", "KM-West (fka Midtown Commons)", "ACCOUNTING"] },
+    { "root": "V:\\Knightdale Marketplace 7-15-19\\KM-East (fka Shoppes at Midway)", "property_id": "00000000-0000-0000-0000-000000000010", "property_name": "KM East", "category": "executed", "exclude": ["ACCOUNTING"] },
+    { "root": "V:\\Knightdale Marketplace 7-15-19\\KM-West (fka Midtown Commons)",   "property_id": "00000000-0000-0000-0000-000000000011", "property_name": "KM West", "category": "executed", "exclude": ["ACCOUNTING"] },
+
+    { "root": "V:\\ENTITY DOCS\\LLCs\\ML-MJW Port Chester SC Owner LLC",    "property_id": "d5a4ed03-0b60-4168-9208-83822dd24884", "property_name": "Gateway Port Chester",    "category": "entity" },
+    { "root": "V:\\ENTITY DOCS\\LLCs\\ML-MJW Port Chester SC Venture LLC",  "property_id": "d5a4ed03-0b60-4168-9208-83822dd24884", "property_name": "Gateway Port Chester",    "category": "entity" },
+    { "root": "V:\\ENTITY DOCS\\LLCs\\Magnolia Park Greenville LLC",        "property_id": "d4f08824-2d88-472d-b7aa-a703310c2aaf", "property_name": "Magnolia Park",            "category": "entity" },
+    { "root": "V:\\ENTITY DOCS\\LLCs\\Magnolia Park Greenville Venture LLC","property_id": "d4f08824-2d88-472d-b7aa-a703310c2aaf", "property_name": "Magnolia Park",            "category": "entity" },
+    { "root": "V:\\ENTITY DOCS\\LLCs\\BBK Midway Plantation, LLC",          "property_id": "00000000-0000-0000-0000-000000000010", "property_name": "KM East",                 "category": "entity" },
+    { "root": "V:\\ENTITY DOCS\\LLCs\\BBK Midtown Commons, LLC",            "property_id": "00000000-0000-0000-0000-000000000011", "property_name": "KM West",                 "category": "entity" },
+    { "root": "V:\\ENTITY DOCS\\LLCs\\BBK Knightdale, LLC",                 "property_id": "00000000-0000-0000-0000-000000000012", "property_name": "Knightdale Consolidated", "category": "entity" }
+  ]
+}

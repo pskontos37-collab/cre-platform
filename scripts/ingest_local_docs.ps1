@@ -16,7 +16,7 @@ $cfg = @{}; foreach ($l in (Get-Content "$repo\.env" | Where-Object { $_ -match 
 $BASE=$cfg['VITE_SUPABASE_URL']; $KEY=$cfg['SUPABASE_SECRET_KEY']; $AK=$cfg['ANTHROPIC_API_KEY']; $OPENAI_KEY=$cfg['OPENAI_API_KEY']
 $VOYAGE_KEY=$cfg['VOYAGE_API_KEY']; $VOYAGE_MODEL= if($cfg['VOYAGE_MODEL']){$cfg['VOYAGE_MODEL']}else{'voyage-3-large'}
 if(-not (Test-Path -LiteralPath $Root)){ throw "Root not found / not accessible from this process: $Root" }
-$SP = "C:\Users\pskontos\AppData\Local\Temp\claude\C--Users-pskontos-Desktop-Software\4813eb50-3027-4b15-81ea-2a63a5f0357b\scratchpad"
+$SP = if($env:INGEST_SP -and (Test-Path -LiteralPath $env:INGEST_SP)){ $env:INGEST_SP } else { "C:\Users\pskontos\AppData\Local\Temp\claude\C--Users-pskontos-Desktop-Software\4813eb50-3027-4b15-81ea-2a63a5f0357b\scratchpad" }
 $log = "$SP\ingest_s$Shard.log"
 $DEAD = "$SP\ingest_deadletter.txt"   # files that deterministically fail (>100pg / too large) — skip on retry, handle via split later
 # Oversized PDFs are QUEUED here (one path per line) instead of dead-ended. Feed this list to
@@ -90,7 +90,7 @@ if($env:INGEST_MANIFEST -and (Test-Path -LiteralPath $env:INGEST_MANIFEST)){
   Log "scan mode: found $($pdfs.Count) PDFs under root"
 }
 Log "shard $Shard/$Of; maxMB=$MaxMB"
-$i=-1; $ok=0; $skip=0; $fail=0; $big=0
+$i=-1; $ok=0; $skip=0; $fail=0; $big=0; $tokIn=0; $tokOut=0
 foreach($f in $pdfs){
   $i++
   if(($i % $Of) -ne $Shard){ continue }
@@ -112,6 +112,7 @@ foreach($f in $pdfs){
         @{ type='text'; text=$PROMPT } )}) } | ConvertTo-Json -Depth 20
     $bb=[System.Text.Encoding]::UTF8.GetBytes($body)
     $r = Invoke-RestMethod -Method Post -Uri "https://api.anthropic.com/v1/messages" -Headers @{ "x-api-key"=$AK; "anthropic-version"="2023-06-01" } -ContentType "application/json" -Body $bb -TimeoutSec 300
+    try { $tokIn += [int]$r.usage.input_tokens; $tokOut += [int]$r.usage.output_tokens } catch {}
     $abs = ($r.content | Where-Object { $_.type -eq 'tool_use' } | Select-Object -First 1).input
     if(-not $abs){ throw "no tool_use in response" }
     $abs | Add-Member -NotePropertyName _tenant_folder -NotePropertyValue $tenant -Force
@@ -142,7 +143,8 @@ foreach($f in $pdfs){
   }
   if($Limit -gt 0 -and $ok -ge $Limit){ Log "hit Limit=$Limit, stopping"; break }
 }
-Log "DONE shard ${Shard}: ok=$ok skip=$skip fail=$fail oversize=$big"
+$costUsd = [math]::Round(($tokIn/1e6*1.0) + ($tokOut/1e6*5.0), 4)   # Haiku 4.5: $1/MTok in, $5/MTok out
+Log "DONE shard ${Shard}: ok=$ok skip=$skip fail=$fail oversize=$big | tokens in=$tokIn out=$tokOut | Anthropic cost=`$$costUsd (avg `$$([math]::Round($(if($ok){$costUsd/$ok}else{0}),5))/doc)"
 if(Test-Path -LiteralPath $GIANTS){
   $gc = (Get-Content -LiteralPath $GIANTS | Where-Object { $_ } | Sort-Object -Unique).Count
   Log "GIANTS queued for split_ingest.ps1 = $gc  ->  run:  `$env:SPLIT_LIST='$GIANTS'; `$env:INGEST_PID=<propertyId>; .\split_ingest.ps1"
