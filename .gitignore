@@ -8,5 +8,5 @@ sample-data/
 scripts/logs/
 
 scripts/*.log
-scripts/_*.json
+scripts/_*
 scripts/.monthly_reports_out/
