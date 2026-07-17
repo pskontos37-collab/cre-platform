@@ -581,6 +581,8 @@ export function AbstractsPage() {
 
       <RefreshLogBanner onJump={t => { setSelected(t); setView('tenant') }} />
 
+      {propertyId && <ExclusivesRegistryPanel propertyId={propertyId} />}
+
       {view === 'tenant' ? (
         <div style={{ display: 'grid', gridTemplateColumns: listCollapsed ? '30px 1fr' : '320px 1fr', gap: 16 }}>
           {listCollapsed && (
@@ -921,7 +923,7 @@ const fmtMoney = (n: number | null | undefined) =>
 
 // Exported: the /diligence DD workspace renders the same abstract view.
 // ── Ensemble cross-check surface (abstract-ensemble, migration 20240110) ──
-const CONF_COLOR: Record<string, string> = { high: 'var(--green, #22c55e)', medium: 'var(--amber, #f59e0b)', low: 'var(--red, #ef4444)' }
+const CONF_COLOR: Record<string, string> = { high: 'var(--green, #22c55e)', medium: 'var(--amber, #f59e0b)', low: 'var(--red, #ef4444)', settled: 'var(--text-faint)' }
 const CONF_FIELD_LABEL: Record<string, string> = {
   'exclusives.exists': 'Exclusive — exists',
   'exclusives.exact_language': 'Exclusive — language',
@@ -1066,9 +1068,102 @@ function ConfidencePanel({ fc, at, resByKey }: { fc: any; at: string | null; res
           )
         })}
       </div>
+      {Array.isArray(fc?.reconfirm) && fc.reconfirm.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', border: '1px solid var(--border-2)', borderRadius: 6, padding: '6px 8px', marginTop: 10 }}>
+          <b style={{ color: 'var(--amber, #f59e0b)' }}>Reconfirm ({fc.reconfirm.length})</b> — you already ruled on these; a lens now differs. Not flagged, but worth a re-look:
+          {fc.reconfirm.map((r: any, i: number) => (
+            <div key={i} style={{ marginTop: 2 }}>{CONF_FIELD_LABEL[r.field] ?? r.field}: kept <b>{clip(r.abstract_value, 40)}</b> vs lens <b>{clip(r.correct_value, 50)}</b>{r.citation ? <span style={{ color: 'var(--text-faint)' }}> · {r.citation}</span> : null}</div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(fc?.registry_rejected) && fc.registry_rejected.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-faint)', border: '1px dashed var(--border-2)', borderRadius: 6, padding: '6px 8px', marginTop: 10 }}>
+          <b>Auto-dismissed ({fc.registry_rejected.length})</b> — a lens proposed an exclusive that the ownership registry attributes to another tenant; not flagged:
+          {fc.registry_rejected.map((r: any, i: number) => (
+            <div key={i} style={{ marginTop: 2 }}>{CONF_FIELD_LABEL[r.field] ?? r.field}: {r.reason}</div>
+          ))}
+        </div>
+      )}
       {Array.isArray(fc?.lens_errors) && fc.lens_errors.length > 0 && (
         <div style={{ fontSize: 9, color: 'var(--amber)', marginTop: 8 }}>Lens issues: {fc.lens_errors.join(' · ')}</div>
       )}
+    </details>
+  )
+}
+
+// Admin curation surface for the exclusives-ownership registry (property_exclusives,
+// migration 20240112) — who holds which exclusive at a property, the ground truth
+// the cross-check guard consults to reject misattributed exclusives. Keep vacated
+// tenants (active off) so their exclusive is never re-filed under another tenant.
+function ExclusivesRegistryPanel({ propertyId }: { propertyId: string }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [bump, setBump] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [owner, setOwner] = useState('')
+  const [category, setCategory] = useState('')
+  const [keywords, setKeywords] = useState('')
+  const [active, setActive] = useState(true)
+  useEffect(() => {
+    let live = true
+    supabase.from('property_exclusives')
+      .select('id, owner_tenant, category, keywords, active')
+      .eq('property_id', propertyId).order('owner_tenant')
+      .then(({ data }) => { if (live) setRows((data ?? []) as any[]) })
+    return () => { live = false }
+  }, [propertyId, bump])
+  async function add() {
+    const o = owner.trim()
+    if (!o) { setErr('Owner tenant is required'); return }
+    setBusy(true); setErr(null)
+    try {
+      const kw = keywords.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+      const { error } = await supabase.from('property_exclusives').insert({
+        property_id: propertyId, owner_tenant: o, category: category.trim() || null,
+        keywords: kw, active, notes: 'Added via registry UI',
+      })
+      if (error) throw new Error(error.message)
+      setOwner(''); setCategory(''); setKeywords(''); setActive(true); setBump(b => b + 1)
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  async function toggleActive(id: string, cur: boolean) {
+    await supabase.from('property_exclusives').update({ active: !cur, updated_at: new Date().toISOString() }).eq('id', id)
+    setBump(b => b + 1)
+  }
+  async function remove(id: string) {
+    await supabase.from('property_exclusives').delete().eq('id', id)
+    setBump(b => b + 1)
+  }
+  return (
+    <details style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', marginBottom: 16 }}>
+      <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Exclusives ownership registry — {rows.length} entr{rows.length === 1 ? 'y' : 'ies'} (this property)
+      </summary>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', margin: '6px 0 10px' }}>
+        Ground truth for who holds which exclusive here. The cross-check guard uses it to reject an exclusive proposed for the wrong tenant. Keep vacated tenants (active off) so their exclusive is never misattributed.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginBottom: 10 }}>
+        {rows.map(r => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, borderTop: '1px solid var(--border)', padding: '5px 0' }}>
+            <span style={{ fontWeight: 600, minWidth: 170, color: r.active ? 'var(--text)' : 'var(--text-faint)' }}>{r.owner_tenant}{r.active ? '' : ' (inactive)'}</span>
+            <span style={{ color: 'var(--text-muted)', flex: 1 }}>{r.category ?? ''}{Array.isArray(r.keywords) && r.keywords.length ? ` · ${r.keywords.join(', ')}` : ''}</span>
+            <button onClick={() => void toggleActive(r.id, r.active)} style={VERB_BTN}>{r.active ? 'Deactivate' : 'Activate'}</button>
+            <button onClick={() => void remove(r.id)} style={{ ...VERB_BTN, color: 'var(--red)' }}>Delete</button>
+          </div>
+        ))}
+        {!rows.length && <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>No registry entries yet for this property.</div>}
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input value={owner} onChange={e => setOwner(e.target.value)} placeholder="Owner tenant" style={{ ...RES_INPUT, width: 160 }} />
+        <input value={category} onChange={e => setCategory(e.target.value)} placeholder="Category (e.g. footwear)" style={{ ...RES_INPUT, width: 170 }} />
+        <input value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="keywords, comma-separated" style={{ ...RES_INPUT, width: 220 }} />
+        <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}>
+          <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} /> active
+        </label>
+        <button onClick={() => void add()} disabled={busy} style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>{busy ? 'Adding…' : 'Add entry'}</button>
+      </div>
+      {err && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 6 }}>{err}</div>}
     </details>
   )
 }
