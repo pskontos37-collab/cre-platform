@@ -37,6 +37,8 @@ interface AbstractRow {
   review_note: string | null
   field_confidence: any         // abstract-ensemble cross-check (mig 20240110): { fields, disagreements, summary }
   field_confidence_at: string | null
+  clause_findings: any          // abstract-clause-verify (mig 20240113): { findings[], summary } single-clause specialists
+  clause_findings_at: string | null
 }
 
 function useTenantsForProperty(propertyId: string | null) {
@@ -66,7 +68,7 @@ function useAbstracts(propertyId: string | null, bump: number) {
     if (!propertyId) return []
     const { data, error } = await supabase
       .from('lease_abstracts')
-      .select('id, tenant_name, status, abstract, generated_at, source_doc_ids, error, qa, qa_status, qa_at, overrides, human_verified, locked, reviewed_at, review_note, field_confidence, field_confidence_at')
+      .select('id, tenant_name, status, abstract, generated_at, source_doc_ids, error, qa, qa_status, qa_at, overrides, human_verified, locked, reviewed_at, review_note, field_confidence, field_confidence_at, clause_findings, clause_findings_at')
       .eq('property_id', propertyId)
     if (error) throw new Error(error.message)
     return (data ?? []) as AbstractRow[]
@@ -172,6 +174,7 @@ export function AbstractsPage() {
   const [phase, setPhase] = useState<Record<string, string>>({})
   const [verifying, setVerifying] = useState<Set<string>>(new Set())
   const [crossChecking, setCrossChecking] = useState<Set<string>>(new Set())
+  const [clauseChecking, setClauseChecking] = useState<Set<string>>(new Set())
   const [genError, setGenError] = useState<string | null>(null)
   const [view, setView] = useState<'tenant' | 'clause' | 'openitems'>('tenant')
   const [clause, setClause] = useState('co_tenancy')
@@ -258,8 +261,8 @@ export function AbstractsPage() {
       // vanished items, revive reappeared ones) so the worklist stays honest.
       try {
         const { data: fresh } = await supabase.from('lease_abstracts')
-          .select('id, abstract, qa, field_confidence').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
-        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence)
+          .select('id, abstract, qa, field_confidence, clause_findings').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence, fresh.clause_findings)
       } catch { /* non-fatal: reconciliation is best-effort */ }
       setBump(b => b + 1)
       setSelected(tenant)
@@ -336,7 +339,14 @@ export function AbstractsPage() {
       if (docErr) throw new Error(`Filing document failed: ${docErr.message}`)
       await updateAbstractJob(jobId, { document_id: docId })
 
-      // ── 2. Text layer (verbatim reindex; OCR fallback for scans). ──
+      // ── 2. Text layer. Uploads DEFAULT TO OCR: an uploaded PDF is typically a
+      // scanned amendment filling a gap, and a thin embedded text layer produces
+      // a useless brief that the abstractor then ignores (the exact failure this
+      // feature exists to fix). Run the verbatim reindex first — it is cheap and,
+      // because the OCR pass returns before clearing chunks when it finds nothing,
+      // it survives as a fallback — then OCR UNLESS the PDF already has a RICH
+      // digital text layer, where OCR would only replace superior text with a
+      // noisier transcription. ──
       setBoth('extracting text…')
       const storagePath = `documents/${key}`
       const rx = await fetch(`${FN_BASE}/pdf-extract?reindexText=1&documentId=${docId}&storagePath=${encodeURIComponent(storagePath)}&propertyId=${propertyId}`,
@@ -344,14 +354,21 @@ export function AbstractsPage() {
       const rxj = await rx.json().catch(() => ({}))
       if (!rx.ok || rxj.error) throw new Error(rxj.error ?? `Text extraction failed (${rx.status})`)
       if (rxj.too_large) throw new Error('Document is too large to process in-app — ingest it with the bulk loader instead.')
-      if (rxj.needs_ocr || (rxj.text_chunks ?? 0) === 0) {
-        setBoth('running OCR (scanned document)…')
+      const reindexChunks = rxj.text_chunks ?? 0
+      const RICH_DIGITAL_CHARS_PER_PAGE = 800
+      const richDigital = !rxj.needs_ocr && reindexChunks > 0 && (rxj.avg_chars_per_page ?? 0) >= RICH_DIGITAL_CHARS_PER_PAGE
+      if (!richDigital) {
+        setBoth('running OCR…')
         const ocr = await fetch(`${FN_BASE}/pdf-extract?ocrText=1&documentId=${docId}&storagePath=${encodeURIComponent(storagePath)}&propertyId=${propertyId}`,
           { method: 'POST', headers: await authHeadersJson() })
         const ocrj = await ocr.json().catch(() => ({}))
         if (!ocr.ok || ocrj.error) throw new Error(ocrj.error ?? `OCR failed (${ocr.status})`)
         if (ocrj.too_large) throw new Error('Document is too large for in-app OCR — use the bulk loader.')
-        if ((ocrj.text_chunks ?? 0) === 0) throw new Error('No readable text found in the document (blank or image-only page).')
+        // An empty OCR leaves the reindex text intact (server returns before
+        // clearing chunks). Only hard-fail if neither pass produced any text.
+        if ((ocrj.text_chunks ?? 0) === 0 && reindexChunks === 0) {
+          throw new Error('No readable text found in the document (blank or image-only).')
+        }
       }
 
       // ── 3. Brief every not-yet-briefed doc in the tenant's file (incl. the
@@ -397,8 +414,8 @@ export function AbstractsPage() {
       // Reconcile resolutions against the regenerated content, then re-verify.
       try {
         const { data: fresh } = await supabase.from('lease_abstracts')
-          .select('id, abstract, qa, field_confidence').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
-        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence)
+          .select('id, abstract, qa, field_confidence, clause_findings').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence, fresh.clause_findings)
       } catch { /* non-fatal */ }
       setBump(b => b + 1)
       setSelected(tenant)
@@ -448,14 +465,46 @@ export function AbstractsPage() {
       // set (archive resolutions whose disagreement vanished, revive reappeared).
       try {
         const { data: fresh } = await supabase.from('lease_abstracts')
-          .select('id, abstract, qa, field_confidence').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
-        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence)
+          .select('id, abstract, qa, field_confidence, clause_findings').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence, fresh.clause_findings)
       } catch { /* non-fatal */ }
       setBump(b => b + 1)
     } catch (e) {
       setGenError(`Cross-check ${tenant}: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setCrossChecking(prev => { const n = new Set(prev); n.delete(tenant); return n })
+    }
+  }
+
+  // Clause-specialist verify: N single-clause experts (exclusives, options,
+  // guaranty, co-tenancy) each audit only their own field with a deep domain
+  // rubric, plus an optional cross-model (OpenAI) adjudicator on high-severity
+  // findings (abstract-clause-verify, mig 20240113). Detection only — actionable
+  // findings flow into the worklist keyed the same as generator/verifier/ensemble
+  // items, so one resolution clears them together. ~15s (specialists run concurrently).
+  async function clauseVerify(tenant: string) {
+    if (!propertyId || clauseChecking.has(tenant)) return
+    setGenError(null)
+    setClauseChecking(prev => new Set(prev).add(tenant))
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${FN_BASE}/abstract-clause-verify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId, tenant }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
+      try {
+        const { data: fresh } = await supabase.from('lease_abstracts')
+          .select('id, abstract, qa, field_confidence, clause_findings').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence, fresh.clause_findings)
+      } catch { /* non-fatal */ }
+      setBump(b => b + 1)
+    } catch (e) {
+      setGenError(`Clause check ${tenant}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setClauseChecking(prev => { const n = new Set(prev); n.delete(tenant); return n })
     }
   }
 
@@ -605,6 +654,7 @@ export function AbstractsPage() {
               onRegenerate={() => void generate(selectedAbstract.tenant_name)} busy={generating.has(selectedAbstract.tenant_name)}
               onVerify={() => void verify(selectedAbstract.tenant_name)} verifying={verifying.has(selectedAbstract.tenant_name)}
               onCrossCheck={() => void crossCheck(selectedAbstract.tenant_name)} crossChecking={crossChecking.has(selectedAbstract.tenant_name)}
+              onClauseVerify={() => void clauseVerify(selectedAbstract.tenant_name)} clauseChecking={clauseChecking.has(selectedAbstract.tenant_name)}
               onUploadDoc={(file) => void uploadAndReabstract(selectedAbstract.tenant_name, file)}
               onSaved={() => setBump(b => b + 1)} reviewerId={appUser?.id}
               resolutions={resByAbstract.get(selectedAbstract.id) ?? []} propertyId={propertyId} />}
@@ -897,6 +947,79 @@ function ConfidenceBadge({ fc }: { fc: any }) {
   )
 }
 
+// ── Clause-specialist surface (abstract-clause-verify, migration 20240113) ──
+const SPEC_LABEL: Record<string, string> = { exclusives: 'Exclusives', options: 'Options', guaranty: 'Guaranty', cotenancy: 'Co-tenancy' }
+const CLAUSE_VERDICT: Record<string, { label: string; color: string }> = {
+  revise: { label: 'Revise', color: 'var(--red, #ef4444)' },
+  cannot_verify: { label: 'Cannot verify', color: 'var(--amber, #f59e0b)' },
+  enrich: { label: 'Add nuance', color: 'var(--accent)' },
+  confirm: { label: 'Confirmed', color: 'var(--green, #22c55e)' },
+}
+
+// Compact header pill summarizing the clause-specialist outcome.
+function ClauseBadge({ cf }: { cf: any }) {
+  if (!cf?.summary) return null
+  const a = cf.summary.actionable ?? 0
+  const [label, color] = a > 0 ? [`⚑ ${a} clause finding${a > 1 ? 's' : ''}`, CONF_COLOR.low] : ['✓ Clause-checked', CONF_COLOR.high]
+  return (
+    <span title="Single-clause specialists (exclusives, options, guaranty, co-tenancy) deep-audited each clause"
+      style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>
+      {label}
+    </span>
+  )
+}
+
+// Per-clause specialist findings detail. A SEPARATE provenance layer: N
+// single-clause experts each deep-audited their own clause against the source
+// briefs + MRI, with an optional cross-model adjudication on high-severity
+// findings. Actionable findings are also rows in the worklist above; here they
+// carry the verbatim quote + proposed correction / missing nuance for adjudication.
+function ClauseFindingsPanel({ cf, at, resByKey }: { cf: any; at: string | null; resByKey: Map<string, Resolution> }) {
+  const all = (Array.isArray(cf?.findings) ? cf.findings : []) as any[]
+  if (!all.length) return null
+  const shown = all.filter(f => f.verdict !== 'confirm')       // confirmed clauses are reassuring but not action items
+  const confirmed = all.length - shown.length
+  const hasRed = shown.some(f => isActionableClauseFinding(f) && isRedClauseFinding(f))
+  return (
+    <details open={hasRed} id="abstract-clause-findings" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+      <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Clause specialists{at ? ` · ${new Date(at).toLocaleDateString()}` : ''}
+      </summary>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', margin: '6px 0 10px' }}>
+        {(cf?.specialists ?? []).map((s: string) => SPEC_LABEL[s] ?? s).join(' + ') || 'specialists'} each deep-audited their own clause against the source briefs and MRI{cf?.cross_model ? `, with a ${cf.cross_model} cross-model check on high-severity findings` : ''}. {confirmed > 0 ? `${confirmed} clause${confirmed > 1 ? 's' : ''} confirmed clean. ` : ''}Actionable findings also appear in the worklist above.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {shown.map((f, i) => {
+          const vm = CLAUSE_VERDICT[f.verdict] ?? { label: f.verdict, color: 'var(--text-faint)' }
+          const resolved = resByKey.has(`field:${String(f.field).toLowerCase()}`)
+          const settled = f.settled
+          return (
+            <div key={i} style={{ border: `1px solid ${resolved || settled ? 'var(--border-2)' : vm.color}`, borderRadius: 6, padding: '7px 9px', background: 'var(--surface-2)', opacity: resolved || settled ? 0.6 : 1 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: vm.color, border: `1px solid ${vm.color}`, borderRadius: 8, padding: '1px 6px' }}>{vm.label}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{CONF_FIELD_LABEL[f.field] ?? SPEC_LABEL[f.specialist] ?? f.field}</span>
+                {f.cross_model?.verdict === 'confirm' && <span title={f.cross_model.note} style={{ fontSize: 9, fontWeight: 700, color: 'var(--green, #22c55e)' }}>✓ 2nd model</span>}
+                {f.cross_model?.verdict === 'refute' && <span title={f.cross_model.note} style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-faint)' }}>✗ 2nd model — downgraded</span>}
+                {settled && <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>· human-settled</span>}
+                {resolved && <span style={{ fontSize: 9, color: 'var(--green, #22c55e)' }}>· resolved</span>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                {f.verdict === 'enrich'
+                  ? <><b>Missing:</b> {clip(f.missing_nuance ?? f.rationale, 320)}</>
+                  : f.verdict === 'revise'
+                    ? <><b>Stored:</b> {clip(f.current_value, 90)} → <b>Should be:</b> {clip(f.correct_value ?? f.rationale, 200)}</>
+                    : <>{clip(f.rationale, 320)}</>}
+              </div>
+              {f.quote && <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 4, fontStyle: 'italic' }}>“{clip(f.quote, 240)}”</div>}
+              {f.citation && <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2 }}>{f.citation}</div>}
+            </div>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
+
 // Per-field confidence chips + disagreement detail. A SEPARATE provenance layer
 // from verification: two independent, differently-framed lenses scored their
 // agreement with the stored value. Disagreements are also actionable rows in the
@@ -950,9 +1073,9 @@ function ConfidencePanel({ fc, at, resByKey }: { fc: any; at: string | null; res
   )
 }
 
-export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onCrossCheck, crossChecking, onAutoFix, onUploadDoc, onSaved, reviewerId, resolutions, propertyId }: {
+export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onCrossCheck, crossChecking, onClauseVerify, clauseChecking, onAutoFix, onUploadDoc, onSaved, reviewerId, resolutions, propertyId }: {
   row: AbstractRow; onRegenerate: () => void; busy: boolean; onVerify: () => void; verifying: boolean
-  onCrossCheck?: () => void; crossChecking?: boolean; onAutoFix?: () => void
+  onCrossCheck?: () => void; crossChecking?: boolean; onClauseVerify?: () => void; clauseChecking?: boolean; onAutoFix?: () => void
   onUploadDoc?: (file: File) => void
   onSaved: () => void; reviewerId?: string; resolutions?: Resolution[]; propertyId?: string | null
 }) {
@@ -976,7 +1099,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
   // Resolution state: key → resolution, and the worklist that drives the top box.
   const resByKey = new Map<string, Resolution>()
   for (const r of resolutions ?? []) resByKey.set(r.item_key, r)
-  const worklist = buildWorklist(openItems, row.qa, a, row.field_confidence)
+  const worklist = buildWorklist(openItems, row.qa, a, row.field_confidence, row.clause_findings)
   const unresolvedRedCount = worklist.filter(w => w.red && !resByKey.has(w.key)).length
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -989,6 +1112,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <ConfidenceBadge fc={row.field_confidence} />
+          <ClauseBadge cf={row.clause_findings} />
           {onCrossCheck && (
             <button onClick={onCrossCheck} disabled={crossChecking || busy}
               title="Two independent lenses re-check the high-stakes fields and score their agreement with the stored value"
@@ -1001,6 +1125,13 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
               title="Cross-check and AUTO-APPLY corrections only where both lenses unanimously agree on the same cited value (dates, guarantor). Contested items still go to the worklist. Reversible."
               style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--green, #22c55e)', background: 'transparent', color: 'var(--green, #22c55e)', cursor: crossChecking || busy ? 'default' : 'pointer' }}>
               {crossChecking ? '…' : 'Auto-fix'}
+            </button>
+          )}
+          {onClauseVerify && (
+            <button onClick={onClauseVerify} disabled={clauseChecking || busy}
+              title="Single-clause specialists (exclusives, options, guaranty, co-tenancy) each deep-audit their own clause, plus a cross-model check on high-severity findings. Surfaces missing nuances and mischaracterizations a generalist pass misses."
+              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--accent)', background: 'var(--surface-2)', color: 'var(--accent)', cursor: clauseChecking || busy ? 'default' : 'pointer' }}>
+              {clauseChecking ? 'Clause check…' : row.clause_findings ? 'Re-clause-check' : 'Clause check'}
             </button>
           )}
           <button onClick={onVerify} disabled={verifying || busy}
@@ -1031,6 +1162,8 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
       <ReviewPanel row={row} onSaved={onSaved} reviewerId={reviewerId} unresolvedRedCount={unresolvedRedCount} />
 
       {row.field_confidence && <div id="abstract-confidence"><ConfidencePanel fc={row.field_confidence} at={row.field_confidence_at} resByKey={resByKey} /></div>}
+
+      {row.clause_findings && <ClauseFindingsPanel cf={row.clause_findings} at={row.clause_findings_at} resByKey={resByKey} />}
 
       {(row.qa || openItems.length > 0) && (
         <details>
@@ -1342,12 +1475,13 @@ async function clearResolution(abstractId: string, itemKey: string) {
 // After a regenerate, an item may vanish (concern gone → archive its resolution)
 // or reappear (un-archive). Keeps the worklist honest across the living-abstracts
 // refresh without deleting the audit trail. Keys computed exactly as buildWorklist.
-async function reconcileResolutions(abstractId: string, abstract: any, qa: any, fieldConfidence?: any) {
+async function reconcileResolutions(abstractId: string, abstract: any, qa: any, fieldConfidence?: any, clauseFindings?: any) {
   const keys = new Set<string>()
   for (const p of parseOpenItems(abstract?.open_items ?? [])) keys.add(keyForOpenItem(p))
   for (const c of (Array.isArray(qa?.field_checks) ? qa.field_checks : [])) if (c?.field && c.verdict !== 'confirmed') keys.add(keyForField(c.field))
   for (const m of (Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : [])) if (m?.field) keys.add(keyForField(m.field))
   for (const d of (Array.isArray(fieldConfidence?.disagreements) ? fieldConfidence.disagreements : [])) if (d?.field) keys.add(keyForField(d.field))
+  for (const f of (Array.isArray(clauseFindings?.findings) ? clauseFindings.findings : [])) if (f?.field && isActionableClauseFinding(f)) keys.add(keyForField(f.field))
   const { data } = await supabase.from('abstract_item_resolutions')
     .select('id, item_key, archived').eq('abstract_id', abstractId)
   for (const r of (data ?? []) as Array<{ id: string; item_key: string; archived: boolean }>) {
@@ -1618,10 +1752,27 @@ interface WorkItem {
   isArray: boolean           // field points at an array of rows we can edit inline
   arrayValue: any[] | null
   citation: string | null    // best hint for the "open lease" link
-  sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith' | 'ensemble'; text: string; jumpId: string }>
+  sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith' | 'ensemble' | 'clause'; text: string; jumpId: string }>
 }
-const ORIGIN_LABEL: Record<string, string> = { open: 'Open item', verify: 'Verify', mri: 'MRI', arith: 'Arithmetic', ensemble: 'Cross-check' }
-function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fieldConfidence?: any): WorkItem[] {
+const ORIGIN_LABEL: Record<string, string> = { open: 'Open item', verify: 'Verify', mri: 'MRI', arith: 'Arithmetic', ensemble: 'Cross-check', clause: 'Clause expert' }
+// A clause-specialist finding is ACTIONABLE (worklist item) when it proposes a
+// change or flags a gap/nuance, is not already human-settled, and was not refuted
+// by the cross-model adjudicator. Mirrors the edge fn's `actionable` rule.
+function isActionableClauseFinding(f: any): boolean {
+  if (!f?.field) return false
+  if (!['revise', 'cannot_verify', 'enrich'].includes(f.verdict)) return false
+  if (f.settled) return false
+  if (f.cross_model?.verdict === 'refute') return false
+  return true
+}
+// Red (attention) = a proposed correction, an unverifiable value, or a
+// high-severity missing nuance. A medium/low "enrich" surfaces amber (read it),
+// not red.
+function isRedClauseFinding(f: any): boolean {
+  return f.verdict === 'revise' || f.verdict === 'cannot_verify' || (f.verdict === 'enrich' && f.severity === 'high')
+}
+
+function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fieldConfidence?: any, clauseFindings?: any): WorkItem[] {
   const map = new Map<string, WorkItem>()
   const rank: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
   const ensure = (key: string, field: string | null, kind: 'open_item' | 'qa_check', severity: OpenSeverity, red: boolean) => {
@@ -1669,6 +1820,22 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fie
     const w = ensure(keyForField(d.field), d.field, 'qa_check', 'discrepancy', true)
     if (!w.citation && d.citation) w.citation = d.citation
     w.sources.push({ origin: 'ensemble', text: `${d.field} — stored ${String(d.abstract_value ?? '—')} → cross-check says ${String(d.correct_value ?? '—')}${d.votes ? ` (${d.votes})` : ''}${d.citation ? ` — ${d.citation}` : ''}`, jumpId: 'abstract-confidence' })
+  }
+  // Clause-specialist findings (abstract-clause-verify): a single-clause expert
+  // proposed a correction (revise), flagged an unverifiable value (cannot_verify),
+  // or surfaced a material missing nuance (enrich). Keyed field:<path> so they
+  // merge with any generator/verifier/ensemble item about the same field.
+  for (const f of (Array.isArray(clauseFindings?.findings) ? clauseFindings.findings : [])) {
+    if (!isActionableClauseFinding(f)) continue
+    const red = isRedClauseFinding(f)
+    const w = ensure(keyForField(f.field), f.field, 'qa_check', red ? 'discrepancy' : 'confirm', red)
+    if (!w.citation && f.citation) w.citation = f.citation
+    const VERB: Record<string, string> = { revise: 'Revise', cannot_verify: 'Cannot verify', enrich: 'Add nuance' }
+    const detail = f.verdict === 'enrich'
+      ? (f.missing_nuance ?? f.rationale ?? '')
+      : (f.correct_value != null ? `→ ${String(f.correct_value)}` : (f.rationale ?? ''))
+    const xm = f.cross_model?.verdict === 'confirm' ? ' ✓2nd-model' : ''
+    w.sources.push({ origin: 'clause', text: `${VERB[f.verdict] ?? f.verdict} · ${f.specialist}: ${f.field} — ${detail}${f.citation ? ` — ${f.citation}` : ''}${xm}`, jumpId: 'abstract-clause-findings' })
   }
   return [...map.values()].sort((a, b) => rank[a.severity] - rank[b.severity])
 }
