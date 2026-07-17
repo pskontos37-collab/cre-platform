@@ -6,6 +6,7 @@ import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { CLAUSES } from './AbstractsPage'
 import { RightsRadar } from '../components/RightsRadar'
+import { viewHref, resolvePage } from '../lib/viewer'
 
 // /clauses — PORTFOLIO clause intelligence. The per-property clause matrix on
 // /abstracts, lifted portfolio-wide: pick a clause type, see every tenant's
@@ -25,6 +26,7 @@ const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 interface SemHit {
   passage: string
   similarity: number
+  document_id: string
   doc_title: string
   doc_type: string
   storage_path: string | null
@@ -62,7 +64,13 @@ function SemanticSearch() {
   async function openPdf(h: SemHit) {
     if (!h.storage_path) return
     const { data } = await supabase.storage.from('documents').createSignedUrl(h.storage_path, 3600)
-    if (data?.signedUrl) window.open(data.signedUrl + (h.page_number ? `#page=${h.page_number}` : ''), '_blank')
+    if (!data?.signedUrl) return
+    // Land on the clause: use the page the RPC returned, else resolve it from the
+    // verbatim-text chunks (a summary-chunk match carries no page). A short prefix
+    // of the passage doubles as the highlight locator in the pdf.js find bar.
+    const page = h.page_number ?? (await resolvePage(h.document_id, h.passage))
+    const locator = h.passage.replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).join(' ') || null
+    window.open(viewHref(data.signedUrl, locator, page), '_blank', 'noopener')
   }
 
   return (

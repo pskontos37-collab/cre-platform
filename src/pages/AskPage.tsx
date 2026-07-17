@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { viewHref } from '../lib/viewer'
+import { viewHref, openSourceAt } from '../lib/viewer'
 import { useProperties } from '../hooks/useProperties'
 import { loadCache, saveCache } from '../lib/uiCache'
 
@@ -205,6 +205,7 @@ export function AskPage() {
                       href={viewHref(s.link, s.locator)}
                       target="_blank"
                       rel="noreferrer"
+                      onClick={e => { e.preventDefault(); void openSourceAt({ link: s.link!, documentId: s.document_id, locator: s.locator }) }}
                       title={s.locator ? `Opens at "${s.locator}"` : 'Open PDF'}
                       style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'underline', textDecorationColor: 'var(--border-2)' }}
                     >
@@ -266,6 +267,7 @@ function DocRow({ doc, first }: { doc: AskDocument; first: boolean }) {
           href={viewHref(doc.link, doc.locator)}
           target="_blank"
           rel="noreferrer"
+          onClick={e => { e.preventDefault(); void openSourceAt({ link: doc.link!, documentId: doc.id, locator: doc.locator }) }}
           title={doc.locator ? `Opens at "${doc.locator}"` : 'Open PDF'}
           style={{ fontSize: 11.5, color: 'var(--accent)', textDecoration: 'none', whiteSpace: 'nowrap', flexShrink: 0, fontWeight: 650 }}
         >

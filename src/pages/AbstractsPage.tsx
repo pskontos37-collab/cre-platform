@@ -7,6 +7,7 @@ import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { AbstractsExportBar } from '../reports/AbstractsExportBar'
 import { createAbstractJob, updateAbstractJob } from '../hooks/useAbstractJobs'
+import { viewHref, resolvePage } from '../lib/viewer'
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 
@@ -1391,7 +1392,7 @@ async function createDocTask(title: string, details: string | null, propertyId: 
 // Open the lease document most relevant to the item being reconciled: the
 // best-cited source doc (via the citation-aware ranker) or, failing a citation,
 // the primary lease instrument (title says "lease", not an ancillary doc).
-async function openBestSourceDoc(citation: string, sourceDocIds: string[]) {
+async function openBestSourceDoc(citation: string, sourceDocIds: string[], probeText?: string | null) {
   if (!sourceDocIds.length) return
   const { data } = await supabase.from('documents')
     .select('id, title, file_name, storage_path').in('id', sourceDocIds)
@@ -1404,14 +1405,23 @@ async function openBestSourceDoc(citation: string, sourceDocIds: string[]) {
       return /lease/.test(t) && !/(amend|estoppel|guaranty|snda|subordinat|option|notice|assignment|memorandum|commencement)/.test(t)
     }) ?? docs[0]
   }
-  await openDocPdf(pick?.storage_path ?? null)
+  if (!pick?.storage_path) return
+  const { data: signed } = await supabase.storage.from('documents').createSignedUrl(pick.storage_path, 3600)
+  if (!signed?.signedUrl) return
+  // Jump to the cited provision: probe the picked doc's verbatim-text chunks (the
+  // clause language, then the citation) for its page. Falls back to opening the
+  // document at page 1 when nothing locates (scanned/paraphrase) — prior behavior.
+  const page = await resolvePage(pick.id, probeText, citation)
+  const locator = (probeText ?? '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).join(' ') || null
+  window.open(viewHref(signed.signedUrl, locator, page), '_blank', 'noopener')
 }
 // One-click into the lease PDF from a reconciliation row (worklist / verify check).
-function LeaseFileLink({ citation, sourceDocIds, label = 'open lease ↗' }: { citation?: string | null; sourceDocIds: string[]; label?: string }) {
+// probeText = the clause language, used to land on the page it lives on.
+function LeaseFileLink({ citation, sourceDocIds, probeText, label = 'open lease ↗' }: { citation?: string | null; sourceDocIds: string[]; probeText?: string | null; label?: string }) {
   const [busy, setBusy] = useState(false)
   if (!sourceDocIds.length) return null
   return (
-    <button onClick={async () => { setBusy(true); try { await openBestSourceDoc(citation ?? '', sourceDocIds) } finally { setBusy(false) } }}
+    <button onClick={async () => { setBusy(true); try { await openBestSourceDoc(citation ?? '', sourceDocIds, probeText) } finally { setBusy(false) } }}
       disabled={busy} title="Open the most relevant lease document for this item"
       style={{ fontSize: 10, fontWeight: 600, padding: '1px 8px', marginLeft: 6, borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
       {busy ? 'opening…' : label}
@@ -1889,7 +1899,7 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sour
             {s.text} <span style={{ color: 'var(--text-faint)' }}>→</span>
           </a>
         ))}
-        <div><LeaseFileLink citation={w.citation} sourceDocIds={sourceDocIds} label="open lease ↗" /></div>
+        <div><LeaseFileLink citation={w.citation} sourceDocIds={sourceDocIds} probeText={w.currentValue || w.sources[0]?.text} label="open lease ↗" /></div>
       </div>
       {w.resolvable ? (
         discussing && w.field ? (
@@ -2057,7 +2067,8 @@ async function locateQuoteData(quote: string, citation: string, sourceDocIds: st
     if (doc?.storage_path) {
       const { data: signed } = await supabase.storage.from('documents')
         .createSignedUrl(doc.storage_path, 3600)
-      if (signed?.signedUrl) pdfUrl = signed.signedUrl + (hit.page_number ? `#page=${hit.page_number}` : '')
+      // pdf.js viewer: land on the page AND highlight the located language.
+      if (signed?.signedUrl) pdfUrl = viewHref(signed.signedUrl, fragment.replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).join(' ') || null, hit.page_number)
     }
     // Highlight: find the fragment inside the chunk (case-insensitive probe on
     // its head; verbatim quotes land exactly, paraphrases just show the page).
@@ -2172,7 +2183,7 @@ function QaPanel({ qa, status, at, sourceDocIds, resByKey }: { qa: any; status: 
           <span style={{ fontSize: 10, fontWeight: 700, color: vm.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{vm.label}</span>
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', textDecoration: res ? 'line-through' : 'none' }}>{c.field}</span>
           {c.severity && c.verdict !== 'confirmed' && <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>({c.severity})</span>}
-          <LeaseFileLink citation={c.citation} sourceDocIds={sourceDocIds} />
+          <LeaseFileLink citation={c.citation} sourceDocIds={sourceDocIds} probeText={c.quote ?? (c.abstract_value != null ? String(c.abstract_value) : null)} />
           {res && <span style={{ fontSize: 9, fontWeight: 700, color: RES_META[res.status].color, whiteSpace: 'nowrap' }}>· {RES_META[res.status].label}</span>}
         </div>
         {c.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.45 }}>{c.note}</div>}

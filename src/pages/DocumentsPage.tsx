@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { viewHref, locatorFromQuery } from '../lib/viewer'
+import { viewHref, locatorFromQuery, openSourceAt } from '../lib/viewer'
 import { Badge } from '../components/ui/Badge'
 import { EmptyState } from '../components/ui/EmptyState'
 import { loadCache, saveCache } from '../lib/uiCache'
@@ -300,6 +300,7 @@ export function DocumentsPage() {
                     href={viewHref(h.document.view_url, locatorFromQuery(searched))}
                     target="_blank"
                     rel="noreferrer"
+                    onClick={e => { e.preventDefault(); void openSourceAt({ link: h.document.view_url!, documentId: h.document.id, locator: locatorFromQuery(searched), probeText: h.snippet }) }}
                     style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', whiteSpace: 'nowrap', fontWeight: 650 }}
                   >
                     View PDF ↗
