@@ -35,6 +35,13 @@ import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared
 const MODEL = Deno.env.get('QA_MODEL') ?? 'claude-opus-4-8'
 const QA_OPENAI_MODEL = Deno.env.get('QA_OPENAI_MODEL') ?? 'gpt-4.1'
 const BRIEF_BUDGET = 150_000
+// Auto-apply lever (opt-in via body.auto_apply): the ONLY fields a unanimous,
+// self-consistent, cited cross-check may correct automatically. Deliberately
+// scalar + unambiguous — NEVER arrays (options/base_rent_schedule = whole-array
+// replacement risk) or verbatim exclusive language (paraphrase risk) or the
+// nuanced/contested exclusives flag. Widen via env without a redeploy.
+const AUTO_APPLY_FIELDS = new Set(
+  (Deno.env.get('AUTO_APPLY_FIELDS') ?? 'term.expiration,guarantor.name').split(',').map(s => s.trim()).filter(Boolean))
 
 // Layer reviewer overrides (dotted-path -> value) over the AI abstract so the
 // lenses cross-check the HUMAN-CORRECTED values (a corrected field must read as
@@ -174,7 +181,7 @@ serve(async (req) => {
 
     // ── 1. The abstract (human-corrected values applied) ──
     const { data: row, error: rErr } = await sb.from('lease_abstracts')
-      .select('id, abstract, overrides, source_doc_ids, model')
+      .select('id, abstract, overrides, source_doc_ids, model, locked')
       .eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
     if (rErr) throw new Error('load abstract failed: ' + rErr.message)
     if (!row || !row.abstract) throw new Error(`No abstract exists for "${tenant}" — generate it first`)
@@ -295,6 +302,56 @@ ${CHECK_SCHEMA}`
       }
     }
 
+    // ── 5a. AUTO-APPLY LEVER (opt-in). Write a correction ONLY when every guard
+    // passes: opt-in flag set; abstract not locked; field is scalar-safe; the
+    // disagreement is UNANIMOUS (every lens disagreed); the lenses agree with
+    // EACH OTHER on the corrected value; it differs from stored; at least one
+    // cites a source; and there is no existing HUMAN override for that field.
+    // The correction is written to the overrides layer (base abstract untouched,
+    // reversible) + logged as a resolution so it shows in the worklist with an
+    // audit trail and is undoable. Anything short of unanimous stays
+    // detection-only in the worklist for a human to adjudicate. ──
+    const autoApplied: any[] = []
+    if (body.auto_apply === true && !row.locked) {
+      const existingOverrides = (row.overrides && typeof row.overrides === 'object') ? row.overrides as Record<string, any> : {}
+      const newOverrides: Record<string, any> = {}
+      for (const h of highStakes) {
+        if (!AUTO_APPLY_FIELDS.has(h.field)) continue
+        if (h.field in existingOverrides) continue                 // never overwrite a human correction
+        const votes = byField.get(h.field) ?? []
+        if (votes.length < 2) continue                             // need every lens's vote
+        const dis = votes.filter(v => v.verdict === 'disagree')
+        if (dis.length !== votes.length) continue                  // UNANIMOUS disagree only
+        const cvs = dis.map(v => v.correct_value).filter(v => v != null && String(v).trim() !== '')
+        if (cvs.length !== votes.length) continue                  // every lens proposed a concrete fix
+        const consensus = norm(cvs[0])
+        if (!cvs.every(cv => norm(cv) === consensus)) continue     // lenses AGREE on the fix
+        if (consensus === norm(h.value)) continue                  // and it differs from stored
+        if (!dis.some(v => String(v.citation ?? '').trim() !== '')) continue   // cited
+        // Light coercion: bare number/bool land as typed; everything else stays string.
+        let val: any = cvs[0]
+        if (val === 'true') val = true
+        else if (val === 'false') val = false
+        else { const nn = String(val).replace(/[$,\s]/g, ''); if (/^-?\d+(\.\d+)?$/.test(nn)) val = Number(nn) }
+        newOverrides[h.field] = val
+        autoApplied.push({ field: h.field, from: h.value, to: cvs[0], citation: dis.find(v => v.citation)?.citation ?? '' })
+      }
+      if (Object.keys(newOverrides).length) {
+        const merged = { ...existingOverrides, ...newOverrides }
+        const { error: ovErr } = await sb.from('lease_abstracts')
+          .update({ overrides: merged, updated_at: new Date().toISOString() })
+          .eq('property_id', propertyId).eq('tenant_name', tenant)
+        if (ovErr) throw new Error('auto-apply override save failed: ' + ovErr.message)
+        for (const a of autoApplied) {
+          await sb.from('abstract_item_resolutions').upsert({
+            abstract_id: row.id, item_key: `field:${a.field.toLowerCase()}`, kind: 'qa_check', status: 'corrected',
+            note: `Auto-applied by cross-check (unanimous): ${String(a.from)} → ${String(a.to)}${a.citation ? ` · ${a.citation}` : ''}`,
+            resolved_by: null, resolved_at: new Date().toISOString(), updated_at: new Date().toISOString(), archived: false,
+          }, { onConflict: 'abstract_id,item_key' })
+        }
+      }
+    }
+
     const fieldConfidence = {
       generated_at: new Date().toISOString(),
       model: MODEL,
@@ -302,12 +359,14 @@ ${CHECK_SCHEMA}`
       lens_errors: lensErrors,
       fields,
       disagreements,
+      auto_applied: autoApplied,
       // Summary counts for portfolio rollups / status chips.
       summary: {
         high: Object.values(fields).filter((f: any) => f.confidence === 'high').length,
         medium: Object.values(fields).filter((f: any) => f.confidence === 'medium').length,
         low: Object.values(fields).filter((f: any) => f.confidence === 'low').length,
         disagreements: disagreements.length,
+        auto_applied: autoApplied.length,
       },
     }
 
@@ -317,7 +376,7 @@ ${CHECK_SCHEMA}`
       .eq('property_id', propertyId).eq('tenant_name', tenant)
     if (upErr) throw new Error('save failed: ' + upErr.message)
 
-    return new Response(JSON.stringify({ success: true, tenant, property_id: propertyId, summary: fieldConfidence.summary, disagreements, lens_errors: lensErrors }),
+    return new Response(JSON.stringify({ success: true, tenant, property_id: propertyId, summary: fieldConfidence.summary, disagreements, auto_applied: autoApplied, lens_errors: lensErrors }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   } catch (err: unknown) {
