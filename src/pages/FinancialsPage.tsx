@@ -1,6 +1,8 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
+import { useFilter } from '../contexts/FilterContext'
+import { useFilteredPropertyIds } from '../hooks/useFilteredPropertyIds'
 import { Widget, WidgetSkeleton, ChipSelect, ExpandToggle } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { viewHref } from '../lib/viewer'
@@ -43,12 +45,24 @@ export function FinancialsPage() {
   const { appUser } = useAuth()
   const { data: properties } = useProperties()
   const propertyNames = Object.fromEntries((properties ?? []).map(p => [p.id, p.name]))
-  const [propertyId, setPropertyId] = useState<string | null>(null)
 
-  // Default to the first property once loaded.
-  useEffect(() => {
-    if (!propertyId && properties && properties.length > 0) setPropertyId(properties[0].id)
-  }, [properties, propertyId])
+  // Financials is single-property by nature (one income statement / balance sheet),
+  // so it reads the global header filter as the source of truth:
+  //  - header scoped to ONE property  → use it, no page-level picker needed
+  //  - header All / portfolio / custom → the header can't name a single asset, so
+  //    fall back to a page-level picker scoped to whatever the header narrowed to.
+  const { filter } = useFilter()
+  const filteredIds = useFilteredPropertyIds(properties ?? null)
+  const headerIsSingle = filter.scope === 'property' && !!filter.id
+
+  // Local pick used only in multi-property header modes.
+  const [localPropertyId, setLocalPropertyId] = useState<string | null>(null)
+
+  const propertyId: string | null = headerIsSingle
+    ? filter.id
+    : (localPropertyId && filteredIds.includes(localPropertyId))
+      ? localPropertyId
+      : (filteredIds[0] ?? null)
 
   const [vendorWindow, setVendorWindow] = useState<SpendWindow>('90d')
   const [vendorsExpanded, setVendorsExpanded] = useState(false)
@@ -104,16 +118,28 @@ export function FinancialsPage() {
               })
             }}
           />
-          <select
-            value={propertyId ?? ''}
-            onChange={e => setPropertyId(e.target.value || null)}
-            style={{
-              background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6,
-              color: 'var(--text)', fontSize: 13, padding: '7px 10px', cursor: 'pointer', outline: 'none',
-            }}
-          >
-            {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          {headerIsSingle ? (
+            // Header already names the property — no redundant page picker.
+            <span style={{
+              fontSize: 13, color: 'var(--text-muted)', padding: '7px 2px', whiteSpace: 'nowrap',
+            }}>
+              {(propertyId && propertyNames[propertyId]) || filter.label}
+            </span>
+          ) : (
+            // Header is multi-property (All / portfolio / custom) — let the user
+            // pick which asset's financials to view, scoped to the header's set.
+            <select
+              value={propertyId ?? ''}
+              onChange={e => setLocalPropertyId(e.target.value || null)}
+              title="The header view covers multiple properties — pick one to see its financials"
+              style={{
+                background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6,
+                color: 'var(--text)', fontSize: 13, padding: '7px 10px', cursor: 'pointer', outline: 'none',
+              }}
+            >
+              {filteredIds.map(id => <option key={id} value={id}>{propertyNames[id] ?? id}</option>)}
+            </select>
+          )}
         </div>
       </div>
 
