@@ -54,6 +54,10 @@ export function MriReconPage() {
     return (data ?? []) as ReconRow[]
   }, [])
   const statuses = useQuery<StatusRow[]>(async () => {
+    // Reopen any resolved/not_an_issue row that a newer QA run has re-flagged, so a
+    // regressed conflict resurfaces in the default 'open' filter instead of staying
+    // hidden. Idempotent — a no-op when nothing is stale.
+    await supabase.rpc('revert_stale_mri_recon')
     const { data, error } = await supabase.from('mri_recon_status').select('id, property_id, tenant_name, field, status, note')
     if (error) throw new Error(error.message)
     return (data ?? []) as StatusRow[]
@@ -91,7 +95,9 @@ export function MriReconPage() {
 
   async function setStatus(r: ReconRow, status: string, note?: string) {
     const existing = stMap.get(stKey(r))
-    const patch: any = { status, updated_by: appUser?.id ?? null, updated_at: new Date().toISOString() }
+    // Stamp the QA timestamp this decision was made against — revert_stale_mri_recon()
+    // reopens the row if a later abstract-verify run (newer qa_at) re-flags the field.
+    const patch: any = { status, updated_by: appUser?.id ?? null, updated_at: new Date().toISOString(), qa_at: r.qa_at }
     if (note !== undefined) patch.note = note || null
     if (existing) {
       await supabase.from('mri_recon_status').update(patch).eq('id', existing.id)

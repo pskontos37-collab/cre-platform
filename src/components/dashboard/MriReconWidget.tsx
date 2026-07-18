@@ -61,6 +61,10 @@ export function MriReconWidget({ propertyIds }: MriReconWidgetProps) {
 
   const statuses = useQuery<StatusRow[]>(async () => {
     if (!canView) return []
+    // Reopen any resolved/not_an_issue row re-flagged by a newer QA run, so the open
+    // count here matches /mri-recon even when nobody has opened that page. No-op when
+    // nothing is stale.
+    await supabase.rpc('revert_stale_mri_recon')
     const { data, error } = await supabase
       .from('mri_recon_status')
       .select('property_id, tenant_name, field, status')
