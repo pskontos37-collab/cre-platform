@@ -57,7 +57,11 @@ export function CAMReconWidget({ propertyIds, propertyNames, previewCount }: CAM
     setConfirmKey(null)
     setSaveError(null)
     setCompleting(prev => { const n = new Set(prev); ids.forEach(i => n.add(i)); return n })
-    const { error: upErr } = await supabase
+    // Ask PostgREST to return the rows it actually updated (.select()) so we can
+    // VERIFY the write rather than trusting the optimistic hide. An RLS-filtered or
+    // partial update returns fewer rows with NO error — previously indistinguishable
+    // from success, which let the board show a false "done" while the DB was untouched.
+    const { data: updated, error: upErr } = await supabase
       .from('cam_reconciliations')
       .update({
         status:         'complete',
@@ -65,10 +69,22 @@ export function CAMReconWidget({ propertyIds, propertyNames, previewCount }: CAM
         updated_at:     new Date().toISOString(),
       })
       .in('id', ids)
-    if (upErr) {
-      // Roll back the optimistic hide and surface the failure.
-      setCompleting(prev => { const n = new Set(prev); ids.forEach(i => n.delete(i)); return n })
-      setSaveError(upErr.message)
+      .select('id')
+
+    const okIds = new Set(((updated ?? []) as { id: string }[]).map(r => r.id))
+    if (upErr || okIds.size !== ids.length) {
+      // Re-show every row that did NOT actually change; keep any that genuinely did.
+      setCompleting(prev => {
+        const n = new Set(prev)
+        ids.forEach(i => { if (!okIds.has(i)) n.delete(i) })
+        return n
+      })
+      setSaveError(
+        upErr
+          ? upErr.message
+          : `only ${okIds.size} of ${ids.length} saved — the rest were blocked and left open`,
+      )
+      refetch()
       return
     }
     refetch()
