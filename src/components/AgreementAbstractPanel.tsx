@@ -214,12 +214,30 @@ function ReaBody({ a }: { a: any }) {
       )}
 
       {approvals.length > 0 && (
-        <Section label="Approval rights">
-          {approvals.map((r, i) => (
-            <div key={i} style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}>
-              <b>{str(r.party)}:</b> {str(r.right)}{str(r.section) && <span style={{ color: 'var(--text-faint)' }}> — {r.section}</span>}
-            </div>
-          ))}
+        <Section label={`Approval & consent rights (${approvals.length})`}>
+          {approvals.map((r, i) => {
+            // Tolerant of the pre-enrichment shape {party, right, section}.
+            const matter = str(r.matter) ?? str(r.right)
+            const approver = str(r.approving_party) ?? str(r.party)
+            return (
+              <Card key={i}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{matter}</span>
+                  {str(r.threshold) && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--amber)' }}>{r.threshold}</span>}
+                  {str(r.category) && <span style={{ fontSize: 9.5, color: 'var(--text-faint)' }}>{String(r.category).replace(/_/g, ' ')}</span>}
+                </div>
+                {(approver || str(r.restricted_party)) && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {approver && <><b>approval:</b> {approver}</>}
+                    {str(r.restricted_party) && <span style={{ color: 'var(--text-faint)' }}>{approver ? '  ·  ' : ''}binds {r.restricted_party}</span>}
+                  </div>
+                )}
+                {str(r.scope) && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{r.scope}</div>}
+                {str(r.deemed_consent) && <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>Deemed consent: {r.deemed_consent}</div>}
+                <Quote text={str(r.quote)} cite={str(r.section)} />
+              </Card>
+            )
+          })}
         </Section>
       )}
 

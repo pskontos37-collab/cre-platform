@@ -252,7 +252,7 @@ EXISTENCE DISCIPLINE: NEVER claim an instrument "is not among the provided docum
 
 Method:
 - Check every material field: ${kind === 'rea'
-  ? 'parties/parcels and roles, amendment chain and currency, operating covenants (obligor + duration), use restrictions (verbatim + who benefits), exclusives (holder must be explicit — never attribute one party\'s protection to another), cost-sharing formulas, approval rights, term/expiration, critical dates.'
+  ? 'parties/parcels and roles, amendment chain and currency, operating covenants (obligor + duration), use restrictions (verbatim + who benefits), exclusives (holder must be explicit — never attribute one party\'s protection to another), cost-sharing formulas, term/expiration, critical dates, AND — verify carefully — the approval_rights block: each cross-parcel consent gate must name the correct approving_party (whose consent is required) and restricted_party, with any size/%/dimension threshold and deemed-consent mechanic traced to a verbatim quote + section; flag any consent right that is unsupported, mis-attributed (wrong party must approve), or whose threshold/trigger is mis-stated or superseded by a later amendment.'
   : kind === 'jv'
   ? 'every waterfall tier (payment order, split percentages, hurdles — quote the split language verbatim), preferred return rate/compounding/base, promote structure, capital-call mechanics and failure remedies, major-decision list, removal rights, transfer/ROFR/buy-sell provisions, amendment currency. The abstract must reflect THIS layer\'s entity only — flag any term that actually belongs to the other layer\'s agreement.'
   : kind === 'svc'

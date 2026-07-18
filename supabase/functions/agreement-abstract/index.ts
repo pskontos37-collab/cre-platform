@@ -63,7 +63,7 @@ const REA_SCHEMA = `{
  "use_restrictions": [{"scope": str, "exact_language": str, "benefits": str|null, "section": str}],
  "exclusives_granted": [{"holder": str, "protection": str, "quote": str|null, "section": str}],
  "cost_sharing": {"common_area_formula": str|null, "shares": str|null, "maintenance": [{"party": str, "scope": str, "section": str}], "insurance": str|null, "section": str|null},
- "approval_rights": [{"party": str, "right": str, "section": str}],
+ "approval_rights": [{"matter": str, "approving_party": str, "restricted_party": str|null, "category": "construction"|"site_plan"|"use_change"|"signage"|"parking"|"common_area"|"building_alteration"|"assignment"|"other"|str, "threshold": str|null, "scope": str|null, "deemed_consent": str|null, "quote": str|null, "section": str}],
  "building_restrictions": {"details": str|null, "section": str|null},
  "parking": {"requirements": str|null, "section": str|null},
  "transfer_assignment": {"notes": str|null, "section": str|null},
@@ -266,7 +266,9 @@ ABSTRACTION METHOD (binding):
 ${kind === 'rea'
   ? `4. PARTIES & PARCELS: map every party to its parcel/tract and role; where an original party has a known successor (e.g. the declarant's interest now held by the current owner entity), note it in current_successor without guessing.
 5. OPERATING COVENANTS vs USE RESTRICTIONS vs EXCLUSIVES are three different things: an operating covenant OBLIGES a party to operate; a use restriction LIMITS what parcels may be used for; an exclusive PROTECTS a named party's use against others. Never mix them.
-6. impact_on_landlord_leasing: a plain-English summary of what this instrument means for leasing decisions at the center (what uses are blocked, whose consent is needed, which anchor covenants feed co-tenancy math).`
+6. APPROVAL & CONSENT RIGHTS + LEASING IMPACT:
+   - approval_rights: ENUMERATE every cross-parcel consent gate — the matters where one party may not act without another's approval/consent. One entry per matter with: approving_party (whose consent is required), restricted_party (who is bound, null if it binds all owners), category (construction / site_plan / use_change / signage / parking / common_area / building_alteration / assignment / other), threshold (the size/%/dimension trigger where one exists, e.g. "building > 35 ft", "changes affecting > 5% of the common area", "improvements > 1,000 sf", "parking reduced below the required ratio"; null if consent is required regardless of size), scope (plain-English), deemed_consent (any deemed-approval / response-deadline mechanic, e.g. "consent deemed given if no written objection within 30 days"; null if none), and a verbatim quote + section. These gates decide what the landlord may build, reconfigure, re-tenant, or re-sign without a neighbor's/declarant's sign-off — capture them exhaustively.
+   - impact_on_landlord_leasing: a plain-English summary of what this instrument means for leasing decisions at the center (what uses are blocked, whose consent is needed, which anchor covenants feed co-tenancy math).`
   : kind === 'jv'
   ? `4. THIS DEAL LAYER ONLY: the cross-check names the layer ("${row.name}"). Abstract the operating agreement of THIS layer's entity — if documents for the other layer's entity are in the inventory, use them only for cross-references, never for this layer's waterfall/promote terms.
 5. distributions_waterfall: one entry per tier IN PAYMENT ORDER, each with a VERBATIM quote of the split language. The modeled waterfall tiers in the cross-check are the platform's current model — abstract the DOCUMENTED terms and flag every disagreement (rate, split, hurdle, ordering) as "DISCREPANCY: …" naming both values.

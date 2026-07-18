@@ -246,10 +246,30 @@ function ReaBody({ a }: { a: any }) {
       ) : null}
 
       {approvals.length > 0 && (
-        <Section label="Approval rights">
-          {approvals.map((r, i) => (
-            <Text key={i} style={{ fontSize: 7.5, color: TEXT_MUTED, lineHeight: 1.5, marginBottom: 1.5 }}><Text style={{ fontFamily: 'Helvetica-Bold', color: TEXT }}>{pdfSafe(`${str(r.party) ?? ''}: `)}</Text>{pdfSafe(str(r.right) ?? '')}</Text>
-          ))}
+        <Section label={`Approval & consent rights (${approvals.length})`}>
+          {approvals.map((r, i) => {
+            // Tolerant of the pre-enrichment shape {party, right, section}.
+            const matter = str(r.matter) ?? str(r.right)
+            const approver = str(r.approving_party) ?? str(r.party)
+            return (
+              <Card key={i}>
+                <Text style={{ fontSize: 7.5, lineHeight: 1.5 }}>
+                  <Text style={{ fontFamily: 'Helvetica-Bold', color: TEXT }}>{pdfSafe(matter ?? '')}</Text>
+                  {str(r.threshold) ? <Text style={{ fontFamily: 'Helvetica-Bold', color: AMBER }}>{pdfSafe(`  ${r.threshold}`)}</Text> : null}
+                  {str(r.category) ? <Text style={{ color: TEXT_FAINT }}>{pdfSafe(`  ${String(r.category).replace(/_/g, ' ')}`)}</Text> : null}
+                </Text>
+                {(approver || str(r.restricted_party)) ? (
+                  <Text style={{ fontSize: 7, color: TEXT_MUTED, lineHeight: 1.45 }}>
+                    {approver ? <Text><Text style={{ fontFamily: 'Helvetica-Bold' }}>approval: </Text>{pdfSafe(approver)}</Text> : null}
+                    {str(r.restricted_party) ? <Text style={{ color: TEXT_FAINT }}>{pdfSafe(`${approver ? '  ·  ' : ''}binds ${r.restricted_party}`)}</Text> : null}
+                  </Text>
+                ) : null}
+                {str(r.scope) ? <Text style={{ fontSize: 7, color: TEXT_MUTED, lineHeight: 1.45 }}>{pdfSafe(r.scope)}</Text> : null}
+                {str(r.deemed_consent) ? <Text style={{ fontSize: 7, color: TEXT_FAINT, lineHeight: 1.45 }}>{pdfSafe(`Deemed consent: ${r.deemed_consent}`)}</Text> : null}
+                <Quote text={str(r.quote)} cite={str(r.section)} />
+              </Card>
+            )
+          })}
         </Section>
       )}
 
