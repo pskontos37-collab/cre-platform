@@ -134,12 +134,19 @@ foreach($f in $pdfs){
     if(($ok % 10) -eq 0){ Log "progress: ok=$ok skip=$skip fail=$fail big=$big (last: $($abs.doc_type) | $tenant | $($f.Name))" }
   } catch {
     $fail++
-    $detail = if($_.ErrorDetails.Message){ ($_.ErrorDetails.Message -replace '\s+',' ') } else { $_.Exception.Message }
-    if($detail.Length -gt 300){ $detail=$detail.Substring(0,300) }
+    # Read the real HTTP error BODY (PS 5.1 often leaves ErrorDetails empty on 400, so a
+    # bare "(400) Bad Request" hides whether it was a size error vs a transient credit/rate issue).
+    $detail = if($_.ErrorDetails.Message){ $_.ErrorDetails.Message }
+              elseif($_.Exception.Response){ try { (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd() } catch { $_.Exception.Message } }
+              else { $_.Exception.Message }
+    $detail = ($detail -replace '\s+',' ')
+    if($detail.Length -gt 400){ $detail=$detail.Substring(0,400) }
     Log "FAIL $($f.Name) :: $detail"
-    # deterministic too-large/too-many-pages -> dead-letter (base64 path skips it) AND queue for
-    # split_ingest.ps1, which handles giants as ONE consolidated doc (no fragmentation).
-    if($detail -match '(?i)\(400\)|too large|exceed|too long|page limit|invalid_request'){ Add-Content -LiteralPath $DEAD -Value $fp -Encoding utf8; Add-Content -LiteralPath $GIANTS -Value $f.FullName }
+    # Dead-letter + queue for split_ingest ONLY on genuine SIZE errors (deterministic - a
+    # retry won't help). Transient errors (credit balance, rate limit, overload, network)
+    # must stay RETRYABLE - never dead-letter them, or a billing/quota blip permanently
+    # drops thousands of valid docs.
+    if($detail -match '(?i)too many pages|too large|prompt is too long|exceeds the maximum|page limit|maximum.*pages'){ Add-Content -LiteralPath $DEAD -Value $fp -Encoding utf8; Add-Content -LiteralPath $GIANTS -Value $f.FullName }
   }
   if($Limit -gt 0 -and $ok -ge $Limit){ Log "hit Limit=$Limit, stopping"; break }
 }
