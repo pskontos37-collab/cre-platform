@@ -8,8 +8,8 @@ name: CI
 #
 # ONE-TIME SETUP: add repo secret VERCEL_TOKEN (Settings > Secrets and variables >
 # Actions). The org/project IDs below are not secret (they already live in
-# scripts/deploy_vercel.ps1). Without the secret, `check` still runs; only `deploy`
-# fails harmlessly. To make deploys manual instead of on-push, change the deploy
+# scripts/deploy_vercel.ps1). Without the secret, `check` still runs; only deployment
+# jobs fail harmlessly. To make production deploys manual instead of on-push, change the deploy
 # job's `if:` to `github.event_name == 'workflow_dispatch'` and add workflow_dispatch
 # to `on:`.
 
@@ -45,6 +45,31 @@ jobs:
       - name: Build (vite, mirrors Vercel)
         run: npm run build:ci
 
+  preview:
+    needs: check
+    # Same-repository pull requests receive an isolated Vercel preview URL.
+    # This intentionally omits --prod, so master and the live application are
+    # never changed by the preview job.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_8u90qS4wCl8RhHbboldHZyzT
+      VERCEL_PROJECT_ID: prj_dGADWiLryETbJ5inT8pUZOHg7jYJ
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Deploy pull request preview to Vercel
+        run: |
+          npm i -g vercel@latest
+          preview_url=$(vercel deploy --yes --token="$VERCEL_TOKEN")
+          echo "Preview: $preview_url"
+          echo "## Vercel preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "[$preview_url]($preview_url)" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
   deploy:
     needs: check
     # Deploy the COMMITTED master ref on every green push to master (and on manual
@@ -60,6 +85,7 @@ jobs:
     env:
       VERCEL_ORG_ID: team_8u90qS4wCl8RhHbboldHZyzT
       VERCEL_PROJECT_ID: prj_dGADWiLryETbJ5inT8pUZOHg7jYJ
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
