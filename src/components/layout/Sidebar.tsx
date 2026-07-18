@@ -11,10 +11,11 @@ const OPEN_WIDTH    = 220
 
 export function Sidebar() {
   const { appUser } = useAuth()
-  // Collapsed to a narrow icon rail by default; expands on hover. No manual
-  // toggle — the expanded panel floats over the page so content never reflows.
+  // Collapsed to a narrow icon rail by default; expands on hover or when the
+  // brand is tapped. The expanded panel floats over the page without reflow.
   const [hovered, setHovered] = useState(false)
-  const collapsed = !hovered
+  const [pinned, setPinned] = useState(false)
+  const collapsed = !(hovered || pinned)
   const groups   = visiblePagesByGroup(appUser)
   const adminNav = visiblePages(appUser).filter(p => p.key === 'admin')
   const { data: taskAlerts } = useAssignedTaskCount(appUser?.id ?? '')
@@ -44,6 +45,7 @@ export function Sidebar() {
 
   return (
     <aside
+      className="app-sidebar"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -73,10 +75,22 @@ export function Sidebar() {
         transition: 'width 0.15s ease, box-shadow 0.15s ease',
       }}
     >
-      <div
+      <button
+        type="button"
+        onClick={() => { setPinned(p => !p); setHovered(false) }}
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? 'Open navigation' : 'Close navigation'}
+        title={collapsed ? 'Open navigation' : 'Close navigation'}
         style={{
           padding:     collapsed ? '20px 10px 16px' : '20px 16px 16px',
           borderBottom:'1px solid var(--border)',
+          borderTop:   'none',
+          borderLeft:  'none',
+          borderRight: 'none',
+          width:       '100%',
+          background:  'transparent',
+          color:       'inherit',
+          cursor:      'pointer',
           display:     'flex',
           alignItems:  'center',
           justifyContent: collapsed ? 'center' : 'flex-start',
@@ -101,7 +115,8 @@ export function Sidebar() {
             </div>
           </div>
         )}
-      </div>
+        {!collapsed && <span aria-hidden="true" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)' }}>‹</span>}
+      </button>
 
       <nav style={{ flex: 1, padding: '8px 8px', overflowY: 'auto', overflowX: 'hidden' }}>
         {collapsed ? (

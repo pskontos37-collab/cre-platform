@@ -511,7 +511,7 @@ export function AbstractsPage() {
   const selectedAbstract = selected ? byTenant.get(selected.toLowerCase()) : null
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: listCollapsed && view === 'tenant' ? 'none' : 1100 }}>
+    <div className="abstracts-page" style={{ padding: '24px 32px', maxWidth: listCollapsed && view === 'tenant' ? 'none' : 1100 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
         <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Lease Abstracts</span>
         <AccuracyChip />
@@ -522,6 +522,12 @@ export function AbstractsPage() {
         with MRI option-date and REA/PMA cross-checks. First generation briefs the file (~30s per document);
         regeneration reuses briefs and takes 1–2 minutes.
       </div>
+
+      <ReviewStatusBar
+        tenantCount={(tenants.data ?? []).length}
+        abstracts={abstracts.data ?? []}
+        unresolvedByTenant={unresolvedRed.data ?? {}}
+      />
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
         <select value={propertyId ?? ''} onChange={e => { setPropertyId(e.target.value); setSelected(null) }}
@@ -584,7 +590,7 @@ export function AbstractsPage() {
       {propertyId && <ExclusivesRegistryPanel propertyId={propertyId} />}
 
       {view === 'tenant' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: listCollapsed ? '30px 1fr' : '320px 1fr', gap: 16 }}>
+        <div className="abstracts-review-grid" style={{ display: 'grid', gridTemplateColumns: listCollapsed ? '30px minmax(0, 1fr)' : '320px minmax(0, 1fr)', gap: 16 }}>
           {listCollapsed && (
             <button onClick={() => setListCollapsed(false)}
               title="Show the tenant list"
@@ -692,6 +698,41 @@ export function AbstractsPage() {
   )
 }
 
+function ReviewStatusBar({ tenantCount, abstracts, unresolvedByTenant }: {
+  tenantCount: number
+  abstracts: AbstractRow[]
+  unresolvedByTenant: Record<string, number>
+}) {
+  const generated = abstracts.length
+  const aiChecked = abstracts.filter(a => !!a.qa_status).length
+  const approved = abstracts.filter(a => a.locked || a.human_verified).length
+  const decisions = Object.values(unresolvedByTenant).reduce((sum, n) => sum + n, 0)
+  const stages = [
+    { label: 'AI generated', value: `${generated}/${tenantCount}`, note: 'structured draft', color: 'var(--text)' },
+    { label: 'AI QA complete', value: `${aiChecked}/${generated || 0}`, note: 'machine checked', color: 'var(--accent)' },
+    { label: 'Human approved', value: String(approved), note: 'reviewed & locked', color: 'var(--green)' },
+    { label: 'Open decisions', value: String(decisions), note: 'human action needed', color: decisions ? 'var(--red)' : 'var(--green)' },
+  ]
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(155px, 100%), 1fr))', gap: 8 }}>
+        {stages.map(s => (
+          <div key={s.label} style={{ border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface)', padding: '9px 11px' }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.label}</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 2 }}>
+              <span style={{ fontSize: 18, fontWeight: 750, color: s.color }}>{s.value}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{s.note}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 6 }}>
+        Generated and AI QA are machine states. Only a reviewed and locked abstract counts as human approved.
+      </div>
+    </div>
+  )
+}
+
 // Portfolio rollup: every open item across the property's abstracts, unresolved
 // red first, grouped by tenant, each row jumping to that tenant's abstract.
 function PortfolioOpenItems({ rows, loading, onJump }: { rows: OpenItemRow[]; loading: boolean; onJump: (tenant: string) => void }) {
@@ -779,7 +820,7 @@ function GenerateAllButton({ tenants, byTenant, generating, onGenerate }: {
     setRunning(false)
   }
 
-  if (!missing.length) return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>All tenants abstracted ✓</span>
+  if (!missing.length) return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>AI drafts generated for all tenants ✓</span>
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <button onClick={() => void run()} disabled={running || generating.size > 0}
@@ -821,7 +862,7 @@ function VerifyAllButton({ abstracts, verifying, onVerify }: {
   }
 
   if (!abstracts.length) return null
-  if (!unverified.length) return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>All verified ✓</span>
+  if (!unverified.length) return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>AI QA complete for all generated abstracts ✓</span>
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <button onClick={() => void run()} disabled={running || verifying.size > 0}
@@ -897,12 +938,12 @@ function AccuracyChip() {
   }, [])
   if (!acc.data) return null
   if (!acc.data.locked_abstracts) {
-    return <span style={{ fontSize: 11, color: 'var(--text-faint)' }} title="Lock human-verified abstracts (Review & correct) to start measuring AI accuracy">accuracy: unmeasured — lock reviews to begin</span>
+    return <span style={{ fontSize: 11, color: 'var(--text-faint)' }} title="Review and lock abstracts to create human ground truth">human review coverage: 0 locked</span>
   }
   return (
     <span title={`${acc.data.fields_corrected} of ${acc.data.fields_reviewed} human-reviewed fields needed correction, across ${acc.data.locked_abstracts} locked abstracts`}
       style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 10, color: 'var(--green, #22c55e)', background: 'rgba(34,197,94,0.12)' }}>
-      AI accuracy {acc.data.field_accuracy_pct}% · {acc.data.locked_abstracts} verified
+      AI field accuracy {acc.data.field_accuracy_pct}% · {acc.data.locked_abstracts} human-approved
     </span>
   )
 }
@@ -2301,7 +2342,7 @@ function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, o
   return (
     <div style={{ border: `1px solid ${hot ? 'var(--red, #ef4444)' : 'var(--border)'}`, background: hot ? 'rgba(239,68,68,0.06)' : 'var(--surface)', borderRadius: 12, padding: '10px 14px' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: hot ? 'var(--red, #ef4444)' : 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
-        Needs a human — {red.length} to resolve{info.length ? ` · ${info.length} missing/notes` : ''}{resolved.length ? ` · ${resolved.length} resolved` : ''}
+        Human review queue — {red.length} decision{red.length === 1 ? '' : 's'}{info.length ? ` · ${info.length} missing/notes` : ''}{resolved.length ? ` · ${resolved.length} resolved` : ''}
       </div>
       {red.length === 0 && info.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--green, #22c55e)', fontWeight: 600 }}>✓ All items resolved.</div>
