@@ -30,6 +30,7 @@ interface StatusRow {
   field: string
   status: string
   note: string | null
+  reflagged_at: string | null   // set by revert_stale_mri_recon() when a newer QA run reopened this; cleared on any manual status change
 }
 
 const STATUSES = ['open', 'in_progress', 'resolved', 'not_an_issue']
@@ -58,7 +59,7 @@ export function MriReconPage() {
     // regressed conflict resurfaces in the default 'open' filter instead of staying
     // hidden. Idempotent — a no-op when nothing is stale.
     await supabase.rpc('revert_stale_mri_recon')
-    const { data, error } = await supabase.from('mri_recon_status').select('id, property_id, tenant_name, field, status, note')
+    const { data, error } = await supabase.from('mri_recon_status').select('id, property_id, tenant_name, field, status, note, reflagged_at')
     if (error) throw new Error(error.message)
     return (data ?? []) as StatusRow[]
   }, [bump])
@@ -86,7 +87,12 @@ export function MriReconPage() {
       const st = stMap.get(stKey(r))?.status ?? 'open'
       return !statusFilter || st === statusFilter
     })
-    .sort((a, b) => a.property_name.localeCompare(b.property_name) || a.tenant_name.localeCompare(b.tenant_name)),
+    // Re-flagged rows (resolved, then reopened by a newer QA run) float to the top so
+    // the regression is the first thing you see.
+    .sort((a, b) =>
+      ((stMap.get(stKey(a))?.reflagged_at ? 0 : 1) - (stMap.get(stKey(b))?.reflagged_at ? 0 : 1))
+      || a.property_name.localeCompare(b.property_name)
+      || a.tenant_name.localeCompare(b.tenant_name)),
   [recon.data, governs, propFilter, tenantFilter, statusFilter, stMap])
 
   if (appUser?.role !== 'admin' && appUser?.role !== 'asset_manager') {
@@ -97,7 +103,9 @@ export function MriReconPage() {
     const existing = stMap.get(stKey(r))
     // Stamp the QA timestamp this decision was made against — revert_stale_mri_recon()
     // reopens the row if a later abstract-verify run (newer qa_at) re-flags the field.
-    const patch: any = { status, updated_by: appUser?.id ?? null, updated_at: new Date().toISOString(), qa_at: r.qa_at }
+    // Clear reflagged_at: a manual status change is the user re-triaging, so the
+    // "re-flagged" badge is done.
+    const patch: any = { status, updated_by: appUser?.id ?? null, updated_at: new Date().toISOString(), qa_at: r.qa_at, reflagged_at: null }
     if (note !== undefined) patch.note = note || null
     if (existing) {
       await supabase.from('mri_recon_status').update(patch).eq('id', existing.id)
@@ -209,7 +217,17 @@ export function MriReconPage() {
                 return (
                   <tr key={i} style={{ borderTop: '1px solid var(--border)', verticalAlign: 'top' }}>
                     <td style={{ padding: '6px 8px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{r.property_name}</td>
-                    <td style={{ padding: '6px 8px', color: 'var(--text)', fontWeight: 600 }}>{r.tenant_name}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text)', fontWeight: 600 }}>
+                      {r.tenant_name}
+                      {st?.reflagged_at && (
+                        <span title="You resolved this, but a newer QA run flagged the field again — please re-check."
+                          style={{ display: 'inline-block', marginLeft: 6, padding: '1px 7px', borderRadius: 10, fontSize: 10, fontWeight: 700,
+                            verticalAlign: 'middle', color: 'var(--amber)', background: 'color-mix(in srgb, var(--amber) 15%, transparent)',
+                            border: '1px solid var(--amber)', whiteSpace: 'nowrap' }}>
+                          ↻ Re-flagged
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: '6px 8px', color: 'var(--text-muted)' }}>{r.field}
                       {r.note && <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2, maxWidth: 380 }}>{r.note}</div>}
                     </td>

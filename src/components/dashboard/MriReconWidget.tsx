@@ -28,6 +28,7 @@ interface StatusRow {
   tenant_name: string
   field: string
   status: string
+  reflagged_at: string | null   // set when a newer QA run reopened a resolved row
 }
 
 // Items no longer needing attention.
@@ -67,7 +68,7 @@ export function MriReconWidget({ propertyIds }: MriReconWidgetProps) {
     await supabase.rpc('revert_stale_mri_recon')
     const { data, error } = await supabase
       .from('mri_recon_status')
-      .select('property_id, tenant_name, field, status')
+      .select('property_id, tenant_name, field, status, reflagged_at')
     if (error) throw new Error(error.message)
     return (data ?? []) as StatusRow[]
   }, [canView])
@@ -78,18 +79,24 @@ export function MriReconWidget({ propertyIds }: MriReconWidgetProps) {
     for (const s of statuses.data ?? []) m.set(stKey(s), s.status)
     return m
   }, [statuses.data])
+  const reflaggedKeys = useMemo(() => {
+    const s = new Set<string>()
+    for (const st of statuses.data ?? []) if (st.reflagged_at) s.add(stKey(st))
+    return s
+  }, [statuses.data])
 
   // Open = in scope and not resolved/not_an_issue (absent status defaults open).
   const counts = useMemo(() => {
-    const c: Record<string, number> = { abstract: 0, mri: 0, unclear: 0, total: 0 }
+    const c: Record<string, number> = { abstract: 0, mri: 0, unclear: 0, total: 0, reflagged: 0 }
     for (const r of recon.data ?? []) {
       if (scope.size > 0 && !scope.has(r.property_id)) continue
       if (CLOSED.has(stMap.get(stKey(r)) ?? 'open')) continue
       c[r.governs] = (c[r.governs] ?? 0) + 1
       c.total++
+      if (reflaggedKeys.has(stKey(r))) c.reflagged++
     }
     return c
-  }, [recon.data, scope, stMap])
+  }, [recon.data, scope, stMap, reflaggedKeys])
 
   const loading = recon.loading || statuses.loading
   const error = recon.error || statuses.error
@@ -124,6 +131,14 @@ export function MriReconWidget({ propertyIds }: MriReconWidgetProps) {
               </div>
             ))}
           </div>
+          {counts.reflagged > 0 && (
+            <div title="Conflicts you had resolved that a newer QA run flagged again — re-check on /mri-recon"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, padding: '3px 10px', borderRadius: 10,
+                fontSize: 11, fontWeight: 700, color: 'var(--amber)', background: 'color-mix(in srgb, var(--amber) 15%, transparent)',
+                border: '1px solid var(--amber)' }}>
+              ↻ {counts.reflagged.toLocaleString()} re-flagged since resolved
+            </div>
+          )}
           <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 10, lineHeight: 1.5 }}>
             Fields where the lease documents and the MRI system-of-record disagree.
           </div>
