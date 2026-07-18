@@ -17,10 +17,24 @@ $enc = New-Object System.Text.UTF8Encoding($false)
 function PostFn($slug, $obj) {
   $tmp = "$PSScriptRoot\_agr_body_$Kind.json"
   [System.IO.File]::WriteAllText($tmp, ($obj | ConvertTo-Json -Compress -Depth 5), $enc)
-  $out = (& curl.exe -s -w "`n%{http_code}" -X POST "$BASE/functions/v1/$slug" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -A $UA --data-binary "@$tmp" --max-time 290) -join "`n"
+  $out = (& curl.exe -s -w "`n%{http_code}" -X POST "$BASE/functions/v1/$slug" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -A $UA --data-binary "@$tmp" --max-time 420) -join "`n"
   $code = ($out -split "`n")[-1]
   $json = if ($out.Length -gt $code.Length) { $out.Substring(0, $out.Length - $code.Length - 1) } else { '' }
   return @{ code = $code; json = $json }
+}
+
+# agreement-abstract returns a keep-alive STREAMING response: HTTP is ALWAYS 200
+# and a synthesis failure is reported in the body's "error" field (leading
+# keep-alive whitespace before the JSON is ignored by ConvertFrom-Json). So a
+# 200 alone no longer means success. Non-streaming fns (doc-brief,
+# agreement-verify) still signal failure via status code; this helper handles
+# both: success = HTTP 200 AND no non-empty "error" property in the body.
+function FnOk($r) {
+  if ($r.code -ne '200') { return $false }
+  $p = $null
+  try { $p = $r.json | ConvertFrom-Json } catch { return $true }
+  if ($p -and ($p.PSObject.Properties.Name -contains 'error') -and $p.error) { return $false }
+  return $true
 }
 
 $table = if ($Kind -eq 'rea') { 'rea_agreements' } else { 'management_agreements' }
@@ -33,7 +47,7 @@ foreach ($r in $rows) {
   $i++
   # Stage 1: plan -> brief unbriefed source docs (resumable segment loop)
   $plan = PostFn 'agreement-abstract' @{ kind = $Kind; id = $r.id; plan = $true }
-  if ($plan.code -ne '200') { Log ("{0}/{1} PLAN FAIL http={2} :: {3}" -f $i, @($rows).Count, $plan.code, ($plan.json -replace '\s+',' ').Substring(0,[Math]::Min(140,$plan.json.Length))); continue }
+  if (-not (FnOk $plan)) { Log ("{0}/{1} PLAN FAIL http={2} :: {3}" -f $i, @($rows).Count, $plan.code, ($plan.json -replace '\s+',' ').Substring(0,[Math]::Min(140,$plan.json.Length))); continue }
   $docs = @(); try { $docs = @(($plan.json | ConvertFrom-Json).docs) } catch {}
   $need = @($docs | Where-Object { $_ -and $_.id -and $_.brief_status -ne 'complete' })
   Log ("{0}/{1} id={2}: {3} docs, {4} need briefs" -f $i, @($rows).Count, $r.id, $docs.Count, $need.Count)
@@ -51,7 +65,7 @@ foreach ($r in $rows) {
     $ok = $false
     foreach ($attempt in 1..3) {
       $res = PostFn $fn @{ kind = $Kind; id = $r.id }
-      if ($res.code -eq '200') { $ok = $true; break }
+      if (FnOk $res) { $ok = $true; break }
       Log ("  {0} attempt {1} http={2} :: {3}" -f $fn, $attempt, $res.code, ($res.json -replace '\s+',' ').Substring(0,[Math]::Min(120,$res.json.Length)))
       Start-Sleep -Seconds 15
     }
