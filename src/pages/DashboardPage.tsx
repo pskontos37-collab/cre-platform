@@ -4,7 +4,7 @@ import { WidgetCategoryProvider } from '../components/ui/Widget'
 import { useAuth } from '../contexts/AuthContext'
 import type { UserRole } from '../types/database'
 import {
-  DASHBOARD_SECTIONS as SECTIONS, WIDGET_DEFS, DEFAULT_WIDGET_KEYS as DEFAULT_KEYS,
+  DASHBOARD_SECTIONS as SECTIONS, WIDGET_DEFS,
   widgetSectionOf as sectionOf, presetForRole, sanitizeWidgetKeys,
 } from '../lib/dashboardWidgets'
 import { useProperties } from '../hooks/useProperties'
@@ -72,7 +72,7 @@ const REGISTRY = WIDGET_DEFS
   .filter(d => RENDERERS[d.key])
   .map(d => ({ ...d, render: RENDERERS[d.key] }))
 
-const roleLabel = (role: UserRole | undefined) => role ? role.replace('_', ' ') : 'your role'
+const roleLabel = (role: UserRole | undefined) => role ? `${role.replace('_', ' ')} profile` : 'your role'
 
 const LAYOUT_KEY    = 'cre-dashboard-layout'          // v2: { order, hidden }
 const LEGACY_KEY    = 'cre-dashboard-widgets'         // v1: string[] (migrated)
@@ -146,6 +146,16 @@ export default function DashboardPage() {
   const presetName = assignedPreset ? 'your assigned profile' : roleLabel(appUser?.role)
   const layout = saved ?? { order: preset, hidden: [] }
   const keys = visibleKeys(layout, preset)
+  const visibleSectionIds = SECTIONS
+    .filter(sec => keys.some(k => sectionOf(k) === sec.id))
+    .map(sec => sec.id)
+
+  // Keep the landing page useful at a glance. A profile's first two populated
+  // sections open by default; the rest remain one click away. Explicit browser
+  // preferences always win, and users can expand everything below.
+  const sectionIsCollapsed = (id: string) =>
+    collapsed[id] ?? visibleSectionIds.indexOf(id) >= 2
+  const allExpanded = visibleSectionIds.every(id => !sectionIsCollapsed(id))
 
   function save(next: Layout) {
     setSaved(next)
@@ -159,7 +169,12 @@ export default function DashboardPage() {
     localStorage.removeItem(LEGACY_KEY)
   }
   function toggleSection(id: string) {
-    const next = { ...collapsed, [id]: !collapsed[id] }
+    const next = { ...collapsed, [id]: !sectionIsCollapsed(id) }
+    setCollapsed(next)
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next))
+  }
+  function setSectionFocus(expandAll: boolean) {
+    const next = Object.fromEntries(visibleSectionIds.map((id, i) => [id, expandAll ? false : i >= 2]))
     setCollapsed(next)
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next))
   }
@@ -168,23 +183,41 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <ExecutiveSnapshotButton
-          propertyIds={propertyIds}
-          propertyNames={propertyNames}
-          totalAccessible={(properties ?? []).length}
-        />
-        <button
-          onClick={() => setCustomizing(c => !c)}
-          style={{
-            fontSize: 11.5, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
-            border: `1px solid ${customizing ? 'var(--accent)' : 'var(--border-2)'}`,
-            background: customizing ? 'var(--accent-dim)' : 'var(--surface-2)',
-            color: customizing ? 'var(--accent)' : 'var(--text-muted)',
-          }}
-        >
-          {customizing ? 'Done' : '⚙ Customize widgets'}
-        </button>
+      <div className="dashboard-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 3 }}>Dashboard</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+            Priorities from {presetName}{propertyIds.length ? ` · ${propertyIds.length} ${propertyIds.length === 1 ? 'property' : 'properties'} in this view` : ''}.
+          </div>
+        </div>
+        <div className="dashboard-actions" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setSectionFocus(!allExpanded)}
+            title={allExpanded ? 'Keep the first two profile sections open' : 'Show every dashboard section'}
+            style={{
+              fontSize: 11.5, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+              border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)',
+            }}
+          >
+            {allExpanded ? 'Focus view' : 'Expand all'}
+          </button>
+          <ExecutiveSnapshotButton
+            propertyIds={propertyIds}
+            propertyNames={propertyNames}
+            totalAccessible={(properties ?? []).length}
+          />
+          <button
+            onClick={() => setCustomizing(c => !c)}
+            style={{
+              fontSize: 11.5, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+              border: `1px solid ${customizing ? 'var(--accent)' : 'var(--border-2)'}`,
+              background: customizing ? 'var(--accent-dim)' : 'var(--surface-2)',
+              color: customizing ? 'var(--accent)' : 'var(--text-muted)',
+            }}
+          >
+            {customizing ? 'Done' : '⚙ Customize widgets'}
+          </button>
+        </div>
       </div>
 
       {customizing && (
@@ -202,7 +235,7 @@ export default function DashboardPage() {
       {SECTIONS.map(sec => {
         const sectionKeys = keys.filter(k => sectionOf(k) === sec.id)
         if (sectionKeys.length === 0) return null
-        const isCollapsed = !!collapsed[sec.id]
+        const isCollapsed = sectionIsCollapsed(sec.id)
         return (
           <section key={sec.id} style={{ marginBottom: 22 }}>
             <button
@@ -226,7 +259,7 @@ export default function DashboardPage() {
             {!isCollapsed && (
               <div style={{
                 display:             'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))',
                 gap:                 16,
                 alignItems:          'stretch',   // every card in a row is equal height → symmetric grid
               }}>

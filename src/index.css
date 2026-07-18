@@ -152,3 +152,44 @@ body {
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+/* Compact screens keep the full application available without forcing page
+   content wider than the viewport. The sidebar remains an icon rail and can be
+   opened by tapping the brand mark. */
+@media (max-width: 760px) {
+  .app-main {
+    padding: 12px !important;
+  }
+  .app-header {
+    min-height: 52px;
+    height: auto !important;
+    padding: 7px 10px !important;
+    overflow-x: auto;
+  }
+  .app-header-scope,
+  .app-header-actions {
+    flex: 0 0 auto !important;
+  }
+  .app-header-view-label {
+    display: none;
+  }
+  .dashboard-heading {
+    flex-direction: column;
+  }
+  .dashboard-actions {
+    justify-content: flex-start !important;
+    width: 100%;
+  }
+  .abstracts-page,
+  .monthly-reports-page {
+    max-width: none !important;
+    padding: 8px !important;
+  }
+  .abstracts-review-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .monthly-report-row {
+    align-items: flex-start !important;
+    flex-direction: column;
+  }
+}

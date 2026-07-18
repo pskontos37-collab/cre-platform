@@ -14,6 +14,7 @@ export function Header() {
 
   return (
     <header
+      className="app-header"
       style={{
         height:        52,
         borderBottom:  '1px solid var(--border)',
@@ -28,8 +29,8 @@ export function Header() {
       }}
     >
       {/* Filter scope selector */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>View:</span>
+      <div className="app-header-scope" style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+        <span className="app-header-view-label" style={{ fontSize: 11, color: 'var(--text-faint)' }}>View:</span>
         <FilterButton
           label="All Properties"
           active={filter.scope === 'all'}
@@ -53,7 +54,7 @@ export function Header() {
       </div>
 
       {/* Right side actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="app-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <HelpCenter />
         <ThemePicker />
         <AccountMenu />

@@ -9,11 +9,11 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
+    <div className="app-shell" style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
       <Sidebar />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Header />
-        <main style={{ flex: 1, padding: '20px 24px', overflowY: 'auto' }}>
+        <main className="app-main" style={{ flex: 1, padding: '20px 24px', overflowY: 'auto', minWidth: 0 }}>
           {children}
         </main>
       </div>
