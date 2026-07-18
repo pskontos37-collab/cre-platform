@@ -219,20 +219,47 @@ serve(async (req) => {
       if (!byDoc.has(c.document_id)) byDoc.set(c.document_id, [])
       byDoc.get(c.document_id)!.push(c.content ?? '')
     }
+    // Two-pass fill so a single giant document (e.g. a 500-chunk base lease, or a
+    // base lease + its re-split duplicate) can't monopolize the budget and crowd
+    // out the small AMENDMENTS that actually carry the CURRENT rent/CAM/percentage
+    // terms — the failure that left Regal's base_rent/percentage_rent "needs_source"
+    // even after the amendment text was OCR'd. PASS 1 (breadth): every doc gets up
+    // to PER_DOC_FLOOR of raw text, so a full amendment (~30-35K chars) always lands
+    // in the window. PASS 2 (depth): remaining budget extends truncated docs in
+    // order (the base lease gets the rest).
+    const PER_DOC_FLOOR = 45_000
     let used = 0
     const parts: string[] = []
     const fullTextIds = new Set<string>()
     const truncatedIds = new Set<string>()
+    const textById = new Map<string, string>()
+    const takenById = new Map<string, number>()
     for (const d of docs) {
       const text = (byDoc.get(d.id) ?? []).join('\n')
+      if (text) textById.set(d.id, text)
+    }
+    for (const d of docs) {                                   // PASS 1 — breadth
+      const text = textById.get(d.id)
       if (!text) continue
       const room = CHAR_BUDGET - used
       if (room < 2000) break
-      const slice = text.slice(0, room)
-      parts.push(`===== DOCUMENT: "${d.title ?? d.file_name}" (type: ${d.doc_type}) =====\n${slice}`)
-      used += slice.length
-      if (slice.length >= text.length) fullTextIds.add(d.id)
-      else truncatedIds.add(d.id)
+      const take = Math.min(text.length, PER_DOC_FLOOR, room)
+      parts.push(`===== DOCUMENT: "${d.title ?? d.file_name}" (type: ${d.doc_type}) =====\n${text.slice(0, take)}`)
+      used += take
+      takenById.set(d.id, take)
+      if (take >= text.length) fullTextIds.add(d.id); else truncatedIds.add(d.id)
+    }
+    for (const d of docs) {                                   // PASS 2 — depth
+      if (CHAR_BUDGET - used < 2000) break
+      const text = textById.get(d.id)
+      const already = takenById.get(d.id) ?? 0
+      if (!text || already >= text.length) continue
+      const extra = Math.min(text.length - already, CHAR_BUDGET - used)
+      if (extra <= 0) continue
+      parts.push(`===== DOCUMENT (continued): "${d.title ?? d.file_name}" =====\n${text.slice(already, already + extra)}`)
+      used += extra
+      takenById.set(d.id, already + extra)
+      if (already + extra >= text.length) { fullTextIds.add(d.id); truncatedIds.delete(d.id) }
     }
 
     // ── 3a. Briefs for docs BEYOND the raw-text budget (v7). The v27
