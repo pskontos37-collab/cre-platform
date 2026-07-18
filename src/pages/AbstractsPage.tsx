@@ -1627,21 +1627,45 @@ async function openBestSourceDoc(citation: string, sourceDocIds: string[], probe
     .select('id, title, file_name, storage_path').in('id', sourceDocIds)
   const docs = (data ?? []) as Array<{ id: string; title: string | null; file_name: string | null; storage_path: string | null }>
   if (!docs.length) return
-  let pick = citation && citation.trim() ? rankDocsByCitation(docs, citation)[0] : undefined
+  const ranked = citation && citation.trim() ? rankDocsByCitation(docs, citation) : []
+  // Locator = a VERBATIM fragment of the cited lease language (longest run with no
+  // ellipsis), never the verifier's note prose — which never appears in the PDF and
+  // was the cause of "open lease" landing on a random page. Verifiers abridge with
+  // "…"; the needle must come from one contiguous fragment (mirrors locateQuoteData).
+  const fragment = (probeText ?? '').split(/\.{3,}|…/).map(f => f.trim()).sort((a, b) => b.length - a.length)[0] ?? ''
+  const probeWords = fragment.replace(/[%_]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(w => w.length >= 3)
+  const hasProbe = probeWords.length >= 3
+  // Open the doc that ACTUALLY CONTAINS the passage — not merely the best
+  // citation-name match. A citation can name a thinly-extracted amendment (e.g. a
+  // scanned Fifth Amendment with a near-empty text layer) that ranks top but has no
+  // locatable text; probing every candidate in citation-rank order and taking the
+  // first that resolves the passage's page fixes both the wrong-doc and wrong-page
+  // failure modes. Falls back to the citation-best / primary lease instrument at
+  // page 1 only when nothing locates (scanned/paraphrase) — prior behavior, no false anchor.
+  let pick: (typeof docs)[number] | undefined
+  let page: number | null = null
+  if (hasProbe) {
+    const order = [...ranked, ...docs.filter(d => !ranked.includes(d))]
+    for (const d of order) {
+      const p = await resolvePage(d.id, fragment)
+      if (p) { pick = d; page = p; break }
+    }
+  }
   if (!pick) {
-    pick = docs.find(d => {
-      const t = `${d.title ?? ''} ${d.file_name ?? ''}`.toLowerCase()
-      return /lease/.test(t) && !/(amend|estoppel|guaranty|snda|subordinat|option|notice|assignment|memorandum|commencement)/.test(t)
-    }) ?? docs[0]
+    pick = ranked[0]
+      ?? docs.find(d => {
+        const t = `${d.title ?? ''} ${d.file_name ?? ''}`.toLowerCase()
+        return /lease/.test(t) && !/(amend|estoppel|guaranty|snda|subordinat|option|notice|assignment|memorandum|commencement)/.test(t)
+      })
+      ?? docs[0]
   }
   if (!pick?.storage_path) return
   const { data: signed } = await supabase.storage.from('documents').createSignedUrl(pick.storage_path, 3600)
   if (!signed?.signedUrl) return
-  // Jump to the cited provision: probe the picked doc's verbatim-text chunks (the
-  // clause language, then the citation) for its page. Falls back to opening the
-  // document at page 1 when nothing locates (scanned/paraphrase) — prior behavior.
-  const page = await resolvePage(pick.id, probeText, citation)
-  const locator = (probeText ?? '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).join(' ') || null
+  // Send the verbatim fragment as the find-bar highlight even when the page didn't
+  // resolve (the live PDF text may be richer than the indexed chunks); never send
+  // note prose as the locator.
+  const locator = hasProbe ? probeWords.slice(0, 8).join(' ') : null
   window.open(viewHref(signed.signedUrl, locator, page), '_blank', 'noopener')
 }
 // One-click into the lease PDF from a reconciliation row (worklist / verify check).
@@ -1847,6 +1871,7 @@ interface WorkItem {
   isArray: boolean           // field points at an array of rows we can edit inline
   arrayValue: any[] | null
   citation: string | null    // best hint for the "open lease" link
+  quote: string | null       // VERBATIM source language to anchor the "open lease" deep-link (never note prose)
   sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith' | 'ensemble' | 'clause'; text: string; jumpId: string }>
 }
 const ORIGIN_LABEL: Record<string, string> = { open: 'Open item', verify: 'Verify', mri: 'MRI', arith: 'Arithmetic', ensemble: 'Cross-check', clause: 'Clause expert' }
@@ -1878,7 +1903,7 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fie
       w = { key, resolvable: true, kind, field, red, severity,
         correctable: !!field && !isArr && (v == null || typeof v !== 'object'),
         currentValue: v == null ? '' : String(v),
-        isArray: isArr, arrayValue: isArr ? v : null, citation: null, sources: [] }
+        isArray: isArr, arrayValue: isArr ? v : null, citation: null, quote: null, sources: [] }
       map.set(key, w)
     } else {
       if (red) w.red = true
@@ -1894,6 +1919,7 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fie
     if (!c?.verdict || c.verdict === 'confirmed' || !c.field) continue
     const w = ensure(keyForField(c.field), c.field, 'qa_check', 'discrepancy', true)
     if (!w.citation && c.citation) w.citation = c.citation
+    if (!w.quote && c.source_quote) w.quote = c.source_quote
     w.sources.push({ origin: 'verify', text: `${VERDICT_META[c.verdict]?.label ?? c.verdict}: ${c.field}${c.note ? ` — ${c.note}` : ''}`, jumpId: 'abstract-verification' })
   }
   for (const m of (Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : [])) {
@@ -1914,6 +1940,7 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fie
     if (!d?.field) continue
     const w = ensure(keyForField(d.field), d.field, 'qa_check', 'discrepancy', true)
     if (!w.citation && d.citation) w.citation = d.citation
+    if (!w.quote && d.quote) w.quote = d.quote
     w.sources.push({ origin: 'ensemble', text: `${d.field} — stored ${String(d.abstract_value ?? '—')} → cross-check says ${String(d.correct_value ?? '—')}${d.votes ? ` (${d.votes})` : ''}${d.citation ? ` — ${d.citation}` : ''}`, jumpId: 'abstract-confidence' })
   }
   // Clause-specialist findings (abstract-clause-verify): a single-clause expert
@@ -1925,6 +1952,7 @@ function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fie
     const red = isRedClauseFinding(f)
     const w = ensure(keyForField(f.field), f.field, 'qa_check', red ? 'discrepancy' : 'confirm', red)
     if (!w.citation && f.citation) w.citation = f.citation
+    if (!w.quote && f.quote) w.quote = f.quote
     const VERB: Record<string, string> = { revise: 'Revise', cannot_verify: 'Cannot verify', enrich: 'Add nuance' }
     const detail = f.verdict === 'enrich'
       ? (f.missing_nuance ?? f.rationale ?? '')
@@ -2161,7 +2189,7 @@ function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sour
             {s.text} <span style={{ color: 'var(--text-faint)' }}>→</span>
           </a>
         ))}
-        <div><LeaseFileLink citation={w.citation} sourceDocIds={sourceDocIds} probeText={w.currentValue || w.sources[0]?.text} label="open lease ↗" /></div>
+        <div><LeaseFileLink citation={w.citation} sourceDocIds={sourceDocIds} probeText={w.quote || w.currentValue || null} label="open lease ↗" /></div>
       </div>
       {w.resolvable ? (
         discussing && w.field ? (
