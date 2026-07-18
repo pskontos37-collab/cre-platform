@@ -31,13 +31,13 @@ export function TenantConcentrationWidget({ propertyIds }: TenantConcentrationWi
       )}
       {!loading && !error && rows.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 110px 70px 90px 90px', gap: 8, padding: '0 2px 4px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr) 110px 70px 90px 90px', gap: 8, padding: '0 2px 4px', borderBottom: '1px solid var(--border)' }}>
             {['#', 'Tenant', 'Annual Rent', '% Rent', 'Leased SF', 'Lease End'].map(h => (
               <div key={h} style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>{h}</div>
             ))}
           </div>
           {rows.map((row, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 110px 70px 90px 90px', gap: 8, alignItems: 'center', padding: '5px 2px' }}>
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr) 110px 70px 90px 90px', gap: 8, alignItems: 'center', padding: '5px 2px' }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: BAR_COLORS[i % BAR_COLORS.length] }}>#{i + 1}</div>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
