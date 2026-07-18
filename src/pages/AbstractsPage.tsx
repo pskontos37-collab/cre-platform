@@ -979,9 +979,18 @@ function ClauseBadge({ cf }: { cf: any }) {
 function ClauseFindingsPanel({ cf, at, resByKey }: { cf: any; at: string | null; resByKey: Map<string, Resolution> }) {
   const all = (Array.isArray(cf?.findings) ? cf.findings : []) as any[]
   if (!all.length) return null
-  const shown = all.filter(f => f.verdict !== 'confirm')       // confirmed clauses are reassuring but not action items
-  const confirmed = all.length - shown.length
-  const hasRed = shown.some(f => isActionableClauseFinding(f) && isRedClauseFinding(f))
+  const rawShown = all.filter(f => f.verdict !== 'confirm')     // confirmed clauses are reassuring but not action items
+  const confirmed = all.length - rawShown.length
+  // Materiality tiering: rank the RED actionable findings so must-fix items lead,
+  // then nuance, then low-materiality reconciliations, then everything else.
+  const tierOf = (f: any) => (isActionableClauseFinding(f) && isRedClauseFinding(f)) ? clauseFindingTier(f) : null
+  const shown = [...rawShown].sort((a, b) => {
+    const ta = tierOf(a), tb = tierOf(b)
+    return (ta ? CLAUSE_TIER_META[ta].rank : 3) - (tb ? CLAUSE_TIER_META[tb].rank : 3)
+  })
+  const hasRed = rawShown.some(f => tierOf(f))
+  const tierCounts: Record<string, number> = { fix: 0, nuance: 0, reconcile: 0 }
+  for (const f of rawShown) { const t = tierOf(f); if (t) tierCounts[t]++ }
   return (
     <details open={hasRed} id="abstract-clause-findings" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
       <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -990,6 +999,16 @@ function ClauseFindingsPanel({ cf, at, resByKey }: { cf: any; at: string | null;
       <div style={{ fontSize: 10, color: 'var(--text-faint)', margin: '6px 0 10px' }}>
         {(cf?.specialists ?? []).map((s: string) => SPEC_LABEL[s] ?? s).join(' + ') || 'specialists'} each deep-audited their own clause against the source briefs and MRI{cf?.cross_model ? `, with a ${cf.cross_model} cross-model check on high-severity findings` : ''}. {confirmed > 0 ? `${confirmed} clause${confirmed > 1 ? 's' : ''} confirmed clean. ` : ''}Actionable findings also appear in the worklist above.
       </div>
+      {(tierCounts.fix + tierCounts.nuance + tierCounts.reconcile) > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {(['fix', 'nuance', 'reconcile'] as const).filter(t => tierCounts[t] > 0).map(t => (
+            <span key={t} title={t === 'fix' ? 'Wrong value or missing document — act first' : t === 'nuance' ? 'Value right, a material detail is missing — read + decide' : 'Notice-date recomputation / MRI reconciliation — low-materiality, batch-clear'}
+              style={{ fontSize: 10, fontWeight: 700, color: CLAUSE_TIER_META[t].color, border: `1px solid ${CLAUSE_TIER_META[t].color}`, borderRadius: 9, padding: '2px 8px' }}>
+              {tierCounts[t]} {CLAUSE_TIER_META[t].label.toLowerCase()}
+            </span>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {shown.map((f, i) => {
           const vm = CLAUSE_VERDICT[f.verdict] ?? { label: f.verdict, color: 'var(--text-faint)' }
@@ -999,6 +1018,7 @@ function ClauseFindingsPanel({ cf, at, resByKey }: { cf: any; at: string | null;
             <div key={i} style={{ border: `1px solid ${resolved || settled ? 'var(--border-2)' : vm.color}`, borderRadius: 6, padding: '7px 9px', background: 'var(--surface-2)', opacity: resolved || settled ? 0.6 : 1 }}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: vm.color, border: `1px solid ${vm.color}`, borderRadius: 8, padding: '1px 6px' }}>{vm.label}</span>
+                {tierOf(f) && <span style={{ fontSize: 8, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: CLAUSE_TIER_META[tierOf(f)!].color }}>{CLAUSE_TIER_META[tierOf(f)!].label}</span>}
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{CONF_FIELD_LABEL[f.field] ?? SPEC_LABEL[f.specialist] ?? f.field}</span>
                 {f.cross_model?.verdict === 'confirm' && <span title={f.cross_model.note} style={{ fontSize: 9, fontWeight: 700, color: 'var(--green, #22c55e)' }}>✓ 2nd model</span>}
                 {f.cross_model?.verdict === 'refute' && <span title={f.cross_model.note} style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-faint)' }}>✗ 2nd model — downgraded</span>}
@@ -1890,6 +1910,36 @@ function isActionableClauseFinding(f: any): boolean {
 // not red.
 function isRedClauseFinding(f: any): boolean {
   return f.verdict === 'revise' || f.verdict === 'cannot_verify' || (f.verdict === 'enrich' && f.severity === 'high')
+}
+function clauseDomainOf(field: string): string {
+  if (/^exclusives/.test(field)) return 'exclusives'
+  if (/^guarant/.test(field)) return 'guaranty'
+  if (/co.?tenancy/i.test(field)) return 'co_tenancy'
+  if (field === 'options') return 'options'
+  return field
+}
+// Materiality tier of a RED clause finding, so reviewers see what matters first
+// instead of a flat pile. Deterministic; mirrors the portfolio calibration:
+//   'fix'       — wrong value or missing document (revise/cannot_verify; option
+//                 STATUS change). Act first.
+//   'nuance'    — value right but a high-severity material detail missing
+//                 (high-sev enrich). Read + decide.
+//   'reconcile' — option NOTICE-DATE recomputation / MRI reconciliation. Correct
+//                 but low-materiality; batch-clear.
+function clauseFindingTier(f: any): 'fix' | 'nuance' | 'reconcile' {
+  if (f.verdict === 'enrich') return 'nuance'
+  if (f.verdict === 'revise' && clauseDomainOf(String(f.field ?? '')) === 'options') {
+    const txt = `${f.correct_value ?? ''} ${f.rationale ?? ''}`.toLowerCase()
+    const dateMath = /notice_by|notice deadline|notice date|days prior|reconcile|off by one|365 day|270 day|210 day|180 day|90 day/.test(txt)
+    const structural = /status|exercised|superseded|missing|fabricat|remove|no renewal|no option/.test(txt)
+    if (dateMath && !structural) return 'reconcile'
+  }
+  return 'fix'
+}
+const CLAUSE_TIER_META: Record<string, { label: string; rank: number; color: string }> = {
+  fix: { label: 'Must-fix', rank: 0, color: 'var(--red, #ef4444)' },
+  nuance: { label: 'Nuance', rank: 1, color: 'var(--amber, #f59e0b)' },
+  reconcile: { label: 'Reconcile', rank: 2, color: 'var(--text-faint)' },
 }
 
 function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fieldConfidence?: any, clauseFindings?: any): WorkItem[] {
