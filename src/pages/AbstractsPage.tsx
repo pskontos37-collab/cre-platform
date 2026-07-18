@@ -261,8 +261,2631 @@ export function AbstractsPage() {
       // vanished items, revive reappeared ones) so the worklist stays honest.
       try {
         const { data: fresh } = await supabase.from('lease_abstracts')
-       Á_z“⁄$z{-ÆÈ‹j◊ù¢wf"Ç“◊FWáB÷◊WFVBír¬FFñÊs¢s7Çr◊”Ó)…r∑ÇÊ6ÜV6∑◊∑ÇÊFWFñ¬Ú(	BG∑ÇÊFWFñ«÷¢rw”¬ˆFóc‚ó––¢¬ˆFóc‡–¢ó––†–¢∂fóÜW2Ê∆VÊwFÇ‚bbÄ–¢∆Fób7Gñ∆S◊∑≤÷&vñÂF˜¢Ç◊”‡–¢∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢„R¬fˆÁEvVñváC¢s¬6ˆ∆˜#¢wf"Ç“÷66VÁBír¬FWáEG&Á6f˜&”¢wWW&66Rr¬∆WGFW%76ñÊs¢s„VV“r¬÷&vñ‰&˜GFˆ”¢"◊”Â&V6ˆ÷÷VÊFVBfóÜW3¬ˆFóc‡–¢«V¬7Gñ∆S◊∑≤÷&vñ„¢¬FFñÊt∆VgC¢Ç◊”‡–¢∂fóÜW2Ê÷ÇáÇ¬íí”‚∆∆í∂Wì◊∂ó“7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬6ˆ∆˜#¢wf"Ç“◊FWáB÷◊WFVBír¬÷&vñ‰&˜GFˆ”¢"◊”Á∑á”¬ˆ∆ì‚ó––¢¬˜V√‡–¢¬ˆFóc‡–¢ó––†–¢∂6ˆÊfó&÷VBÊ∆VÊwFÇ‚bbÄ–¢∆Fób7Gñ∆S◊∑≤÷&vñÂF˜¢Ç◊”‡–¢∆'WGFˆ‚ˆ‰6∆ñ6≥◊≤Çí”‚6WE6Ü˜t6ˆÊfó&÷VBá2”‚2ó––¢7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬&6∂w&˜VÊC¢vÊˆÊRr¬&˜&FW#¢vÊˆÊRr¬7W'6˜#¢wˆñÁFW"r¬FFñÊs¢◊”‡–¢∑6Ü˜t6ˆÊfó&÷VBÚ~)k‚r¢~)kÇw“∂6ˆÊfó&÷VBÊ∆VÊwFá“6ˆÊfó&÷VB∂6ˆÊfó&÷VBÊ∆VÊwFÇ””“ÚvfñV∆Br¢vfñV∆G2w––¢¬ˆ'WGFˆ„‡–¢∑6Ü˜t6ˆÊfó&÷VBbb6ˆÊfó&÷VBÊ÷ÇÜ2¬íí”‚ƒ6ÜV6≤∂Wì◊∂ó“3◊∂7“Û‚ó––¢¬ˆFóc‡–¢ó––†–¢¬Û‚ó––¢¬ıvñFvWC‡–¢ê–ß––†–¢ÚÚ&WfñWvW"6˜'&V7FñˆÁ2&R7F˜&VB2F˜GFVB◊FÇ(i"f«VR÷ÊB∆ñW&VB˜fW –¢ÚÚFÜRí'7G&7Bf˜"Fó7∆íˆWá˜'C≤FÜRí•4Ù‚óG6V∆bó2ÊWfW"◊WFFVB‡–¶6ˆÁ7BvWEFÇ“ÜÛ¢Áí¬FÉ¢7G&ñÊrí”‚FÇÁ7∆óBÇr‚ríÁ&VGV6RÇáÇ¬≤í”‚áÇ”“ÁV∆¬ÚVÊFVfñÊVB¢Ö∂µ“í¬Úê–¶gVÊ7Fñˆ‚«î˜fW'&ñFW2Ü'7G&7C¢Áí¬˜fW'&ñFW3¢&V6˜&C«7G&ñÊr¬Áì‚¬ÁV∆¬¬VÊFVfñÊVBí∞–¢ñbÇ˜fW'&ñFW2«¬ˆ&¶V7BÊ∂Wó2Ü˜fW'&ñFW2íÊ∆VÊwFÇí&WGW&‚'7G&7@–¢6ˆÁ7B6∆ˆÊR“•4Ù‚Á'6RÑ•4Ù‚Á7G&ñÊvñgíÜ'7G&7BÛÚ∑“íê–¢f˜"Ü6ˆÁ7B∑FÇ¬f≈“ˆbˆ&¶V7BÊVÁG&ñW2Ü˜fW'&ñFW2íí∞–¢6ˆÁ7B'G2“FÇÁ7∆óBÇr‚rê–¢∆WBÚ“6∆ˆÊP–¢f˜"Ü∆WBí“≤í¬'G2Ê∆VÊwFÇ“≤í≤≤í∞–¢ñbÜı∑'G5∂ï’“”“ÁV∆¬«¬GóVˆbı∑'G5∂ï’“”“vˆ&¶V7Bríı∑'G5∂ï’““∑––¢Ú“ı∑'G5∂ï’––¢––¢ı∑'G5∑'G2Ê∆VÊwFÇ“’““f¿–¢––¢&WGW&‚6∆ˆÊP–ß––†–¢ÚÚÜñvÇ◊f«VR66∆"fñV∆G2&WfñWvW"÷˜7BˆgFV‚6˜'&V7G2áFÜRˆÊW2f∆w3†–¢ÚÚÊ÷W2¬7VóFR¬4b¬FÜRFW&“FFW2í‚FV∆ñ&W&FV«íÊ˜BgV∆¬ÊW7FVB‘•4Ù‚VFóF˜"‡–¶6ˆÁ7B$UdîUuÙdîTƒE3¢'&ì«≤FÉ¢7G&ñÊs≤∆&V√¢7G&ñÊs≤ÁV”Û¢&ˆˆ∆V‚”‚“∞–¢≤FÉ¢wG&FUˆÊ÷Rr¬∆&V√¢uG&FRÊ÷RÜF&ír“¿–¢≤FÉ¢wFVÊÁEˆ∆Vv≈ˆÊ÷Rr¬∆&V√¢uFVÊÁB∆Vv¬Ê÷Rr“¿–¢≤FÉ¢w7VóFRr¬∆&V√¢u7VóFRr“¿–¢≤FÉ¢w7V&Uˆfˆ˜FvRr¬∆&V√¢u7V&Rfˆ˜FvRr¬ÁV”¢G'VR“¿–¢≤FÉ¢wFW&“Á&VÁEˆ6ˆ÷÷VÊ6V÷VÁBr¬∆&V√¢u&VÁB6ˆ÷÷VÊ6V÷VÁBr“¿–¢≤FÉ¢wFW&“ÊWáó&Fñˆ‚r¬∆&V√¢tWáó&Fñˆ‚r“¿–¢≤FÉ¢wFW&“ÁFW&’˜ñV'2r¬∆&V√¢uFW&“áñV'2ír¬ÁV”¢G'VR“¿–•––†–¶gVÊ7Fñˆ‚&WfñWuÊV¬á≤&˜r¬ˆÂ6fVB¬&WfñWvW$ñB¬VÁ&W6ˆ«fVE&VD6˜VÁB“”¢≤&˜s¢'7G&7E&˜s≤ˆÂ6fVC¢Çí”‚fˆñC≤&WfñWvW$ñCÛ¢7G&ñÊs≤VÁ&W6ˆ«fVE&VD6˜VÁCÛ¢ÁV÷&W"“í∞–¢6ˆÁ7BVffV7FófR“«î˜fW'&ñFW2á&˜rÊ'7G&7B¬&˜rÊ˜fW'&ñFW2íÛÚ∑––¢6ˆÁ7B∂VFóG2¬6WDVFóG5““W6U7FFS≈&V6˜&C«7G&ñÊr¬7G&ñÊs„‚ÇÇí”‚∞–¢6ˆÁ7BñÊóC¢&V6˜&C«7G&ñÊr¬7G&ñÊs‚“∑––¢f˜"Ü6ˆÁ7Bbˆb$UdîUuÙdîTƒE2í≤6ˆÁ7Bb“vWEFÇÜVffV7FófR¬bÁFÇì≤ñÊóE∂bÁFÖ““b”“ÁV∆¬Úrr¢7G&ñÊrábí––¢&WGW&‚ñÊó@–¢“ê–¢6ˆÁ7B∂Ê˜FR¬6WDÊ˜FU““W6U7FFRá&˜rÁ&WfñWuˆÊ˜FRÛÚrrê–¢6ˆÁ7B∑6fñÊr¬6WE6fñÊu““W6U7FFRÜf«6Rê–¢6ˆÁ7B∂W'"¬6WDW'%““W6U7FFS«7G&ñÊr¬ÁV∆√‚ÜÁV∆¬ê–¢6ˆÁ7B∂˜V‚¬6WD˜VÂ““W6U7FFRÜf«6Rê–¢ÚÚ6ˆgB∆ˆ6≤vFS¢VÁ&W6ˆ«fVB&VBóFV◊2Fˆ‚wB&∆ˆ6≤∆ˆ6∂ñÊr¬'WBFÜR&WfñWvW –¢ÚÚ◊W7B6∂Ê˜v∆VFvRFÜV“vóFÇˆÊR÷∆ñÊR&V6ˆ‚‡–¢6ˆÁ7B∂vFT˜V‚¬6WDvFT˜VÂ““W6U7FFRÜf«6Rê–¢6ˆÁ7B∂vFU&V6ˆ‚¬6WDvFU&V6ˆÂ““W6U7FFRÇrrê–†–¢7ñÊ2gVÊ7Fñˆ‚6fRÜ˜G3¢≤∆ˆ6≥Û¢&ˆˆ∆V„≤fW&ñfñVCÛ¢&ˆˆ∆V„≤∆ˆ6µ&V6ˆ„Û¢7G&ñÊr“í∞–¢6WE6fñÊráG'VRì≤6WDW'"ÜÁV∆¬ê–¢G'í∞–¢ÚÚ7F˜&R‚˜fW'&ñFRˆÊ«ívÜW&RFÜR&WfñWvW"w2f«VRFñffW'2g&ˆ“FÜRíf«VR‡–¢6ˆÁ7B˜fW'&ñFW3¢&V6˜&C«7G&ñÊr¬Áì‚“∑––¢f˜"Ü6ˆÁ7Bbˆb$UdîUuÙdîTƒE2í∞–¢6ˆÁ7B&r“ÜVFóG5∂bÁFÖ“ÛÚrríÁG&ñ“Çê–¢ñbá&r””“rrí6ˆÁFñÁVP–¢6ˆÁ7Bf¬“bÊÁV“ÚÁV÷&W"á&rí¢&p–¢ñbÜbÊÁV“bbÁV÷&W"Êó4Ê‚áf¬2ÁV÷&W"íí6ˆÁFñÁVP–¢6ˆÁ7Bïf¬“vWEFÇá&˜rÊ'7G&7B¬bÁFÇê–¢ñbÖ7G&ñÊrÜïf¬ÛÚrrí”“7G&ñÊráf¬íí˜fW'&ñFW5∂bÁFÖ““f¿–¢––¢6ˆÁ7B&WfñWtÊ˜FR“∞–¢Ê˜FRÁG&ñ“Çí«¬ÁV∆¬¿–¢˜G2Ê∆ˆ6µ&V6ˆ‚Ú∂∆ˆ6∂VB˜fW"G∑VÁ&W6ˆ«fVE&VD6˜VÁG“VÁ&W6ˆ«fVBóFV“á2ì¢G∂˜G2Ê∆ˆ6µ&V6ˆ‚ÁG&ñ“Çó’÷¢ÁV∆¬¿–¢“Êfñ«FW"Ñ&ˆˆ∆V‚íÊ¶ˆñ‚Çrrí«¬ÁV∆¿–¢6ˆÁ7BF6É¢Áí“∞–¢˜fW'&ñFW3¢ˆ&¶V7BÊ∂Wó2Ü˜fW'&ñFW2íÊ∆VÊwFÇÚ˜fW'&ñFW2¢ÁV∆¬¿–¢&WfñWuˆÊ˜FS¢&WfñWtÊ˜FR¿–¢&WfñWvVEˆ'ì¢&WfñWvW$ñBÛÚÁV∆¬¿–¢&WfñWvVEˆC¢ÊWrFFRÇíÁFÙï4ı7G&ñÊrÇí¿–¢WFFVEˆC¢ÊWrFFRÇíÁFÙï4ı7G&ñÊrÇí¿–¢––¢ñbÜ˜G2ÁfW&ñfñVB”“VÊFVfñÊVBíF6ÇÊáV÷Â˜fW&ñfñVB“˜G2ÁfW&ñfñV@–¢ñbÜ˜G2Ê∆ˆ6≤”“VÊFVfñÊVBíF6ÇÊ∆ˆ6∂VB“˜G2Ê∆ˆ6∞–¢6ˆÁ7B≤W'&˜"““vóB7W&6RÊg&ˆ“Çv∆V6Uˆ'7G&7G2ríÁWFFRáF6ÇíÊWÇvñBr¬&˜rÊñBê–¢ñbÜW'&˜"íFá&˜rÊWrW'&˜"ÜW'&˜"Ê÷W76vRê–¢6WDvFT˜V‚Üf«6Rì≤6WDvFU&V6ˆ‚Çrrê–¢ˆÂ6fVBÇê–¢“6F6ÇÜRí≤6WDW'"ÜRñÁ7FÊ6VˆbW'&˜"ÚRÊ÷W76vR¢7G&ñÊrÜRíí––¢fñÊ∆«í≤6WE6fñÊrÜf«6Rí––¢––†–¢ÚÚ∆ˆ6≤VÁG'óˆñÁC¢6∆V‚(i"∆ˆ6≤Fó&V7F«ì≤VÁ&W6ˆ«fVB&VB(i"˜V‚FÜRvFR‡–¢gVÊ7Fñˆ‚&WVW7D∆ˆ6≤Çí∞–¢ñbáVÁ&W6ˆ«fVE&VD6˜VÁB‚í6WDvFT˜V‚áG'VRê–¢V«6RfˆñB6fRá≤fW&ñfñVC¢G'VR¬∆ˆ6≥¢G'VR“ê–¢––†–¢6ˆÁ7B˜fW'&ñFT6˜VÁB“&˜rÊ˜fW'&ñFW2Úˆ&¶V7BÊ∂Wó2á&˜rÊ˜fW'&ñFW2íÊ∆VÊwFÇ¢ –¢&WGW&‚Ä–¢≈vñFvWBFóF∆S“%&WfñWrb6˜'&V7B –¢6Üó◊∑&˜rÊáV÷Â˜fW&ñfñVBÚváV÷‚◊fW&ñfñVBr¢˜fW'&ñFT6˜VÁBÚG∂˜fW'&ñFT6˜VÁG“6˜'&V7Fñˆ‚G∂˜fW'&ñFT6˜VÁB””“Úrr¢w2w÷¢VÊFVfñÊVG”‡–¢≤˜V‚ÚÄ–¢∆Fób7Gñ∆S◊∑≤Fó7∆ì¢vf∆WÇr¬v¢¬∆ñv‰óFV◊3¢v6VÁFW"r¬f∆WÖw&¢ww&r◊”‡–¢«7‚7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬6ˆ∆˜#¢wf"Ç“◊FWáB÷◊WFVBír◊”‡–¢∑&˜rÊáV÷Â˜fW&ñfñV@–¢ÚfW&ñfñVBG∑&˜rÁ&WfñWvVEˆBÚG∂ÊWrFFRá&˜rÁ&WfñWvVEˆBíÁFÙ∆ˆ6∆TFFU7G&ñÊrÇó÷¢rw“G∑&˜rÊ∆ˆ6∂VBÚr+r∆ˆ6∂VBr¢rw“Ê –¢¢t6˜'&V7BÁífñV∆BÊB÷&≤FÜR'7G&7BáV÷‚◊fW&ñfñVB‚w––¢¬˜7„‡–¢∆'WGFˆ‚ˆ‰6∆ñ6≥◊≤Çí”‚6WD˜V‚áG'VRó––¢7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬fˆÁEvVñváC¢c¬FFñÊs¢sGÇ'Çr¬&˜&FW%&FóW3¢b¬&˜&FW#¢sÇ6ˆ∆ñBf"Ç“÷&˜&FW"”"ír¬&6∂w&˜VÊC¢wf"Ç“◊7W&f6R”"ír¬6ˆ∆˜#¢wf"Ç“◊FWáBír¬7W'6˜#¢wˆñÁFW"r◊”‡–¢∂˜fW'&ñFT6˜VÁB«¬&˜rÊáV÷Â˜fW&ñfñVBÚtVFóB&WfñWrr¢u&WfñWrb6˜'&V7Bw––¢¬ˆ'WGFˆ„‡–¢∑&˜rÊ∆ˆ6∂VBbbÄ–¢∆'WGFˆ‚ˆ‰6∆ñ6≥◊≤Çí”‚fˆñB6fRá≤∆ˆ6≥¢f«6R“ó“Fó6&∆VC◊∑6fñÊw––¢7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬FFñÊs¢sGÇÇr¬&˜&FW%&FóW3¢b¬&˜&FW#¢sÇ6ˆ∆ñBf"Ç“÷&˜&FW"”"ír¬&6∂w&˜VÊC¢wG&Á7&VÁBr¬6ˆ∆˜#¢wf"Ç“◊FWáB÷◊WFVBír¬7W'6˜#¢wˆñÁFW"r◊”‡–¢∑6fñÊrÚ~(
-br¢uVÊ∆ˆ6≤w––¢¬ˆ'WGFˆ„‡–¢ó––¢¬ˆFóc‡–¢í¢Ä–¢∆Fób7Gñ∆S◊∑≤Fó7∆ì¢vf∆WÇr¬f∆WÑFó&V7Fñˆ„¢v6ˆ«V÷‚r¬v¢◊”‡–¢∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír◊”‰&∆Ê≤“∂VWFÜRíf«VR‚f«VRFÜBFñffW'2g&ˆ“FÜRí'7G&7Bó26fVB26˜'&V7Fñˆ‚ÊB6Ü˜v‚ñ‚w&VV‚Fá&˜VvÜ˜WB„¬ˆFóc‡–¢∆Fób7Gñ∆S◊∑≤Fó7∆ì¢vw&ñBr¬w&ñEFV◊∆FT6ˆ«V÷Á3¢w&WVBÜWFÚ÷fóB¬÷ñÊ÷ÇÉ##Ç¬g"íír¬v¢sáÇGÇr◊”‡–¢µ$UdîUuÙdîTƒE2Ê÷Üb”‚∞–¢6ˆÁ7Bïf¬“vWEFÇá&˜rÊ'7G&7B¬bÁFÇê–¢6ˆÁ7B6ÜÊvVB“ÜVFóG5∂bÁFÖ“ÛÚrríÁG&ñ“Çí”“rrbb7G&ñÊrÜïf¬ÛÚrrí”“ÜVFóG5∂bÁFÖ“ÛÚrríÁG&ñ“Çê–¢&WGW&‚Ä–¢∆Fób∂Wì◊∂bÁFá”‡–¢∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬FWáEG&Á6f˜&”¢wWW&66Rr¬∆WGFW%76ñÊs¢s„VV“r¬÷&vñ‰&˜GFˆ”¢"◊”Á∂bÊ∆&V«”¬ˆFóc‡–¢∆ñÁWBf«VS◊∂VFóG5∂bÁFÖ“ÛÚrw“ˆ‰6ÜÊvS◊∂R”‚6WDVFóG2á2”‚á≤‚‚Á2¬∂bÁFÖ”¢RÁF&vWBÁf«VR“íó––¢∆6VÜˆ∆FW#◊∂ïf¬”“ÁV∆¬Ú~(	Br¢7G&ñÊrÜïf¬ó––¢7Gñ∆S◊∑≤vñGFÉ¢sRr¬fˆÁE6ó¶S¢"¬FFñÊs¢sWÇáÇr¬&˜&FW%&FóW3¢R¬&6∂w&˜VÊC¢wf"Ç“◊7W&f6R”"ír¬6ˆ∆˜#¢wf"Ç“◊FWáBír¬&˜&FW#¢Ç6ˆ∆ñBG∂6ÜÊvVBÚwf"Ç“÷w&VV‚¬3#&3SVRír¢wf"Ç“÷&˜&FW"”"íw÷◊“Û‡–¢∂6ÜÊvVBbb∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬÷&vñÂF˜¢◊”‰ì¢∂ïf¬”“ÁV∆¬Ú~(	Br¢7G&ñÊrÜïf¬ó”¬ˆFócÁ––¢¬ˆFóc‡–¢ê–¢“ó––¢¬ˆFóc‡–¢∆Fóc‡–¢∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬FWáEG&Á6f˜&”¢wWW&66Rr¬∆WGFW%76ñÊs¢s„VV“r¬÷&vñ‰&˜GFˆ”¢"◊”Â&WfñWvW"Ê˜FS¬ˆFóc‡–¢«FWáF&Vf«VS◊∂Ê˜FW“ˆ‰6ÜÊvS◊∂R”‚6WDÊ˜FRÜRÁF&vWBÁf«VRó“&˜w3◊≥'––¢7Gñ∆S◊∑≤vñGFÉ¢sRr¬fˆÁE6ó¶S¢"¬FFñÊs¢sgÇáÇr¬&˜&FW%&FóW3¢R¬&6∂w&˜VÊC¢wf"Ç“◊7W&f6R”"ír¬6ˆ∆˜#¢wf"Ç“◊FWáBír¬&˜&FW#¢sÇ6ˆ∆ñBf"Ç“÷&˜&FW"”"ír¬&W6ó¶S¢wfW'Fñ6¬r◊“Û‡–¢¬ˆFóc‡–¢∂W'"bb∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬6ˆ∆˜#¢wf"Ç“◊&VBír◊”Á∂W''”¬ˆFócÁ––¢∂vFT˜V‚bbÄ–¢∆Fób7Gñ∆S◊∑≤&˜&FW#¢sÇ6ˆ∆ñBf"Ç“◊&VB¬6VcCCCBír¬&6∂w&˜VÊC¢w&v&É#3í√cÇ√cÇ√„bír¬&˜&FW%&FóW3¢Ç¬FFñÊs¢sáÇ'Çr¬Fó7∆ì¢vf∆WÇr¬f∆WÑFó&V7Fñˆ„¢v6ˆ«V÷‚r¬v¢b◊”‡–¢«7‚7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬6ˆ∆˜#¢wf"Ç“◊&VB¬6VcCCCBír¬fˆÁEvVñváC¢c◊”‡–¢∑VÁ&W6ˆ«fVE&VD6˜VÁG“VÁ&W6ˆ«fVBFó67&WÊ7íˆ6ˆÊfó&“óFV◊∑VÁ&W6ˆ«fVE&VD6˜VÁB””“Úrr¢w2w“ñ‚FÜRv˜&∂∆ó7B&˜fR‚∆ˆ6∂ñÊrÁóví(	BFBˆÊR÷∆ñÊR&V6ˆ‚‡–¢¬˜7„‡–¢∆ñÁWBf«VS◊∂vFU&V6ˆÁ“ˆ‰6ÜÊvS◊∂R”‚6WDvFU&V6ˆ‚ÜRÁF&vWBÁf«VRó“∆6VÜˆ∆FW#“'&V6ˆ‚f˜"∆ˆ6∂ñÊrvóFÇóFV◊2VÁ&W6ˆ«fVB –¢7Gñ∆S◊∑≤vñGFÉ¢sRr¬fˆÁE6ó¶S¢"¬FFñÊs¢sWÇáÇr¬&˜&FW%&FóW3¢R¬&6∂w&˜VÊC¢wf"Ç“◊7W&f6R”"ír¬6ˆ∆˜#¢wf"Ç“◊FWáBír¬&˜&FW#¢sÇ6ˆ∆ñBf"Ç“÷&˜&FW"”"ír◊“Û‡–¢∆Fób7Gñ∆S◊∑≤Fó7∆ì¢vf∆WÇr¬v¢b◊”‡–¢∆'WGFˆ‚ˆ‰6∆ñ6≥◊≤Çí”‚fˆñB6fRá≤fW&ñfñVC¢G'VR¬∆ˆ6≥¢G'VR¬∆ˆ6µ&V6ˆ„¢vFU&V6ˆ‚“ó“Fó6&∆VC◊∑6fñÊr«¬vFU&V6ˆ‚ÁG&ñ“Çó––¢7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬fˆÁEvVñváC¢c¬FFñÊs¢sWÇ'Çr¬&˜&FW%&FóW3¢b¬&˜&FW#¢vÊˆÊRr¬&6∂w&˜VÊC¢wf"Ç“◊&VB¬6VcCCCBír¬6ˆ∆˜#¢r6ffbr¬7W'6˜#¢wˆñÁFW"r◊”‡–¢∑6fñÊrÚ~(
-br¢t∆ˆ6≤Áóvíw––¢¬ˆ'WGFˆ„‡–¢∆'WGFˆ‚ˆ‰6∆ñ6≥◊≤Çí”‚≤6WDvFT˜V‚Üf«6Rì≤6WDvFU&V6ˆ‚Çrrí◊“Fó6&∆VC◊∑6fñÊw––¢7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬FFñÊs¢sWÇÇr¬&˜&FW%&FóW3¢b¬&˜&FW#¢sÇ6ˆ∆ñBf"Ç“÷&˜&FW"”"ír¬&6∂w&˜VÊC¢wG&Á7&VÁBr¬6ˆ∆˜#¢wf"Ç“◊FWáB÷◊WFVBír¬7W'6˜#¢wˆñÁFW"r◊”‰6Ê6V√¬ˆ'WGFˆ„‡–¢¬ˆFóc‡–¢¬ˆFóc‡–¢ó––¢∆Fób7Gñ∆S◊∑≤Fó7∆ì¢vf∆WÇr¬v¢Ç¬f∆WÖw&¢ww&r◊”‡–¢∆'WGFˆ‚ˆ‰6∆ñ6≥◊≤Çí”‚fˆñB6fRá∑“ó“Fó6&∆VC◊∑6fñÊw––¢7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬fˆÁEvVñváC¢c¬FFñÊs¢sgÇGÇr¬&˜&FW%&FóW3¢b¬&˜&FW#¢vÊˆÊRr¬&6∂w&˜VÊC¢wf"Ç“◊7W&f6R”"ír¬6ˆ∆˜#¢wf"Ç“◊FWáBír¬7W'6˜#¢wˆñÁFW"r◊”‡–¢∑6fñÊrÚu6fñÊ~(
-br¢u6fR6˜'&V7FñˆÁ2w––¢¬ˆ'WGFˆ„‡–¢∆'WGFˆ‚ˆ‰6∆ñ6≥◊∑&WVW7D∆ˆ6∑“Fó6&∆VC◊∑6fñÊr«¬vFT˜VÁ––¢7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬fˆÁEvVñváC¢c¬FFñÊs¢sgÇGÇr¬&˜&FW%&FóW3¢b¬&˜&FW#¢vÊˆÊRr¬&6∂w&˜VÊC¢wf"Ç“÷w&VV‚¬3#&3SVRír¬6ˆ∆˜#¢r6ffbr¬7W'6˜#¢6fñÊr«¬vFT˜V‚ÚvFVfV«Br¢wˆñÁFW"r¬˜6óGì¢vFT˜V‚Ú„R¢◊”‡–¢∑6fñÊrÚ~(
-br¢VÁ&W6ˆ«fVE&VD6˜VÁB‚Ú÷&≤fW&ñfñVBb∆ˆ6≤ÇG∑VÁ&W6ˆ«fVE&VD6˜VÁG“˜V‚ñ¢t÷&≤fW&ñfñVBb∆ˆ6≤w––¢¬ˆ'WGFˆ„‡–¢∆'WGFˆ‚ˆ‰6∆ñ6≥◊≤Çí”‚≤6WD˜V‚Üf«6Rì≤6WDW'"ÜÁV∆¬ì≤6WDvFT˜V‚Üf«6Rí◊“Fó6&∆VC◊∑6fñÊw––¢7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬FFñÊs¢sgÇ'Çr¬&˜&FW%&FóW3¢b¬&˜&FW#¢sÇ6ˆ∆ñBf"Ç“÷&˜&FW"”"ír¬&6∂w&˜VÊC¢wG&Á7&VÁBr¬6ˆ∆˜#¢wf"Ç“◊FWáB÷◊WFVBír¬7W'6˜#¢wˆñÁFW"r◊”‡–¢6Ê6V¿–¢¬ˆ'WGFˆ„‡–¢¬ˆFóc‡–¢¬ˆFóc‡–¢ó––¢¬ıvñFvWC‡–¢ê–ß––†–¶gVÊ7Fñˆ‚w&ñBá≤6Üñ∆G&V‚”¢≤6Üñ∆G&V„¢&V7BÂ&V7DÊˆFR“í∞–¢&WGW&‚∆Fób7Gñ∆S◊∑≤Fó7∆ì¢vw&ñBr¬w&ñEFV◊∆FT6ˆ«V÷Á3¢w&WVBÜWFÚ÷fóB¬÷ñÊ÷ÇÉ##Ç¬g"íír¬v¢sÇgÇr◊”Á∂6Üñ∆G&VÁ”¬ˆFóc‡–ß––¶gVÊ7Fñˆ‚f7Bá≤≤¬b¬vñFR¬7V"¬fˆ˜B”¢≤≥¢7G&ñÊs≤c¢Áì≤vñFSÛ¢&ˆˆ∆V„≤7V#Û¢7G&ñÊr¬ÁV∆√≤fˆ˜CÛ¢ÁV÷&W%µ““í∞–¢&WGW&‚Ä–¢∆Fób7Gñ∆S◊∑≤w&ñD6ˆ«V÷„¢vñFRÚsÚ”r¢VÊFVfñÊVB◊”‡–¢∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬FWáEG&Á6f˜&”¢wWW&66Rr¬∆WGFW%76ñÊs¢s„VV“r¬÷&vñ‰&˜GFˆ”¢"◊”Á∂∑”ƒfˆ˜FÊ˜FRÁV◊3◊∂fˆ˜BÛÚµ◊“Û„¬ˆFóc‡–¢∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢2¬6ˆ∆˜#¢wf"Ç“◊FWáBír◊”Á∑b”“ÁV∆¬«¬b””“rrÚ~(	Br¢7G&ñÊrábó”¬ˆFóc‡–¢∑7V"Ú∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢„R¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬÷&vñÂF˜¢¬∆ñÊTÜVñváC¢„3R◊”Á∑7V'”¬ˆFóc‚¢ÁV∆«––¢¬ˆFóc‡–¢ê–ß––¢ÚÚWfW'íFV◊∆FRfñV∆B&VÊFW'2(	B‚V◊GífñV∆B6ó26ÚWá∆ñ6óF«í&FÜW"FÜ‡–¢ÚÚFó6V&ñÊrÜv2«6Ú∆ÊBñ‚FÜR˜V‚óFV◊26V7Fñˆ‚í‚7&6FG2–¢ÚÚ'fñWrñ‚∆V6R(ir"∆ñÊ≤FÜB˜2FÜR&˜fó6ñˆ‚w27GV¬∆ÊwVvRñ‚6ˆÁFWáB‡–¶gVÊ7Fñˆ‚∆ˆÊtf7Bá≤≤¬b¬7&2¬fˆ˜B”¢∞–¢≥¢7G&ñÊs≤c¢Áê–¢7&3Û¢≤V˜FSÛ¢7G&ñÊr¬ÁV∆√≤6óFFñˆ„Û¢7G&ñÊr¬ÁV∆√≤Fˆ4ñG3Û¢7G&ñÊuµ“¬ÁV∆¬––¢fˆ˜CÛ¢ÁV÷&W%µ––ß“í∞–¢6ˆÁ7B÷ó76ñÊr“b”“ÁV∆¬«¬b””“rp–¢6ˆÁ7BV˜FR“7&3ÚÁV˜FRÛÚáGóVˆbb””“w7G&ñÊrrÚb¢rrê–¢6ˆÁ7B∆ñÊ∂&∆R“÷ó76ñÊrbbV˜FRbbV˜FRÊ∆VÊwFÇ„“#Rbb7&3ÚÊFˆ4ñG3ÚÊ∆VÊwFÄ–¢&WGW&‚Ä–¢∆Fób7Gñ∆S◊∑≤÷&vñ‰&˜GFˆ”¢◊”‡–¢∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬FWáEG&Á6f˜&”¢wWW&66Rr¬∆WGFW%76ñÊs¢s„VV“r¬÷&vñ‰&˜GFˆ”¢"◊”‡–¢∂∑––¢ƒfˆ˜FÊ˜FRÁV◊3◊∂fˆ˜BÛÚµ◊“Û‡–¢∂∆ñÊ∂&∆Rbb≈6˜W&6T∆ñÊ≤V˜FS◊∑V˜FW“6óFFñˆ„◊∑7&3ÚÊ6óFFñˆ‚ÛÚrw“6˜W&6TFˆ4ñG3◊∑7&2ÊFˆ4ñG2“∆&V√“'fñWrñ‚∆V6R(ir"ÛÁ––¢¬ˆFóc‡–¢∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢"„R¬6ˆ∆˜#¢÷ó76ñÊrÚwf"Ç“◊FWáB÷fñÁBír¢wf"Ç“◊FWáB÷◊WFVBír¬∆ñÊTÜVñváC¢„R¬vÜóFU76S¢w&R◊w&r¬fˆÁE7Gñ∆S¢÷ó76ñÊrÚvóF∆ñ2r¢vÊ˜&÷¬r◊”‡–¢∂÷ó76ñÊrÚ√‰Ê˜Bf˜VÊBñ‚&WfñWvVBFˆ7V÷VÁG2(	Bƒ˜V‰óFV◊4ßV◊Û„¬Û‚¢7G&ñÊrábó––¢¬ˆFóc‡–¢¬ˆFóc‡–¢ê–ß––†–¶gVÊ7Fñˆ‚÷ó76ñÊtÊ˜FRá≤vÜB”¢≤vÜC¢7G&ñÊr“í∞–¢&WGW&‚∆Fób7Gñ∆S◊∑≤fˆÁE6ó¶S¢"¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬fˆÁE7Gñ∆S¢vóF∆ñ2r◊”Á∑vÜG“(	Bƒ˜V‰óFV◊4ßV◊Û„¬ˆFóc‡–ß––¶gVÊ7Fñˆ‚÷ñÊïF&∆Rá≤ÜVB¬&˜w2”¢≤ÜVC¢7G&ñÊuµ”≤&˜w3¢Áïµ’µ““í∞–¢&WGW&‚Ä–¢«F&∆R7Gñ∆S◊∑≤vñGFÉ¢sRr¬&˜&FW$6ˆ∆∆6S¢v6ˆ∆∆6Rr¬fˆÁE6ó¶S¢"◊”‡–¢«FÜVC„«G"7Gñ∆S◊∑≤FWáD∆ñv„¢v∆VgBr¬6ˆ∆˜#¢wf"Ç“◊FWáB÷fñÁBír¬fˆÁE6ó¶S¢„R◊”‡–¢∂ÜVBÊ÷ÜÇ”‚«FÇ∂Wì◊∂á“7Gñ∆S◊∑≤FFñÊs¢s7ÇáÇr¬fˆÁEvVñváC¢c◊”Á∂á”¬˜FÉ‚ó––¢¬˜G#„¬˜FÜVC‡–¢«F&ˆGì‡–¢∑&˜w2Ê÷Çá"¬íí”‚Ä–¢«G"∂Wì◊∂ó“7Gñ∆S◊∑≤&˜&FW%F˜¢sÇ6ˆ∆ñBf"Ç“÷&˜&FW"ír◊”‡–¢∑"Ê÷ÇÜ2¬¢í”‚«FB∂Wì◊∂ß“7Gñ∆S◊∑≤FFñÊs¢sWÇáÇr¬6ˆ∆˜#¢wf"Ç“◊FWáBír¬fW'Fñ6ƒ∆ñv„¢wF˜r◊”Á∂2”“ÁV∆¬«¬2””“rrÚ~(	Br¢7G&ñÊrÜ2ó”¬˜FC‚ó––¢¬˜G#‡–¢íó––¢¬˜F&ˆGì‡–¢¬˜F&∆S‡–¢ê–ß––†
+          .select('id, abstract, qa, field_confidence, clause_findings').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence, fresh.clause_findings)
+      } catch { /* non-fatal: reconciliation is best-effort */ }
+      setBump(b => b + 1)
+      setSelected(tenant)
+    } catch (e) {
+      setGenError(`${tenant}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setPhase(p => { const n = { ...p }; delete n[tenant]; return n })
+      setGenerating(prev => { const n = new Set(prev); n.delete(tenant); return n })
+    }
+  }
+
+  // Independent QA pass: re-reads the source PDFs and adversarially checks the
+  // stored abstract. Takes 1‚Äì2 min (runs on the strongest model).
+  async function verify(tenant: string) {
+    if (!propertyId || verifying.has(tenant)) return
+    setGenError(null)
+    setVerifying(prev => new Set(prev).add(tenant))
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${FN_BASE}/abstract-verify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId, tenant }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
+      setBump(b => b + 1)
+    } catch (e) {
+      setGenError(`Verify ${tenant}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setVerifying(prev => { const n = new Set(prev); n.delete(tenant); return n })
+    }
+  }
+
+  // Upload a document straight from the review surface and re-abstract on the
+  // spot: file it against this tenant, build its text layer (OCR fallback for
+  // scans), brief every not-yet-briefed doc, re-synthesize the abstract, then
+  // re-verify. Progress is written to abstract_jobs so the reviewer can leave
+  // the page and still get a completion alert (AbstractJobsToaster). The run
+  // survives navigation within the app but not a full tab close.
+  async function uploadAndReabstract(tenant: string, file: File) {
+    if (!propertyId || generating.has(tenant)) return
+    if (byTenant.get(tenant.toLowerCase())?.locked) {
+      setGenError(`${tenant}: abstract is locked ‚Äî unlock it in "Review & correct" before adding documents.`)
+      return
+    }
+    if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) {
+      setGenError(`${tenant}: only PDF documents can be added here.`)
+      return
+    }
+    setGenError(null)
+    setGenerating(prev => new Set(prev).add(tenant))
+    const jobId = await createAbstractJob({ propertyId, tenant, kind: 'upload_reabstract', fileName: file.name, createdBy: appUser?.id })
+    const setBoth = (phaseText: string) => { setPhase(p => ({ ...p, [tenant]: phaseText })); void updateAbstractJob(jobId, { phase: phaseText }) }
+    try {
+      // ‚îÄ‚îÄ 1. Upload + file the document so the abstractor's matcher finds it.
+      // Tenant name lands in BOTH title and file_path (the two fields the
+      // matcher searches); the synthetic \tenants\ path also earns the folder
+      // score bonus without tripping the non-lease-subfolder filter.
+      setBoth('uploading‚Ä¶')
+      const safeTenant = (tenant.replace(/[^A-Za-z0-9 &._-]/g, '').trim() || 'tenant')
+      const docId = crypto.randomUUID()
+      const key = `p/${propertyId}/abstract-uploads/${safeTenant}/${docId}-${file.name}`.replace(/\s+/g, '_')
+      const { error: upErr } = await supabase.storage.from('documents').upload(key, file, { contentType: file.type || 'application/pdf', upsert: true })
+      if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
+      const { error: docErr } = await supabase.from('documents').insert({
+        id: docId, property_id: propertyId, doc_type: 'lease',
+        title: `${tenant} ‚Äî ${file.name}`, file_name: file.name,
+        file_path: `abstract-uploads\\tenants\\${safeTenant}\\${file.name}`,
+        mime_type: file.type || 'application/pdf', file_size_bytes: file.size,
+        storage_path: key, upload_date: new Date().toISOString().slice(0, 10),
+        uploaded_by: appUser?.id ?? null, is_indexed: false,
+      })
+      if (docErr) throw new Error(`Filing document failed: ${docErr.message}`)
+      await updateAbstractJob(jobId, { document_id: docId })
+
+      // ‚îÄ‚îÄ 2. Text layer. Uploads DEFAULT TO OCR: an uploaded PDF is typically a
+      // scanned amendment filling a gap, and a thin embedded text layer produces
+      // a useless brief that the abstractor then ignores (the exact failure this
+      // feature exists to fix). Run the verbatim reindex first ‚Äî it is cheap and,
+      // because the OCR pass returns before clearing chunks when it finds nothing,
+      // it survives as a fallback ‚Äî then OCR UNLESS the PDF already has a RICH
+      // digital text layer, where OCR would only replace superior text with a
+      // noisier transcription. ‚îÄ‚îÄ
+      setBoth('extracting text‚Ä¶')
+      const storagePath = `documents/${key}`
+      const rx = await fetch(`${FN_BASE}/pdf-extract?reindexText=1&documentId=${docId}&storagePath=${encodeURIComponent(storagePath)}&propertyId=${propertyId}`,
+        { method: 'POST', headers: await authHeadersJson() })
+      const rxj = await rx.json().catch(() => ({}))
+      if (!rx.ok || rxj.error) throw new Error(rxj.error ?? `Text extraction failed (${rx.status})`)
+      if (rxj.too_large) throw new Error('Document is too large to process in-app ‚Äî ingest it with the bulk loader instead.')
+      const reindexChunks = rxj.text_chunks ?? 0
+      const RICH_DIGITAL_CHARS_PER_PAGE = 800
+      const richDigital = !rxj.needs_ocr && reindexChunks > 0 && (rxj.avg_chars_per_page ?? 0) >= RICH_DIGITAL_CHARS_PER_PAGE
+      if (!richDigital) {
+        setBoth('running OCR‚Ä¶')
+        const ocr = await fetch(`${FN_BASE}/pdf-extract?ocrText=1&documentId=${docId}&storagePath=${encodeURIComponent(storagePath)}&propertyId=${propertyId}`,
+          { method: 'POST', headers: await authHeadersJson() })
+        const ocrj = await ocr.json().catch(() => ({}))
+        if (!ocr.ok || ocrj.error) throw new Error(ocrj.error ?? `OCR failed (${ocr.status})`)
+        if (ocrj.too_large) throw new Error('Document is too large for in-app OCR ‚Äî use the bulk loader.')
+        // An empty OCR leaves the reindex text intact (server returns before
+        // clearing chunks). Only hard-fail if neither pass produced any text.
+        if ((ocrj.text_chunks ?? 0) === 0 && reindexChunks === 0) {
+          throw new Error('No readable text found in the document (blank or image-only).')
+        }
+      }
+
+      // ‚îÄ‚îÄ 3. Brief every not-yet-briefed doc in the tenant's file (incl. the
+      // new upload), then synthesize. Mirrors generate()'s Stage 1/2. ‚îÄ‚îÄ
+      const planRes = await fetch(`${FN_BASE}/lease-abstract`, {
+        method: 'POST', headers: await authHeadersJson(),
+        body: JSON.stringify({ property_id: propertyId, tenant, plan: true }),
+      })
+      const plan = await planRes.json().catch(() => ({}))
+      if (!planRes.ok || plan.error) throw new Error(plan.error ?? `Planning failed (${planRes.status})`)
+      if (Array.isArray(plan.docs)) {
+        const toBrief = plan.docs.filter((d: any) => d.brief_status !== 'complete')
+        const total = toBrief.length
+        let completed = 0
+        const briefOne = async (d: any) => {
+          let done = false, guard = 0
+          while (!done && guard++ < 15) {
+            const r = await fetch(`${FN_BASE}/doc-brief`, {
+              method: 'POST', headers: await authHeadersJson(),
+              body: JSON.stringify({ document_id: d.id }),
+            })
+            const j = await r.json().catch(() => ({}))
+            if (!r.ok || j.error) break     // non-fatal: synthesis falls back to raw text for this doc
+            done = j.done !== false
+          }
+          completed++
+          setBoth(`briefing ${completed}/${total} document(s)‚Ä¶`)
+        }
+        if (total) setBoth(`briefing ${completed}/${total} document(s)‚Ä¶`)
+        const CONCURRENCY = 8
+        const queue = [...toBrief]
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, async () => {
+          for (let d = queue.shift(); d; d = queue.shift()) await briefOne(d)
+        }))
+      }
+      setBoth('synthesizing abstract‚Ä¶')
+      const synth = await fetch(`${FN_BASE}/lease-abstract`, {
+        method: 'POST', headers: await authHeadersJson(),
+        body: JSON.stringify({ property_id: propertyId, tenant }),
+      })
+      const synthJson = await synth.json().catch(() => ({}))
+      if (!synth.ok || synthJson.error) throw new Error(synthJson.error ?? `Synthesis failed (${synth.status})`)
+      // Reconcile resolutions against the regenerated content, then re-verify.
+      try {
+        const { data: fresh } = await supabase.from('lease_abstracts')
+          .select('id, abstract, qa, field_confidence, clause_findings').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence, fresh.clause_findings)
+      } catch { /* non-fatal */ }
+      setBump(b => b + 1)
+      setSelected(tenant)
+
+      // ‚îÄ‚îÄ 4. Re-verify (best-effort: the abstract already updated). ‚îÄ‚îÄ
+      setBoth('verifying against source‚Ä¶')
+      try {
+        const vr = await fetch(`${FN_BASE}/abstract-verify`, {
+          method: 'POST', headers: await authHeadersJson(),
+          body: JSON.stringify({ property_id: propertyId, tenant }),
+        })
+        await vr.json().catch(() => ({}))
+      } catch { /* verify is best-effort */ }
+      setBump(b => b + 1)
+
+      await updateAbstractJob(jobId, { status: 'done', phase: 'complete', error: null })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setGenError(`${tenant}: ${msg}`)
+      await updateAbstractJob(jobId, { status: 'error', error: msg })
+    } finally {
+      setPhase(p => { const n = { ...p }; delete n[tenant]; return n })
+      setGenerating(prev => { const n = new Set(prev); n.delete(tenant); return n })
+    }
+  }
+
+  // Ensemble cross-check: two independent, differently-framed lenses score
+  // agreement with the stored value on the high-stakes fields -> per-field
+  // confidence + disagreements (abstract-ensemble, mig 20240110). Fast (~15s):
+  // both lenses run concurrently on briefs only. Disagreements flow into the
+  // worklist keyed the same as generator/verifier items, so one resolution
+  // clears them together.
+  async function crossCheck(tenant: string, autoApply = false) {
+    if (!propertyId || crossChecking.has(tenant)) return
+    setGenError(null)
+    setCrossChecking(prev => new Set(prev).add(tenant))
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${FN_BASE}/abstract-ensemble`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId, tenant, auto_apply: autoApply }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
+      // Keep the worklist honest: fold the fresh disagreements into the live-key
+      // set (archive resolutions whose disagreement vanished, revive reappeared).
+      try {
+        const { data: fresh } = await supabase.from('lease_abstracts')
+          .select('id, abstract, qa, field_confidence, clause_findings').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence, fresh.clause_findings)
+      } catch { /* non-fatal */ }
+      setBump(b => b + 1)
+    } catch (e) {
+      setGenError(`Cross-check ${tenant}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setCrossChecking(prev => { const n = new Set(prev); n.delete(tenant); return n })
+    }
+  }
+
+  // Clause-specialist verify: N single-clause experts (exclusives, options,
+  // guaranty, co-tenancy) each audit only their own field with a deep domain
+  // rubric, plus an optional cross-model (OpenAI) adjudicator on high-severity
+  // findings (abstract-clause-verify, mig 20240113). Detection only ‚Äî actionable
+  // findings flow into the worklist keyed the same as generator/verifier/ensemble
+  // items, so one resolution clears them together. ~15s (specialists run concurrently).
+  async function clauseVerify(tenant: string) {
+    if (!propertyId || clauseChecking.has(tenant)) return
+    setGenError(null)
+    setClauseChecking(prev => new Set(prev).add(tenant))
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${FN_BASE}/abstract-clause-verify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId, tenant }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
+      try {
+        const { data: fresh } = await supabase.from('lease_abstracts')
+          .select('id, abstract, qa, field_confidence, clause_findings').eq('property_id', propertyId).eq('tenant_name', tenant).maybeSingle()
+        if (fresh?.id) await reconcileResolutions(fresh.id, fresh.abstract, fresh.qa, fresh.field_confidence, fresh.clause_findings)
+      } catch { /* non-fatal */ }
+      setBump(b => b + 1)
+    } catch (e) {
+      setGenError(`Clause check ${tenant}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setClauseChecking(prev => { const n = new Set(prev); n.delete(tenant); return n })
+    }
+  }
+
+  const selectedAbstract = selected ? byTenant.get(selected.toLowerCase()) : null
+
+  return (
+    <div className="abstracts-page" style={{ padding: '24px 32px', maxWidth: listCollapsed && view === 'tenant' ? 'none' : 1100 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
+        <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Lease Abstracts</span>
+        <AccuracyChip />
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 18 }}>
+        AI-generated abstracts following the firm's Abstraction Standard ‚Äî every document in the tenant's file is
+        fully read into a structured brief (one-time per document), then the abstract is synthesized from the briefs
+        with MRI option-date and REA/PMA cross-checks. First generation briefs the file (~30s per document);
+        regeneration reuses briefs and takes 1‚Äì2 minutes.
+      </div>
+
+      <ReviewStatusBar
+        tenantCount={(tenants.data ?? []).length}
+        abstracts={abstracts.data ?? []}
+        unresolvedByTenant={unresolvedRed.data ?? {}}
+      />
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+        <select value={propertyId ?? ''} onChange={e => { setPropertyId(e.target.value); setSelected(null) }}
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '7px 10px' }}>
+          {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        {/* Quick tenant selection menu (‚úì = abstract exists) */}
+        <select value={selected ?? ''} onChange={e => { setSelected(e.target.value || null); setView('tenant') }}
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '7px 10px', maxWidth: 280 }}>
+          <option value="">Select tenant‚Ä¶</option>
+          {(tenants.data ?? []).map(t => (
+            <option key={t} value={t}>{byTenant.has(t.toLowerCase()) ? '‚úì ' : ''}{t}</option>
+          ))}
+        </select>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <ModeButton label="By tenant" active={view === 'tenant'} onClick={() => setView('tenant')} />
+          <ModeButton label="Clause matrix" active={view === 'clause'} onClick={() => setView('clause')} />
+          <ModeButton label="Open items" active={view === 'openitems'} onClick={() => setView('openitems')} />
+        </div>
+        {view === 'tenant' && (
+          <button onClick={() => setListCollapsed(c => !c)}
+            title={listCollapsed ? 'Show the tenant list' : 'Hide the tenant list for a wider, near-full-screen abstract'}
+            style={{ fontSize: 12, padding: '5px 12px', borderRadius: 20, cursor: 'pointer',
+              border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+            {listCollapsed ? '‚ùØ Show tenants' : '‚ùÆ Focus abstract'}
+          </button>
+        )}
+        <GenerateAllButton
+          tenants={tenants.data ?? []}
+          byTenant={byTenant}
+          generating={generating}
+          onGenerate={generate}
+        />
+        <VerifyAllButton
+          abstracts={abstracts.data ?? []}
+          verifying={verifying}
+          onVerify={verify}
+        />
+        {view === 'clause' && (
+          <select value={clause} onChange={e => setClause(e.target.value)}
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '7px 10px' }}>
+            {CLAUSES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        )}
+        <div style={{ marginLeft: 'auto' }}>
+          <AbstractsExportBar
+            properties={(properties ?? []).map(p => ({ id: p.id, name: p.name }))}
+            propertyId={propertyId}
+            propertyName={(properties ?? []).find(p => p.id === propertyId)?.name ?? ''}
+            selectedTenant={selected}
+            currentAbstracts={(abstracts.data ?? []).map(r => ({ ...r, abstract: applyOverrides(r.abstract, r.overrides) }))}
+          />
+        </div>
+      </div>
+
+      {genError && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 10 }}>{genError}</div>}
+
+      <RefreshLogBanner onJump={t => { setSelected(t); setView('tenant') }} />
+
+      {propertyId && <ExclusivesRegistryPanel propertyId={propertyId} />}
+
+      {view === 'tenant' ? (
+        <div className="abstracts-review-grid" style={{ display: 'grid', gridTemplateColumns: listCollapsed ? '30px minmax(0, 1fr)' : '320px minmax(0, 1fr)', gap: 16 }}>
+          {listCollapsed && (
+            <button onClick={() => setListCollapsed(false)}
+              title="Show the tenant list"
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start',
+                paddingTop: 12, gap: 8, borderRadius: 8, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+              <span style={{ fontSize: 13 }}>‚ùØ</span>
+              <span style={{ fontSize: 11, letterSpacing: 1, writingMode: 'vertical-rl', textOrientation: 'mixed' }}>Tenants</span>
+            </button>
+          )}
+          {!listCollapsed && (
+          <Widget title="Tenants" chip={tenants.data ? `${tenants.data.length} active` : undefined}>
+            {tenants.loading && <WidgetSkeleton rows={10} />}
+            {tenants.error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{tenants.error}</div>}
+            {!tenants.loading && (tenants.data ?? []).length === 0 && (
+              <EmptyState title="No structured leases" subtitle="Lease model not seeded for this property yet" />
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 560, overflowY: 'auto' }}>
+              {(tenants.data ?? []).map(t => {
+                const a = byTenant.get(t.toLowerCase())
+                const busy = generating.has(t)
+                return (
+                  <div key={t}
+                    onClick={() => setSelected(t)}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '6px 8px',
+                      borderRadius: 6, cursor: 'pointer',
+                      background: selected === t ? 'var(--accent-dim)' : 'transparent' }}>
+                    <span style={{ fontSize: 12, color: selected === t ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t}</span>
+                    {busy
+                      ? <span style={{ fontSize: 10, color: 'var(--amber)', whiteSpace: 'nowrap' }}>{phase[t] ?? 'generating‚Ä¶'}</span>
+                      : verifying.has(t)
+                        ? <span style={{ fontSize: 10, color: 'var(--amber)' }}>verifying‚Ä¶</span>
+                        : a
+                          ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              {(unresolvedRed.data?.[t.toLowerCase()] ?? 0) > 0 && (
+                                <span title={`${unresolvedRed.data?.[t.toLowerCase()]} unresolved discrepancy/confirm item(s)`}
+                                  style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10, color: 'var(--red, #ef4444)', background: 'rgba(239,68,68,0.12)' }}>
+                                  {unresolvedRed.data?.[t.toLowerCase()]}
+                                </span>
+                              )}
+                              {a.locked && <span title="Human-verified & locked" style={{ fontSize: 10 }}>üîí</span>}<QaBadge status={a.qa_status} /></span>
+                          : <button onClick={e => { e.stopPropagation(); void generate(t) }}
+                              style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                              Generate
+                            </button>}
+                  </div>
+                )
+              })}
+            </div>
+          </Widget>
+          )}
+
+          <div>
+            {!selectedAbstract && (
+              <Widget title="Abstract">
+                <EmptyState icon="üìÑ" title={selected ? 'Not generated yet' : 'Pick a tenant'}
+                  subtitle={selected ? 'Click Generate on the tenant list ‚Äî takes 1‚Äì2 minutes' : 'Abstracts render here in template order'} />
+                {selected && !byTenant.get(selected.toLowerCase()) && (
+                  <div style={{ textAlign: 'center', marginTop: 10 }}>
+                    <button onClick={() => void generate(selected)} disabled={generating.has(selected)}
+                      style={{ fontSize: 12, fontWeight: 600, padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+                      {generating.has(selected) ? (phase[selected] ?? 'Generating‚Ä¶') : `Generate abstract for ${selected}`}
+                    </button>
+                  </div>
+                )}
+              </Widget>
+            )}
+            {selectedAbstract && <AbstractView row={selectedAbstract}
+              onRegenerate={() => void generate(selectedAbstract.tenant_name)} busy={generating.has(selectedAbstract.tenant_name)}
+              onVerify={() => void verify(selectedAbstract.tenant_name)} verifying={verifying.has(selectedAbstract.tenant_name)}
+              onCrossCheck={() => void crossCheck(selectedAbstract.tenant_name)} crossChecking={crossChecking.has(selectedAbstract.tenant_name)}
+              onClauseVerify={() => void clauseVerify(selectedAbstract.tenant_name)} clauseChecking={clauseChecking.has(selectedAbstract.tenant_name)}
+              onUploadDoc={(file) => void uploadAndReabstract(selectedAbstract.tenant_name, file)}
+              onSaved={() => setBump(b => b + 1)} reviewerId={appUser?.id}
+              resolutions={resByAbstract.get(selectedAbstract.id) ?? []} propertyId={propertyId} />}
+          </div>
+        </div>
+      ) : view === 'clause' ? (
+        <Widget title={`Clause matrix ‚Äî ${CLAUSES.find(c => c.key === clause)?.label}`} chip={`${(abstracts.data ?? []).length} abstracts`} fullWidth>
+          {(abstracts.data ?? []).length === 0
+            ? <EmptyState title="No abstracts yet" subtitle="Generate abstracts in the By-tenant view first ‚Äî the matrix compares them" />
+            : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead><tr style={{ textAlign: 'left', color: 'var(--text-faint)', fontSize: 11 }}>
+                  <th style={{ padding: '4px 8px', width: 220 }}>Tenant</th><th style={{ padding: '4px 8px' }}>{CLAUSES.find(c => c.key === clause)?.label}</th>
+                </tr></thead>
+                <tbody>
+                  {(abstracts.data ?? []).slice().sort((a, b) => a.tenant_name.localeCompare(b.tenant_name)).map(a => (
+                    <tr key={a.id} style={{ borderTop: '1px solid var(--border)', verticalAlign: 'top' }}>
+                      <td style={{ padding: '6px 8px', color: 'var(--text)', fontWeight: 600 }}>{a.tenant_name}</td>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
+                        {CLAUSES.find(c => c.key === clause)?.render(a.abstract) || '‚Äî'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+        </Widget>
+      ) : (
+        <PortfolioOpenItems rows={openItemsView.data ?? []} loading={openItemsView.loading}
+          onJump={t => { setSelected(t); setView('tenant') }} />
+      )}
+    </div>
+  )
+}
+
+function ReviewStatusBar({ tenantCount, abstracts, unresolvedByTenant }: {
+  tenantCount: number
+  abstracts: AbstractRow[]
+  unresolvedByTenant: Record<string, number>
+}) {
+  const generated = abstracts.length
+  const aiChecked = abstracts.filter(a => !!a.qa_status).length
+  const approved = abstracts.filter(a => a.locked || a.human_verified).length
+  const decisions = Object.values(unresolvedByTenant).reduce((sum, n) => sum + n, 0)
+  const stages = [
+    { label: 'AI generated', value: `${generated}/${tenantCount}`, note: 'structured draft', color: 'var(--text)' },
+    { label: 'AI QA complete', value: `${aiChecked}/${generated || 0}`, note: 'machine checked', color: 'var(--accent)' },
+    { label: 'Human approved', value: String(approved), note: 'reviewed & locked', color: 'var(--green)' },
+    { label: 'Open decisions', value: String(decisions), note: 'human action needed', color: decisions ? 'var(--red)' : 'var(--green)' },
+  ]
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(155px, 100%), 1fr))', gap: 8 }}>
+        {stages.map(s => (
+          <div key={s.label} style={{ border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface)', padding: '9px 11px' }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.label}</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 2 }}>
+              <span style={{ fontSize: 18, fontWeight: 750, color: s.color }}>{s.value}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{s.note}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 6 }}>
+        Generated and AI QA are machine states. Only a reviewed and locked abstract counts as human approved.
+      </div>
+    </div>
+  )
+}
+
+// Portfolio rollup: every open item across the property's abstracts, unresolved
+// red first, grouped by tenant, each row jumping to that tenant's abstract.
+function PortfolioOpenItems({ rows, loading, onJump }: { rows: OpenItemRow[]; loading: boolean; onJump: (tenant: string) => void }) {
+  const [unresolvedOnly, setUnresolvedOnly] = useState(true)
+  const rank: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
+  const shown = rows
+    .filter(r => !unresolvedOnly || !r.resolved)
+    .sort((a, b) =>
+      Number(a.resolved) - Number(b.resolved) ||
+      rank[a.severity] - rank[b.severity] ||
+      a.tenant_name.localeCompare(b.tenant_name))
+  const unresolvedRed = rows.filter(r => !r.resolved && r.severity !== 'info').length
+  return (
+    <Widget title="Open items ‚Äî portfolio rollup"
+      chip={`${unresolvedRed} unresolved red ¬∑ ${rows.length} total`} fullWidth>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={unresolvedOnly} onChange={e => setUnresolvedOnly(e.target.checked)} />
+          Unresolved only
+        </label>
+      </div>
+      {loading && <WidgetSkeleton rows={8} />}
+      {!loading && shown.length === 0 && <EmptyState title="Nothing open" subtitle={unresolvedOnly ? 'No unresolved items on this property' : 'No open items on this property'} />}
+      {shown.length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead><tr style={{ textAlign: 'left', color: 'var(--text-faint)', fontSize: 11 }}>
+            <th style={{ padding: '4px 8px', width: 180 }}>Tenant</th>
+            <th style={{ padding: '4px 8px', width: 90 }}>Severity</th>
+            <th style={{ padding: '4px 8px' }}>Item</th>
+            <th style={{ padding: '4px 8px', width: 110 }}>Status</th>
+          </tr></thead>
+          <tbody>
+            {shown.map((r, i) => {
+              const m = OPEN_META[r.severity]
+              return (
+                <tr key={i} style={{ borderTop: '1px solid var(--border)', verticalAlign: 'top', opacity: r.resolved ? 0.55 : 1 }}>
+                  <td style={{ padding: '6px 8px' }}>
+                    <button onClick={() => onJump(r.tenant_name)}
+                      style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}>
+                      {r.tenant_name}
+                    </button>
+                  </td>
+                  <td style={{ padding: '6px 8px' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: m.color }}>{m.icon} {m.label}</span>
+                  </td>
+                  <td style={{ padding: '6px 8px', color: 'var(--text-muted)', textDecoration: r.resolved ? 'line-through' : 'none' }}>
+                    {r.field && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', marginRight: 6 }}>{r.field}</span>}
+                    {r.txt}
+                  </td>
+                  <td style={{ padding: '6px 8px', fontSize: 11, color: r.resolved ? 'var(--green, #22c55e)' : 'var(--text-faint)' }}>
+                    {r.resolved ? (RES_META[(r.resolution_status ?? 'accepted') as ResStatus]?.label ?? 'resolved') : 'open'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </Widget>
+  )
+}
+
+// Sequentially generates every tenant that has no abstract yet. Keep the tab
+// open while it runs (~1-2 min per tenant).
+function GenerateAllButton({ tenants, byTenant, generating, onGenerate }: {
+  tenants: string[]
+  byTenant: Map<string, AbstractRow>
+  generating: Set<string>
+  onGenerate: (t: string) => Promise<void>
+}) {
+  const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState('')
+  const missing = tenants.filter(t => !byTenant.has(t.toLowerCase()))
+
+  async function run() {
+    if (running || !missing.length) return
+    setRunning(true)
+    let done = 0
+    for (const t of missing) {
+      setProgress(`${done + 1}/${missing.length}: ${t}`)
+      await onGenerate(t)          // errors surface via the page banner; keep going
+      done++
+    }
+    setProgress('')
+    setRunning(false)
+  }
+
+  if (!missing.length) return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>AI drafts generated for all tenants ‚úì</span>
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button onClick={() => void run()} disabled={running || generating.size > 0}
+        style={{
+          fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none',
+          background: running ? 'var(--surface-2)' : 'var(--accent)',
+          color: running ? 'var(--text-muted)' : '#fff', cursor: running ? 'default' : 'pointer',
+        }}>
+        {running ? 'Generating‚Ä¶' : `Generate all missing (${missing.length})`}
+      </button>
+      {running && <span style={{ fontSize: 11, color: 'var(--amber)' }}>{progress} ‚Äî keep this tab open</span>}
+    </span>
+  )
+}
+
+// Sequentially verifies every abstract that has not been verified since its
+// last generation. Surfaces batch problems (e.g. stale post-amendment terms
+// across a whole property) in one pass. Keep the tab open (~1-2 min each).
+function VerifyAllButton({ abstracts, verifying, onVerify }: {
+  abstracts: AbstractRow[]
+  verifying: Set<string>
+  onVerify: (t: string) => Promise<void>
+}) {
+  const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState('')
+  const unverified = abstracts.filter(a => !a.qa_status)
+
+  async function run() {
+    if (running || !unverified.length) return
+    setRunning(true)
+    let done = 0
+    for (const a of unverified) {
+      setProgress(`${done + 1}/${unverified.length}: ${a.tenant_name}`)
+      await onVerify(a.tenant_name)      // errors surface via the page banner; keep going
+      done++
+    }
+    setProgress('')
+    setRunning(false)
+  }
+
+  if (!abstracts.length) return null
+  if (!unverified.length) return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>AI QA complete for all generated abstracts ‚úì</span>
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button onClick={() => void run()} disabled={running || verifying.size > 0}
+        style={{
+          fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6,
+          border: `1px solid ${running ? 'var(--border-2)' : 'var(--accent)'}`,
+          background: running ? 'var(--surface-2)' : 'var(--accent-dim)',
+          color: running ? 'var(--text-muted)' : 'var(--accent)', cursor: running ? 'default' : 'pointer',
+        }}>
+        {running ? 'Verifying‚Ä¶' : `Verify all (${unverified.length})`}
+      </button>
+      {running && <span style={{ fontSize: 11, color: 'var(--amber)' }}>{progress} ‚Äî keep this tab open</span>}
+    </span>
+  )
+}
+
+// LIVING ABSTRACTS: unseen refresh-log entries ‚Äî abstracts the nightly watcher
+// regenerated (with field diffs) because a new document arrived, or locked
+// abstracts flagged for manual review. Dismiss marks seen.
+function RefreshLogBanner({ onJump }: { onJump: (tenant: string) => void }) {
+  const [bump, setBump] = useState(0)
+  const events = useQuery<any[]>(async () => {
+    const { data, error } = await supabase.from('abstract_refresh_log')
+      .select('id, tenant_name, doc_title, action, qa_status, changes, material, created_at')
+      .eq('seen', false).order('created_at', { ascending: false }).limit(20)
+    if (error) throw new Error(error.message)
+    return data ?? []
+  }, [bump])
+  async function dismiss(id: string) {
+    await supabase.from('abstract_refresh_log').update({ seen: true }).eq('id', id)
+    setBump(b => b + 1)
+  }
+  if (!events.data?.length) return null
+  return (
+    <div style={{ border: '1px solid var(--accent)', background: 'var(--accent-dim)', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', marginBottom: 6 }}>
+        ‚ü≥ Abstract changes from newly-ingested documents ({events.data.length})
+      </div>
+      {events.data.map(e => (
+        <div key={e.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '4px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+          <button onClick={() => onJump(e.tenant_name)}
+            style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+            {e.tenant_name}
+          </button>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flex: 1, minWidth: 200 }}>
+            {e.action === 'locked_needs_review'
+              ? <>üîí locked ‚Äî new document needs manual review: <em>{e.doc_title}</em></>
+              : e.action === 'regen_failed'
+                ? <>regeneration failed ‚Äî retry from the tenant list</>
+                : e.changes && Object.keys(e.changes).length
+                  ? <>auto-regenerated ({e.qa_status ?? '‚Äî'}): {Object.entries(e.changes as Record<string, any>).map(([k, v]) => `${k}: ${v.old || '‚Äî'} ‚Üí ${v.new || '‚Äî'}`).join(' ¬∑ ')}</>
+                  : <>auto-regenerated ({e.qa_status ?? '‚Äî'}) ‚Äî no high-value field changed</>}
+          </span>
+          <button onClick={() => void dismiss(e.id)}
+            style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer' }}>
+            Dismiss
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Portfolio-wide AI accuracy, measured against human ground truth: every locked
+// abstract = 7 reviewed fields; `overrides` records exactly which the reviewer
+// had to correct (v_abstract_accuracy, migration 20240061). The number that makes
+// the abstractor's quality provable ‚Äî recomputes live as the team locks reviews.
+function AccuracyChip() {
+  const acc = useQuery<{ locked_abstracts: number; fields_reviewed: number; fields_corrected: number; field_accuracy_pct: number | null }>(async () => {
+    const { data, error } = await supabase.from('v_abstract_accuracy').select('*').single()
+    if (error) throw new Error(error.message)
+    return data as any
+  }, [])
+  if (!acc.data) return null
+  if (!acc.data.locked_abstracts) {
+    return <span style={{ fontSize: 11, color: 'var(--text-faint)' }} title="Review and lock abstracts to create human ground truth">human review coverage: 0 locked</span>
+  }
+  return (
+    <span title={`${acc.data.fields_corrected} of ${acc.data.fields_reviewed} human-reviewed fields needed correction, across ${acc.data.locked_abstracts} locked abstracts`}
+      style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 10, color: 'var(--green, #22c55e)', background: 'rgba(34,197,94,0.12)' }}>
+      AI field accuracy {acc.data.field_accuracy_pct}% ¬∑ {acc.data.locked_abstracts} human-approved
+    </span>
+  )
+}
+
+function ModeButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '5px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', fontWeight: active ? 600 : 400,
+      border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+      background: active ? 'var(--accent-dim)' : 'transparent',
+      color: active ? 'var(--accent)' : 'var(--text-muted)',
+    }}>{label}</button>
+  )
+}
+
+const fmtMoney = (n: number | null | undefined) =>
+  n == null ? '‚Äî' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
+
+// Exported: the /diligence DD workspace renders the same abstract view.
+// ‚îÄ‚îÄ Ensemble cross-check surface (abstract-ensemble, migration 20240110) ‚îÄ‚îÄ
+const CONF_COLOR: Record<string, string> = { high: 'var(--green, #22c55e)', medium: 'var(--amber, #f59e0b)', low: 'var(--red, #ef4444)', settled: 'var(--text-faint)' }
+const CONF_FIELD_LABEL: Record<string, string> = {
+  'exclusives.exists': 'Exclusive ‚Äî exists',
+  'exclusives.exact_language': 'Exclusive ‚Äî language',
+  'term.expiration': 'Expiration',
+  'guarantor.name': 'Guarantor',
+  'options': 'Options (notice dates)',
+  'base_rent_schedule': 'Base rent schedule',
+}
+const clip = (s: any, n = 140) => { const t = String(s ?? '‚Äî'); return t.length > n ? t.slice(0, n) + '‚Ä¶' : t }
+
+// Compact header pill summarizing the ensemble cross-check outcome.
+function ConfidenceBadge({ fc }: { fc: any }) {
+  if (!fc?.summary) return null
+  const s = fc.summary
+  const [label, color] = s.low > 0 ? [`‚öë ${s.low} low-confidence`, CONF_COLOR.low]
+    : s.medium > 0 ? [`${s.medium} medium-confidence`, CONF_COLOR.medium]
+    : ['‚úì Cross-checked', CONF_COLOR.high]
+  return (
+    <span title="Ensemble cross-check: two independent lenses vs the stored value"
+      style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>
+      {label}
+    </span>
+  )
+}
+
+// ‚îÄ‚îÄ Clause-specialist surface (abstract-clause-verify, migration 20240113) ‚îÄ‚îÄ
+const SPEC_LABEL: Record<string, string> = { exclusives: 'Exclusives', options: 'Options', guaranty: 'Guaranty', cotenancy: 'Co-tenancy' }
+const CLAUSE_VERDICT: Record<string, { label: string; color: string }> = {
+  revise: { label: 'Revise', color: 'var(--red, #ef4444)' },
+  cannot_verify: { label: 'Cannot verify', color: 'var(--amber, #f59e0b)' },
+  enrich: { label: 'Add nuance', color: 'var(--accent)' },
+  confirm: { label: 'Confirmed', color: 'var(--green, #22c55e)' },
+}
+
+// Compact header pill summarizing the clause-specialist outcome.
+function ClauseBadge({ cf }: { cf: any }) {
+  if (!cf?.summary) return null
+  const a = cf.summary.actionable ?? 0
+  const [label, color] = a > 0 ? [`‚öë ${a} clause finding${a > 1 ? 's' : ''}`, CONF_COLOR.low] : ['‚úì Clause-checked', CONF_COLOR.high]
+  return (
+    <span title="Single-clause specialists (exclusives, options, guaranty, co-tenancy) deep-audited each clause"
+      style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>
+      {label}
+    </span>
+  )
+}
+
+// Per-clause specialist findings detail. A SEPARATE provenance layer: N
+// single-clause experts each deep-audited their own clause against the source
+// briefs + MRI, with an optional cross-model adjudication on high-severity
+// findings. Actionable findings are also rows in the worklist above; here they
+// carry the verbatim quote + proposed correction / missing nuance for adjudication.
+function ClauseFindingsPanel({ cf, at, resByKey }: { cf: any; at: string | null; resByKey: Map<string, Resolution> }) {
+  const all = (Array.isArray(cf?.findings) ? cf.findings : []) as any[]
+  if (!all.length) return null
+  const rawShown = all.filter(f => f.verdict !== 'confirm')     // confirmed clauses are reassuring but not action items
+  const confirmed = all.length - rawShown.length
+  // Materiality tiering: rank the RED actionable findings so must-fix items lead,
+  // then nuance, then low-materiality reconciliations, then everything else.
+  const tierOf = (f: any) => (isActionableClauseFinding(f) && isRedClauseFinding(f)) ? clauseFindingTier(f) : null
+  const shown = [...rawShown].sort((a, b) => {
+    const ta = tierOf(a), tb = tierOf(b)
+    return (ta ? CLAUSE_TIER_META[ta].rank : 3) - (tb ? CLAUSE_TIER_META[tb].rank : 3)
+  })
+  const hasRed = rawShown.some(f => tierOf(f))
+  const tierCounts: Record<string, number> = { fix: 0, nuance: 0, reconcile: 0 }
+  for (const f of rawShown) { const t = tierOf(f); if (t) tierCounts[t]++ }
+  return (
+    <details open={hasRed} id="abstract-clause-findings" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+      <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Clause specialists{at ? ` ¬∑ ${new Date(at).toLocaleDateString()}` : ''}
+      </summary>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', margin: '6px 0 10px' }}>
+        {(cf?.specialists ?? []).map((s: string) => SPEC_LABEL[s] ?? s).join(' + ') || 'specialists'} each deep-audited their own clause against the source briefs and MRI{cf?.cross_model ? `, with a ${cf.cross_model} cross-model check on high-severity findings` : ''}. {confirmed > 0 ? `${confirmed} clause${confirmed > 1 ? 's' : ''} confirmed clean. ` : ''}Actionable findings also appear in the worklist above.
+      </div>
+      {(tierCounts.fix + tierCounts.nuance + tierCounts.reconcile) > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {(['fix', 'nuance', 'reconcile'] as const).filter(t => tierCounts[t] > 0).map(t => (
+            <span key={t} title={t === 'fix' ? 'Wrong value or missing document ‚Äî act first' : t === 'nuance' ? 'Value right, a material detail is missing ‚Äî read + decide' : 'Notice-date recomputation / MRI reconciliation ‚Äî low-materiality, batch-clear'}
+              style={{ fontSize: 10, fontWeight: 700, color: CLAUSE_TIER_META[t].color, border: `1px solid ${CLAUSE_TIER_META[t].color}`, borderRadius: 9, padding: '2px 8px' }}>
+              {tierCounts[t]} {CLAUSE_TIER_META[t].label.toLowerCase()}
+            </span>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {shown.map((f, i) => {
+          const vm = CLAUSE_VERDICT[f.verdict] ?? { label: f.verdict, color: 'var(--text-faint)' }
+          const resolved = resByKey.has(`field:${String(f.field).toLowerCase()}`)
+          const settled = f.settled
+          return (
+            <div key={i} style={{ border: `1px solid ${resolved || settled ? 'var(--border-2)' : vm.color}`, borderRadius: 6, padding: '7px 9px', background: 'var(--surface-2)', opacity: resolved || settled ? 0.6 : 1 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: vm.color, border: `1px solid ${vm.color}`, borderRadius: 8, padding: '1px 6px' }}>{vm.label}</span>
+                {tierOf(f) && <span style={{ fontSize: 8, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: CLAUSE_TIER_META[tierOf(f)!].color }}>{CLAUSE_TIER_META[tierOf(f)!].label}</span>}
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{CONF_FIELD_LABEL[f.field] ?? SPEC_LABEL[f.specialist] ?? f.field}</span>
+                {f.cross_model?.verdict === 'confirm' && <span title={f.cross_model.note} style={{ fontSize: 9, fontWeight: 700, color: 'var(--green, #22c55e)' }}>‚úì 2nd model</span>}
+                {f.cross_model?.verdict === 'refute' && <span title={f.cross_model.note} style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-faint)' }}>‚úó 2nd model ‚Äî downgraded</span>}
+                {settled && <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>¬∑ human-settled</span>}
+                {resolved && <span style={{ fontSize: 9, color: 'var(--green, #22c55e)' }}>¬∑ resolved</span>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                {f.verdict === 'enrich'
+                  ? <><b>Missing:</b> {clip(f.missing_nuance ?? f.rationale, 320)}</>
+                  : f.verdict === 'revise'
+                    ? <><b>Stored:</b> {clip(f.current_value, 90)} ‚Üí <b>Should be:</b> {clip(f.correct_value ?? f.rationale, 200)}</>
+                    : <>{clip(f.rationale, 320)}</>}
+              </div>
+              {f.quote && <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 4, fontStyle: 'italic' }}>‚Äú{clip(f.quote, 240)}‚Äù</div>}
+              {f.citation && <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2 }}>{f.citation}</div>}
+            </div>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
+
+// Per-field confidence chips + disagreement detail. A SEPARATE provenance layer
+// from verification: two independent, differently-framed lenses scored their
+// agreement with the stored value. Disagreements are also actionable rows in the
+// worklist above; here they carry the competing value + citation for adjudication.
+function ConfidencePanel({ fc, at, resByKey }: { fc: any; at: string | null; resByKey: Map<string, Resolution> }) {
+  const entries = Object.entries(fc?.fields ?? {}) as Array<[string, any]>
+  if (!entries.length) return null
+  const disByField = new Map<string, any>((Array.isArray(fc?.disagreements) ? fc.disagreements : []).map((d: any) => [d.field, d]))
+  const hasLow = (fc?.summary?.low ?? 0) > 0
+  return (
+    <details open={hasLow} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+      <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Cross-check confidence{at ? ` ¬∑ ${new Date(at).toLocaleDateString()}` : ''}
+      </summary>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', margin: '6px 0 10px' }}>
+        Two independent lenses ({(fc?.lenses ?? []).join(' + ') || 'ensemble'}) re-checked each field against the source briefs and MRI; their agreement with the stored value sets the confidence. Low-confidence fields also appear in the worklist above.
+      </div>
+      {Array.isArray(fc?.auto_applied) && fc.auto_applied.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--green, #22c55e)', border: '1px solid var(--green, #22c55e)', borderRadius: 6, padding: '6px 8px', marginBottom: 10 }}>
+          <b>Auto-applied {fc.auto_applied.length} unanimous fix{fc.auto_applied.length > 1 ? 'es' : ''}</b> (reversible ‚Äî logged in the worklist):
+          {fc.auto_applied.map((a: any, i: number) => (
+            <div key={i} style={{ color: 'var(--text-muted)', marginTop: 2 }}>{a.field}: {clip(a.from, 60)} ‚Üí <b>{clip(a.to, 60)}</b>{a.citation ? <span style={{ color: 'var(--text-faint)' }}> ¬∑ {a.citation}</span> : null}</div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 8 }}>
+        {entries.map(([field, info]) => {
+          const color = CONF_COLOR[info?.confidence] ?? 'var(--text-faint)'
+          const d = disByField.get(field)
+          const resolved = resByKey.has(`field:${field.toLowerCase()}`)
+          return (
+            <div key={field} style={{ border: '1px solid var(--border-2)', borderRadius: 6, padding: '6px 8px', background: 'var(--surface-2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--text)' }}>{CONF_FIELD_LABEL[field] ?? field}</span>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color, border: `1px solid ${color}`, borderRadius: 8, padding: '1px 6px' }}>{info?.confidence ?? '‚Äî'}</span>
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--text-faint)', marginTop: 3 }}>agreement {info?.agreement ?? '‚Äî'}</div>
+              {d && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, textDecoration: resolved ? 'line-through' : 'none', opacity: resolved ? 0.6 : 1 }}>
+                  ‚Üí cross-check: <b>{clip(d.correct_value)}</b>{d.citation ? <span style={{ color: 'var(--text-faint)' }}> ¬∑ {d.citation}</span> : null}{resolved ? ' (resolved)' : ''}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {Array.isArray(fc?.reconfirm) && fc.reconfirm.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', border: '1px solid var(--border-2)', borderRadius: 6, padding: '6px 8px', marginTop: 10 }}>
+          <b style={{ color: 'var(--amber, #f59e0b)' }}>Reconfirm ({fc.reconfirm.length})</b> ‚Äî you already ruled on these; a lens now differs. Not flagged, but worth a re-look:
+          {fc.reconfirm.map((r: any, i: number) => (
+            <div key={i} style={{ marginTop: 2 }}>{CONF_FIELD_LABEL[r.field] ?? r.field}: kept <b>{clip(r.abstract_value, 40)}</b> vs lens <b>{clip(r.correct_value, 50)}</b>{r.citation ? <span style={{ color: 'var(--text-faint)' }}> ¬∑ {r.citation}</span> : null}</div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(fc?.registry_rejected) && fc.registry_rejected.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-faint)', border: '1px dashed var(--border-2)', borderRadius: 6, padding: '6px 8px', marginTop: 10 }}>
+          <b>Auto-dismissed ({fc.registry_rejected.length})</b> ‚Äî a lens proposed an exclusive that the ownership registry attributes to another tenant; not flagged:
+          {fc.registry_rejected.map((r: any, i: number) => (
+            <div key={i} style={{ marginTop: 2 }}>{CONF_FIELD_LABEL[r.field] ?? r.field}: {r.reason}</div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(fc?.lens_errors) && fc.lens_errors.length > 0 && (
+        <div style={{ fontSize: 9, color: 'var(--amber)', marginTop: 8 }}>Lens issues: {fc.lens_errors.join(' ¬∑ ')}</div>
+      )}
+    </details>
+  )
+}
+
+// Admin curation surface for the exclusives-ownership registry (property_exclusives,
+// migration 20240112) ‚Äî who holds which exclusive at a property, the ground truth
+// the cross-check guard consults to reject misattributed exclusives. Keep vacated
+// tenants (active off) so their exclusive is never re-filed under another tenant.
+function ExclusivesRegistryPanel({ propertyId }: { propertyId: string }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [bump, setBump] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [owner, setOwner] = useState('')
+  const [category, setCategory] = useState('')
+  const [keywords, setKeywords] = useState('')
+  const [active, setActive] = useState(true)
+  useEffect(() => {
+    let live = true
+    supabase.from('property_exclusives')
+      .select('id, owner_tenant, category, keywords, active')
+      .eq('property_id', propertyId).order('owner_tenant')
+      .then(({ data }) => { if (live) setRows((data ?? []) as any[]) })
+    return () => { live = false }
+  }, [propertyId, bump])
+  async function add() {
+    const o = owner.trim()
+    if (!o) { setErr('Owner tenant is required'); return }
+    setBusy(true); setErr(null)
+    try {
+      const kw = keywords.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+      const { error } = await supabase.from('property_exclusives').insert({
+        property_id: propertyId, owner_tenant: o, category: category.trim() || null,
+        keywords: kw, active, notes: 'Added via registry UI',
+      })
+      if (error) throw new Error(error.message)
+      setOwner(''); setCategory(''); setKeywords(''); setActive(true); setBump(b => b + 1)
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  async function toggleActive(id: string, cur: boolean) {
+    await supabase.from('property_exclusives').update({ active: !cur, updated_at: new Date().toISOString() }).eq('id', id)
+    setBump(b => b + 1)
+  }
+  async function remove(id: string) {
+    await supabase.from('property_exclusives').delete().eq('id', id)
+    setBump(b => b + 1)
+  }
+  return (
+    <details style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', marginBottom: 16 }}>
+      <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Exclusives ownership registry ‚Äî {rows.length} entr{rows.length === 1 ? 'y' : 'ies'} (this property)
+      </summary>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', margin: '6px 0 10px' }}>
+        Ground truth for who holds which exclusive here. The cross-check guard uses it to reject an exclusive proposed for the wrong tenant. Keep vacated tenants (active off) so their exclusive is never misattributed.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginBottom: 10 }}>
+        {rows.map(r => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, borderTop: '1px solid var(--border)', padding: '5px 0' }}>
+            <span style={{ fontWeight: 600, minWidth: 170, color: r.active ? 'var(--text)' : 'var(--text-faint)' }}>{r.owner_tenant}{r.active ? '' : ' (inactive)'}</span>
+            <span style={{ color: 'var(--text-muted)', flex: 1 }}>{r.category ?? ''}{Array.isArray(r.keywords) && r.keywords.length ? ` ¬∑ ${r.keywords.join(', ')}` : ''}</span>
+            <button onClick={() => void toggleActive(r.id, r.active)} style={VERB_BTN}>{r.active ? 'Deactivate' : 'Activate'}</button>
+            <button onClick={() => void remove(r.id)} style={{ ...VERB_BTN, color: 'var(--red)' }}>Delete</button>
+          </div>
+        ))}
+        {!rows.length && <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>No registry entries yet for this property.</div>}
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input value={owner} onChange={e => setOwner(e.target.value)} placeholder="Owner tenant" style={{ ...RES_INPUT, width: 160 }} />
+        <input value={category} onChange={e => setCategory(e.target.value)} placeholder="Category (e.g. footwear)" style={{ ...RES_INPUT, width: 170 }} />
+        <input value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="keywords, comma-separated" style={{ ...RES_INPUT, width: 220 }} />
+        <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}>
+          <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} /> active
+        </label>
+        <button onClick={() => void add()} disabled={busy} style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>{busy ? 'Adding‚Ä¶' : 'Add entry'}</button>
+      </div>
+      {err && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 6 }}>{err}</div>}
+    </details>
+  )
+}
+
+export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onCrossCheck, crossChecking, onClauseVerify, clauseChecking, onAutoFix, onUploadDoc, onSaved, reviewerId, resolutions, propertyId }: {
+  row: AbstractRow; onRegenerate: () => void; busy: boolean; onVerify: () => void; verifying: boolean
+  onCrossCheck?: () => void; crossChecking?: boolean; onClauseVerify?: () => void; clauseChecking?: boolean; onAutoFix?: () => void
+  onUploadDoc?: (file: File) => void
+  onSaved: () => void; reviewerId?: string; resolutions?: Resolution[]; propertyId?: string | null
+}) {
+  // Hidden picker shared by the header button and the worklist rows: pick a PDF
+  // -> hand it to onUploadDoc (upload + re-abstract on the spot).
+  const fileRef = useRef<HTMLInputElement>(null)
+  const pickUpload = onUploadDoc ? () => fileRef.current?.click() : undefined
+  // Display/export the human-corrected values layered over the AI abstract.
+  const a = applyOverrides(row.abstract, row.overrides) ?? {}
+  // Click-to-provision links search the abstract's own source documents.
+  const srcIds: string[] = row.source_doc_ids ?? []
+  // Parse open items once (severity + optional field tag + stable footnote #),
+  // and expose a keyword matcher so applicable sections above can footnote the
+  // exact item below. Matches the item's [field] tag first, then its text.
+  const openItems = parseOpenItems(a.open_items ?? [])
+  const footnotesFor = (keywords: string[]): number[] =>
+    openItems.filter(p => {
+      const hay = `${p.field ?? ''} ${p.text}`.toLowerCase()
+      return keywords.some(k => hay.includes(k.toLowerCase()))
+    }).map(p => p.n)
+  // Resolution state: key ‚Üí resolution, and the worklist that drives the top box.
+  const resByKey = new Map<string, Resolution>()
+  for (const r of resolutions ?? []) resByKey.set(r.item_key, r)
+  const worklist = buildWorklist(openItems, row.qa, a, row.field_confidence, row.clause_findings)
+  const unresolvedRedCount = worklist.filter(w => w.red && !resByKey.has(w.key)).length
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+          {row.human_verified && <span style={{ color: 'var(--green, #22c55e)', fontWeight: 700 }}>üîí Human-verified ¬∑ </span>}
+          Generated {new Date(row.generated_at).toLocaleString()} ¬∑ {srcIds.length > 0
+            ? <a href="#abstract-source-docs" onClick={e => scrollToId(e, 'abstract-source-docs')} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{srcIds.length} source documents ‚Üì</a>
+            : '0 source documents'}{row.human_verified ? '' : ' ¬∑ verify against the source lease before relying on it'}
+        </span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <ConfidenceBadge fc={row.field_confidence} />
+          <ClauseBadge cf={row.clause_findings} />
+          {onCrossCheck && (
+            <button onClick={onCrossCheck} disabled={crossChecking || busy}
+              title="Two independent lenses re-check the high-stakes fields and score their agreement with the stored value"
+              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)', cursor: crossChecking || busy ? 'default' : 'pointer' }}>
+              {crossChecking ? 'Cross-checking‚Ä¶' : row.field_confidence ? 'Re-cross-check' : 'Cross-check'}
+            </button>
+          )}
+          {onAutoFix && !row.locked && (
+            <button onClick={onAutoFix} disabled={crossChecking || busy}
+              title="Cross-check and AUTO-APPLY corrections only where both lenses unanimously agree on the same cited value (dates, guarantor). Contested items still go to the worklist. Reversible."
+              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--green, #22c55e)', background: 'transparent', color: 'var(--green, #22c55e)', cursor: crossChecking || busy ? 'default' : 'pointer' }}>
+              {crossChecking ? '‚Ä¶' : 'Auto-fix'}
+            </button>
+          )}
+          {onClauseVerify && (
+            <button onClick={onClauseVerify} disabled={clauseChecking || busy}
+              title="Single-clause specialists (exclusives, options, guaranty, co-tenancy) each deep-audit their own clause, plus a cross-model check on high-severity findings. Surfaces missing nuances and mischaracterizations a generalist pass misses."
+              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--accent)', background: 'var(--surface-2)', color: 'var(--accent)', cursor: clauseChecking || busy ? 'default' : 'pointer' }}>
+              {clauseChecking ? 'Clause check‚Ä¶' : row.clause_findings ? 'Re-clause-check' : 'Clause check'}
+            </button>
+          )}
+          <button onClick={onVerify} disabled={verifying || busy}
+            style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--accent)', background: 'var(--accent-dim)', color: 'var(--accent)', cursor: verifying || busy ? 'default' : 'pointer' }}>
+            {verifying ? 'Verifying (1‚Äì2 min)‚Ä¶' : row.qa_status ? 'Re-verify' : 'Verify against source'}
+          </button>
+          <button onClick={onRegenerate} disabled={busy || row.locked}
+            title={row.locked ? 'Locked ‚Äî unlock in Review & correct to regenerate' : undefined}
+            style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: row.locked ? 'not-allowed' : 'pointer', opacity: row.locked ? 0.5 : 1 }}>
+            {busy ? 'Regenerating‚Ä¶' : row.locked ? 'üîí Regenerate' : 'Regenerate'}
+          </button>
+          {pickUpload && (
+            <>
+              <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) onUploadDoc!(f); e.target.value = '' }} />
+              <button onClick={pickUpload} disabled={busy || row.locked}
+                title={row.locked ? 'Locked ‚Äî unlock in Review & correct to add documents' : 'Upload a missing lease/amendment and re-run the abstract on the spot (runs in the background)'}
+                style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--accent)', background: 'var(--accent)', color: '#fff', cursor: busy || row.locked ? 'default' : 'pointer', opacity: busy || row.locked ? 0.5 : 1 }}>
+                {busy ? 'Working‚Ä¶' : 'Ôºã Upload document'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <ResolutionWorklist row={row} worklist={worklist} resByKey={resByKey} reviewerId={reviewerId} propertyId={propertyId ?? null} onSaved={onSaved} sourceDocIds={srcIds} onRequestUpload={pickUpload} uploadBusy={busy} />
+
+      <ReviewPanel row={row} onSaved={onSaved} reviewerId={reviewerId} unresolvedRedCount={unresolvedRedCount} />
+
+      {row.field_confidence && <div id="abstract-confidence"><ConfidencePanel fc={row.field_confidence} at={row.field_confidence_at} resByKey={resByKey} /></div>}
+
+      {row.clause_findings && <ClauseFindingsPanel cf={row.clause_findings} at={row.clause_findings_at} resByKey={resByKey} />}
+
+      {(row.qa || openItems.length > 0) && (
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '6px 2px' }}>
+            Verification &amp; open items ‚Äî detail{row.qa_status ? ` ¬∑ ${QA_META[row.qa_status]?.label ?? row.qa_status}` : ''}{openItems.length ? ` ¬∑ ${openItems.length} open` : ''}
+          </summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+            {row.qa && <div id="abstract-verification"><QaPanel qa={row.qa} status={row.qa_status} at={row.qa_at} sourceDocIds={row.source_doc_ids ?? []} resByKey={resByKey} /></div>}
+            {openItems.length > 0 && <OpenItemsPanel items={openItems} sourceDocIds={srcIds} resByKey={resByKey} />}
+          </div>
+        </details>
+      )}
+
+      <div id="abstract-source-docs"><SourceDocsPanel docIds={srcIds} tenant={row.tenant_name} propertyId={propertyId ?? null} /></div>
+
+      <Widget title={`${a.trade_name ?? row.tenant_name} ‚Äî Lease Abstract`} chip={a.suite ? `Suite ${a.suite}` : undefined}>
+        <Grid>
+          <Fact k="Trade name (dba)" v={a.trade_name} />
+          <Fact k="Tenant legal name" v={a.tenant_legal_name} />
+          <Fact k="Suite" v={a.suite} />
+          <Fact k="Square footage" v={a.square_footage?.toLocaleString?.() ?? a.square_footage} />
+          <Fact k="Rent commencement" v={a.term?.rent_commencement} sub={a.term?.rcd_basis} foot={footnotesFor(['rent commencement', 'rcd', 'commencement'])} />
+          <Fact k="Expiration" v={a.term?.expiration} sub={a.term?.expiration_basis} foot={footnotesFor(['expiration', 'term end', 'lease exp'])} />
+          <Fact k="Term (yrs)" v={a.term?.term_years} />
+          <Fact k="Guarantor" v={a.guarantor?.exists ? `${a.guarantor.name ?? 'Yes'}${a.guarantor.section ? ` [${a.guarantor.section}]` : ''}` : 'None'} />
+          {(a.term?.original_commencement || a.term?.current_term_start) && (<>
+            <Fact k="Original commencement" v={a.term?.original_commencement} sub={a.term?.original_commencement_basis} />
+            <Fact k="Current term start" v={a.term?.current_term_start} sub={a.term?.current_term_basis} />
+          </>)}
+        </Grid>
+      </Widget>
+
+      {(a.guaranty_chain ?? []).length > 0 && (
+        <Widget title="Guaranty chain" chip={a.guarantor?.exists ? `current: ${a.guarantor?.name ?? '?'}` : 'no current guarantor'}>
+          <MiniTable head={['Event', 'Date', 'Instrument', 'Guarantor', 'Status', 'Notes']}
+            rows={a.guaranty_chain.map((g: any) => [g.event, g.date, g.instrument, g.guarantor, g.status, g.notes])} />
+        </Widget>
+      )}
+
+      <Widget title="Lease documents" chip={`${(a.lease_documents ?? []).length} instruments`}>
+        {(a.lease_documents ?? []).length === 0
+          ? <MissingNote what="No instruments catalogued" />
+          : (a.lease_documents ?? []).some((d: any) => d.category)
+            // v2: operative chain first, then ancillary executed instruments.
+            // Correspondence/notices are excluded from this list at generation.
+            ? <MiniTable head={['Type', 'Category', 'Date', 'Signed', 'Notes']}
+                rows={[...a.lease_documents]
+                  .sort((x: any, y: any) => (x.category === 'ancillary' ? 1 : 0) - (y.category === 'ancillary' ? 1 : 0) || String(x.date ?? '').localeCompare(String(y.date ?? '')))
+                  .map((d: any) => [d.type, d.category, d.date, d.signed, d.notes])} />
+            : <MiniTable head={['Type', 'Date', 'Signed', 'Notes']}
+                rows={a.lease_documents.map((d: any) => [d.type, d.date, d.signed, d.notes])} />}
+      </Widget>
+
+      <Widget title="Base / minimum rent" chip={<Footnote nums={footnotesFor(['rent schedule', 'base rent', 'current-term rent', 'psf', 'annual rent', 'monthly'])} />}>
+        {(a.base_rent_schedule ?? []).length === 0
+          ? <MissingNote what="No rent schedule found in the reviewed documents" />
+          : <MiniTable head={['Start', 'End', '$ PSF', 'Monthly', 'Annual']}
+              rows={a.base_rent_schedule.map((r: any) => [r.start, r.end, r.psf, fmtMoney(r.monthly), fmtMoney(r.annual)])} />}
+      </Widget>
+
+      <Widget title="Options" chip={<>{(a.options ?? [])[0]?.section ?? ''}<Footnote nums={footnotesFor(['option', 'notice by', 'notice deadline', 'renewal'])} /></>}>
+        {(a.options ?? []).length === 0
+          ? <MissingNote what="No renewal/extension options found" />
+          : (a.options ?? []).some((o: any) => o.status || o.notice_by)
+            // v2 lifecycle view: status + hard notice-by date (MRI-reconciled),
+            // ‚öë = lease obliges LANDLORD to remind the tenant of the window.
+            ? <MiniTable head={['Term', 'Status', 'Notice by', 'Start', 'End', '$ PSF', 'Annual', 'Section']}
+                rows={a.options.map((o: any) => [
+                  `${o.landlord_reminder_required ? '‚öë ' : ''}${o.term ?? ''}`,
+                  o.status,
+                  o.notice_by ? `${o.notice_by}${o.notice_by_basis ? ` (${o.notice_by_basis})` : ''}` : o.notice_period,
+                  o.start, o.end, o.psf, fmtMoney(o.annual), o.section,
+                ])} />
+            : <MiniTable head={['Term', 'Notice', 'Start', 'End', '$ PSF', 'Annual', 'Section']}
+                rows={a.options.map((o: any) => [o.term, o.notice_period, o.start, o.end, o.psf, fmtMoney(o.annual), o.section])} />}
+      </Widget>
+
+      <Widget title="Percentage rent & sales reporting">
+        <Grid>
+          <Fact k="Percentage rent" v={a.percentage_rent?.applicable ? `${a.percentage_rent.rate_pct ?? '?'}% over ${a.percentage_rent.breakpoint ?? '?'}` : 'None'} />
+          <Fact k="Section" v={a.percentage_rent?.section} />
+          <Fact k="Sales reporting" v={a.sales_reporting?.reports ? a.sales_reporting.frequency : 'Does not report'} />
+          <Fact k="Notes" v={a.percentage_rent?.notes} wide />
+        </Grid>
+      </Widget>
+
+      <Widget title="Reimbursements ‚Äî CAM / RET / Insurance" chip={a.cam?.section}>
+        <LongFact k="CAM methodology" v={a.cam?.methodology} src={{ citation: a.cam?.section, docIds: srcIds }} foot={footnotesFor(['cam', 'common area', 'reimburs'])} />
+        <LongFact k="CAM exact language" v={a.cam?.details_exact_language} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Pro-rata share calc / denominator" v={a.cam?.prorata_share_calc} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Definition of shopping center" v={a.cam?.shopping_center_definition} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Admin fee" v={a.cam?.admin_fee} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Caps / exclusions" v={a.cam?.caps_exclusions} src={{ citation: a.cam?.section, docIds: srcIds }} />
+        <LongFact k="Audit rights" v={a.cam?.audit_rights ? `Yes${a.cam?.audit_years_back ? ` ‚Äî ${a.cam.audit_years_back}` : ''}` : a.cam?.audit_rights === false ? 'No' : null} />
+        <LongFact k={`Real estate tax methodology ${a.real_estate_tax?.section ? `[${a.real_estate_tax.section}]` : ''}`} v={a.real_estate_tax?.methodology} src={{ citation: a.real_estate_tax?.section, docIds: srcIds }} />
+        <LongFact k="RET caps on sale/reassessment" v={a.real_estate_tax?.sale_reassessment_caps} src={{ citation: a.real_estate_tax?.section, docIds: srcIds }} />
+        <LongFact k={`Insurance methodology ${a.insurance?.section ? `[${a.insurance.section}]` : ''}`} v={a.insurance?.methodology} src={{ citation: a.insurance?.section, docIds: srcIds }} />
+      </Widget>
+
+      <Widget title="Key clauses">
+        <LongFact k={`Co-tenancy ${a.co_tenancy?.section ? `[${a.co_tenancy.section}]` : ''}`} v={a.co_tenancy?.exists ? a.co_tenancy.exact_language_and_remedies : 'None'}
+          src={{ quote: a.co_tenancy?.exact_language_and_remedies, citation: a.co_tenancy?.section, docIds: srcIds }} foot={footnotesFor(['co-tenancy', 'cotenancy', 'co tenancy'])} />
+        <LongFact k="Replacement tenants" v={a.co_tenancy?.replacement_tenants_permitted}
+          src={{ citation: a.co_tenancy?.section, docIds: srcIds }} />
+        <LongFact k={`Exclusives ‚Äî tenant's own protection ${a.exclusives?.section ? `[${a.exclusives.section}]` : ''}`}
+          v={a.exclusives?.exists
+            ? [a.exclusives.exact_language,
+               a.exclusives.remedies ? `REMEDIES: ${a.exclusives.remedies}` : null,
+               a.exclusives.conditions ? `CONDITIONS: ${a.exclusives.conditions}` : null].filter(Boolean).join('\n')
+            : 'None'}
+          src={{ quote: a.exclusives?.exact_language, citation: a.exclusives?.section, docIds: srcIds }} foot={footnotesFor(['exclusive'])} />
+        {a.use_restrictions_on_tenant !== undefined && (
+          <LongFact k={`Use restrictions ON tenant (others' exclusives) ${a.use_restrictions_on_tenant?.source_exhibit ? `[${a.use_restrictions_on_tenant.source_exhibit}]` : a.use_restrictions_on_tenant?.section ? `[${a.use_restrictions_on_tenant.section}]` : ''}`}
+            v={a.use_restrictions_on_tenant?.exists ? a.use_restrictions_on_tenant.exact_language : 'None'}
+            src={{ quote: a.use_restrictions_on_tenant?.exact_language, citation: a.use_restrictions_on_tenant?.source_exhibit ?? a.use_restrictions_on_tenant?.section, docIds: srcIds }} />
+        )}
+        <LongFact k={`Termination / kickout ${a.termination_kickout?.section ? `[${a.termination_kickout.section}]` : ''}`} v={a.termination_kickout?.exists ? a.termination_kickout.details : 'None'}
+          src={{ quote: a.termination_kickout?.details, citation: a.termination_kickout?.section, docIds: srcIds }} />
+        <LongFact k={`Permitted use ${a.permitted_use?.section ? `[${a.permitted_use.section}]` : ''}`} v={a.permitted_use?.exact_language}
+          src={{ citation: a.permitted_use?.section, docIds: srcIds }} />
+        <LongFact k={`Prohibited uses ${a.prohibited_uses?.section ? `[${a.prohibited_uses.section}]` : ''}`} v={a.prohibited_uses?.exact_language}
+          src={{ citation: a.prohibited_uses?.section, docIds: srcIds }} />
+        <LongFact k="Radius clause" v={a.radius_clause?.exists ? a.radius_clause.details : 'None'}
+          src={{ quote: a.radius_clause?.details, citation: a.radius_clause?.section, docIds: srcIds }} />
+        <LongFact k="Continuous operations" v={a.continuous_operations?.exists ? a.continuous_operations.details : 'None'}
+          src={{ quote: a.continuous_operations?.details, citation: a.continuous_operations?.section, docIds: srcIds }} />
+        <LongFact k="Relocation rights" v={a.relocation_rights?.exists ? `${a.relocation_rights.who_pays ?? ''} ${a.relocation_rights.notes ?? ''}` : 'None'}
+          src={{ quote: a.relocation_rights?.notes, citation: a.relocation_rights?.section, docIds: srcIds }} />
+        <LongFact k="Recapture rights" v={a.recapture_rights?.exists ? a.recapture_rights.details : 'None'}
+          src={{ quote: a.recapture_rights?.details, citation: a.recapture_rights?.section, docIds: srcIds }} />
+        <LongFact k="Assignment & subletting" v={[a.assignment_subletting?.allowed, a.assignment_subletting?.liability_continues_post_assignment, a.assignment_subletting?.notes].filter(Boolean).join(' ¬∑ ')}
+          src={{ quote: a.assignment_subletting?.notes ?? a.assignment_subletting?.allowed, citation: a.assignment_subletting?.section, docIds: srcIds }} />
+        <LongFact k="Option to purchase" v={a.option_to_purchase?.exists ? a.option_to_purchase.details : 'None'}
+          src={{ quote: a.option_to_purchase?.details, citation: a.option_to_purchase?.section, docIds: srcIds }} />
+      </Widget>
+
+      <Widget title="Deposits, allowances, signage & delivery">
+        <Grid>
+          <Fact k="Security deposit" v={a.security_deposit?.exists ? `${a.security_deposit.type ?? ''} ${fmtMoney(a.security_deposit.total)}` : 'None'} />
+          <Fact k="Tenant allowance" v={a.tenant_allowance?.exists ? `${fmtMoney(a.tenant_allowance.total)}${a.tenant_allowance.psf ? ` ($${a.tenant_allowance.psf}/SF)` : ''}` : 'None'} />
+          <Fact k="Parking" v={a.parking?.spaces_per_1000 ? `${a.parking.spaces_per_1000}/1000 SF` : a.parking?.notes} />
+          <Fact k="Signage ‚Äî pylon/monument" v={a.signage?.pylon_monument_right == null ? a.signage?.notes : a.signage.pylon_monument_right ? `Yes ${a.signage?.notes ?? ''}` : 'No'} />
+          <Fact k="Estoppel delivery" v={a.estoppel?.timing_for_delivery} sub={a.estoppel?.executed_on_file ? `Executed on file: ${a.estoppel.executed_on_file}` : undefined} />
+          <Fact k="SNDA delivery" v={a.snda?.timing_for_delivery} sub={a.snda?.executed_on_file ? `Executed on file: ${a.snda.executed_on_file}` : undefined} />
+        </Grid>
+        {a.additional_rights_notes && <LongFact k="More / notes" v={a.additional_rights_notes} />}
+      </Widget>
+
+      {a.rea_pma && (
+        <Widget title="REA / property management context">
+          <Grid>
+            <Fact k="Subject to REA" v={a.rea_pma.subject_to_rea == null ? null : a.rea_pma.subject_to_rea ? `Yes${a.rea_pma.rea_name ? ` ‚Äî ${a.rea_pma.rea_name}` : ''}` : 'No'} />
+            <Fact k="Property manager (PMA)" v={a.rea_pma.pma_manager} />
+            <Fact k="Impact on this tenant" v={a.rea_pma.tenant_impact} wide />
+            {a.rea_pma.notes && <Fact k="Notes" v={a.rea_pma.notes} wide />}
+          </Grid>
+        </Widget>
+      )}
+
+      {(a.critical_dates ?? []).length > 0 && (
+        <Widget title="Critical dates" chip={`${a.critical_dates.length}`}>
+          <MiniTable head={['Date', 'Event', 'Source']}
+            rows={[...a.critical_dates]
+              .sort((x: any, y: any) => String(x.date ?? '').localeCompare(String(y.date ?? '')))
+              .map((c: any) => [c.date, c.event, c.source])} />
+        </Widget>
+      )}
+
+    </div>
+  )
+}
+
+// Compact QA status pill for the tenant list. No verdict yet = a muted "verify"
+// hint so untested abstracts read as unverified, not implicitly trusted.
+const QA_META: Record<string, { label: string; color: string; bg: string }> = {
+  verified: { label: '‚úì verified', color: 'var(--green, #22c55e)', bg: 'rgba(34,197,94,0.12)' },
+  issues:   { label: '‚ö† issues',   color: 'var(--red, #ef4444)',   bg: 'rgba(239,68,68,0.12)' },
+  review:   { label: '‚óè review',   color: 'var(--amber)',           bg: 'rgba(245,158,11,0.12)' },
+}
+function QaBadge({ status }: { status: string | null }) {
+  const m = status ? QA_META[status] : null
+  if (!m) return <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>unverified</span>
+  return <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 10, color: m.color, background: m.bg, whiteSpace: 'nowrap' }}>{m.label}</span>
+}
+
+const VERDICT_META: Record<string, { color: string; label: string }> = {
+  confirmed:    { color: 'var(--green, #22c55e)', label: 'Confirmed' },
+  discrepancy:  { color: 'var(--red, #ef4444)',   label: 'Discrepancy' },
+  unsupported:  { color: 'var(--red, #ef4444)',   label: 'Unsupported' },
+  needs_source: { color: 'var(--amber)',           label: 'Needs source' },
+}
+
+// ‚îÄ‚îÄ Open items: severity, footnotes, source links ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+// The lease-abstract edge fn tags each open item with a de-facto severity via a
+// prefix convention: "DISCREPANCY:" = a conflict/error a human must resolve,
+// "CONFIRM:" = a value to verify against a source outside this request, anything
+// else = an informational gap / missing document. Newer generations may also
+// prepend an optional "[field.path]" tag so the section footnotes can point at
+// the exact item. Kept as strings on the record (PDF-report-safe); parsed here.
+type OpenSeverity = 'discrepancy' | 'confirm' | 'info'
+interface ParsedOpenItem { severity: OpenSeverity; field: string | null; text: string; n: number }
+// CONFIRM + DISCREPANCY are the attention tier (red); MISSING-doc / not-reviewed
+// notes are informational (neutral) so the eye lands on what needs action.
+// Distinct icons keep a discrepancy (hard conflict) legible from a confirm.
+const OPEN_META: Record<OpenSeverity, { color: string; bg: string; icon: string; label: string }> = {
+  discrepancy: { color: 'var(--red, #ef4444)', bg: 'rgba(239,68,68,0.12)', icon: '‚úó', label: 'Discrepancy' },
+  confirm:     { color: 'var(--red, #ef4444)', bg: 'rgba(239,68,68,0.07)', icon: '‚öë', label: 'Confirm' },
+  info:        { color: 'var(--text-muted)',   bg: 'var(--surface-2)',     icon: '‚óã', label: 'Missing / note' },
+}
+function parseOpenItems(items: any[]): ParsedOpenItem[] {
+  return (items ?? []).map((x, i) => {
+    const n = i + 1  // stable footnote number, in the record's original order
+    // Forward-compatible with a structured {severity, field, text} object.
+    if (x && typeof x === 'object') {
+      const sev: OpenSeverity = (['discrepancy', 'confirm', 'info'] as const).includes(x.severity) ? x.severity : 'info'
+      return { severity: sev, field: x.field ?? null, text: String(x.text ?? ''), n }
+    }
+    let rest = String(x ?? '').trim()
+    let severity: OpenSeverity = 'info'
+    const m = /^(DISCREPANCY|CONFIRM)\s*:\s*/i.exec(rest)
+    if (m) { severity = m[1].toUpperCase() === 'DISCREPANCY' ? 'discrepancy' : 'confirm'; rest = rest.slice(m[0].length) }
+    let field: string | null = null
+    const f = /^\[([^\]]+)\]\s*/.exec(rest)
+    if (f) { field = f[1].trim(); rest = rest.slice(f[0].length) }
+    return { severity, field, text: rest, n }
+  })
+}
+// If an open item embeds a verbatim quote (‚â•25 chars) we can pinpoint it in the
+// PDFs; otherwise the reviewer opens the file from the Source documents panel.
+function quotedFragment(text: string): string | null {
+  const m = /["‚Äú]([^"‚Äù]{25,})["‚Äù]/.exec(text)
+  return m ? m[1] : null
+}
+// Smooth-scroll + brief flash to an anchor id (footnote / worklist jump targets).
+// Opens any collapsed <details> ancestor first so folded panels reveal their
+// target (the Verification / Open-items detail lives inside a <details>).
+function scrollToId(e: React.MouseEvent, id: string) {
+  const el = document.getElementById(id)
+  if (!el) return
+  e.preventDefault()
+  let p: HTMLElement | null = el.parentElement
+  while (p) { if (p.tagName === 'DETAILS') (p as HTMLDetailsElement).open = true; p = p.parentElement }
+  // Let the details expand before measuring scroll position.
+  setTimeout(() => {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const prev = el.style.boxShadow
+    el.style.boxShadow = '0 0 0 2px var(--amber)'
+    setTimeout(() => { el.style.boxShadow = prev }, 1200)
+  }, 0)
+}
+// Superscript footnote link(s) that jump to the matching open item(s) below.
+function Footnote({ nums }: { nums: number[] }) {
+  if (!nums.length) return null
+  return (
+    <sup style={{ fontSize: 9, marginLeft: 2 }}>
+      {nums.map((n, i) => (
+        <a key={n} href={`#open-item-${n}`} onClick={e => scrollToId(e, `open-item-${n}`)}
+          title="See the matching open item below"
+          style={{ color: 'var(--amber)', fontWeight: 700, textDecoration: 'none', marginLeft: i ? 3 : 0 }}>
+          [{n}]
+        </a>
+      ))}
+    </sup>
+  )
+}
+// Jump link used in-line where a field is empty ("see open items ‚Üì").
+function OpenItemsJump() {
+  return (
+    <a href="#abstract-open-items" onClick={e => scrollToId(e, 'abstract-open-items')}
+      style={{ color: 'var(--amber)', textDecoration: 'none', fontWeight: 600 }}>see Open items ‚Üì</a>
+  )
+}
+
+// ‚îÄ‚îÄ Item resolution (migration 20240105) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+// A resolution attaches to a STABLE item_key so it survives regeneration. The
+// key derivation MUST stay identical to the SQL in migration 20240105 /
+// v_abstract_open_items, or the portfolio view and the client will disagree.
+interface Resolution {
+  id: string; abstract_id: string; item_key: string; kind: string
+  status: 'corrected' | 'accepted' | 'waived' | 'needs_doc'
+  note: string | null; task_id: string | null; resolved_by: string | null; resolved_at: string; archived: boolean
+}
+type ResStatus = Resolution['status']
+const RES_META: Record<ResStatus, { label: string; color: string }> = {
+  corrected: { label: 'Corrected',    color: 'var(--green, #22c55e)' },
+  accepted:  { label: 'Accepted',     color: 'var(--green, #22c55e)' },
+  waived:    { label: 'Waived / N/A', color: 'var(--text-muted)' },
+  needs_doc: { label: 'Needs document', color: 'var(--amber)' },
+}
+// collapse whitespace ‚Üí trim ‚Üí lowercase ‚Üí first 120 chars (mirrors the SQL).
+const normalizeKeyText = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 120)
+const keyForOpenItem = (p: ParsedOpenItem) => p.field ? `field:${p.field.toLowerCase()}` : `text:${normalizeKeyText(p.text)}`
+const keyForField = (field: string) => `field:${String(field ?? '').toLowerCase()}`
+
+async function upsertResolution(abstractId: string, itemKey: string, kind: 'open_item' | 'qa_check',
+  status: ResStatus, note: string | null, resolvedBy?: string, taskId?: string | null) {
+  const { error } = await supabase.from('abstract_item_resolutions').upsert({
+    abstract_id: abstractId, item_key: itemKey, kind, status, note: note || null,
+    task_id: taskId ?? null, resolved_by: resolvedBy ?? null,
+    resolved_at: new Date().toISOString(), updated_at: new Date().toISOString(), archived: false,
+  }, { onConflict: 'abstract_id,item_key' })
+  if (error) throw new Error(error.message)
+}
+async function clearResolution(abstractId: string, itemKey: string) {
+  const { error } = await supabase.from('abstract_item_resolutions').delete()
+    .eq('abstract_id', abstractId).eq('item_key', itemKey)
+  if (error) throw new Error(error.message)
+}
+// After a regenerate, an item may vanish (concern gone ‚Üí archive its resolution)
+// or reappear (un-archive). Keeps the worklist honest across the living-abstracts
+// refresh without deleting the audit trail. Keys computed exactly as buildWorklist.
+async function reconcileResolutions(abstractId: string, abstract: any, qa: any, fieldConfidence?: any, clauseFindings?: any) {
+  const keys = new Set<string>()
+  for (const p of parseOpenItems(abstract?.open_items ?? [])) keys.add(keyForOpenItem(p))
+  for (const c of (Array.isArray(qa?.field_checks) ? qa.field_checks : [])) if (c?.field && c.verdict !== 'confirmed') keys.add(keyForField(c.field))
+  for (const m of (Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : [])) if (m?.field) keys.add(keyForField(m.field))
+  for (const d of (Array.isArray(fieldConfidence?.disagreements) ? fieldConfidence.disagreements : [])) if (d?.field) keys.add(keyForField(d.field))
+  for (const f of (Array.isArray(clauseFindings?.findings) ? clauseFindings.findings : [])) if (f?.field && isActionableClauseFinding(f)) keys.add(keyForField(f.field))
+  const { data } = await supabase.from('abstract_item_resolutions')
+    .select('id, item_key, archived').eq('abstract_id', abstractId)
+  for (const r of (data ?? []) as Array<{ id: string; item_key: string; archived: boolean }>) {
+    const shouldArchive = !keys.has(r.item_key)
+    if (shouldArchive !== r.archived) {
+      await supabase.from('abstract_item_resolutions')
+        .update({ archived: shouldArchive, updated_at: new Date().toISOString() }).eq('id', r.id)
+    }
+  }
+}
+// A "Correct" writes the human value into the abstract's override map (dotted
+// path ‚Üí value), the same layer ReviewPanel and applyOverrides use.
+async function saveFieldOverride(row: AbstractRow, path: string, value: any, reviewerId?: string) {
+  const overrides = { ...(row.overrides ?? {}) }
+  overrides[path] = value
+  const { error } = await supabase.from('lease_abstracts').update({
+    overrides, reviewed_by: reviewerId ?? null,
+    reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).eq('id', row.id)
+  if (error) throw new Error(error.message)
+}
+// Batch variant: write several dotted-path overrides in ONE update (a per-path
+// loop would each spread the ORIGINAL overrides and clobber the others).
+async function saveFieldOverrides(row: AbstractRow, entries: Record<string, any>, reviewerId?: string) {
+  const overrides = { ...(row.overrides ?? {}), ...entries }
+  const { error } = await supabase.from('lease_abstracts').update({
+    overrides, reviewed_by: reviewerId ?? null,
+    reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).eq('id', row.id)
+  if (error) throw new Error(error.message)
+}
+// "Needs document" spins off a tracked /tasks item and returns its id to link.
+async function createDocTask(title: string, details: string | null, propertyId: string | null, createdBy: string): Promise<string | null> {
+  const { data, error } = await supabase.from('tasks').insert({
+    title: title.slice(0, 200), details: details || null, priority: 'normal',
+    property_id: propertyId || null, created_by: createdBy,
+  }).select('id').single()
+  if (error) throw new Error(error.message)
+  return data?.id ?? null
+}
+
+// Open the lease document most relevant to the item being reconciled: the
+// best-cited source doc (via the citation-aware ranker) or, failing a citation,
+// the primary lease instrument (title says "lease", not an ancillary doc).
+async function openBestSourceDoc(citation: string, sourceDocIds: string[], probeText?: string | null) {
+  if (!sourceDocIds.length) return
+  const { data } = await supabase.from('documents')
+    .select('id, title, file_name, storage_path').in('id', sourceDocIds)
+  const docs = (data ?? []) as Array<{ id: string; title: string | null; file_name: string | null; storage_path: string | null }>
+  if (!docs.length) return
+  const ranked = citation && citation.trim() ? rankDocsByCitation(docs, citation) : []
+  // Locator = a VERBATIM fragment of the cited lease language (longest run with no
+  // ellipsis), never the verifier's note prose ‚Äî which never appears in the PDF and
+  // was the cause of "open lease" landing on a random page. Verifiers abridge with
+  // "‚Ä¶"; the needle must come from one contiguous fragment (mirrors locateQuoteData).
+  const fragment = (probeText ?? '').split(/\.{3,}|‚Ä¶/).map(f => f.trim()).sort((a, b) => b.length - a.length)[0] ?? ''
+  const probeWords = fragment.replace(/[%_]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(w => w.length >= 3)
+  const hasProbe = probeWords.length >= 3
+  // Open the doc that ACTUALLY CONTAINS the passage ‚Äî not merely the best
+  // citation-name match. A citation can name a thinly-extracted amendment (e.g. a
+  // scanned Fifth Amendment with a near-empty text layer) that ranks top but has no
+  // locatable text; probing every candidate in citation-rank order and taking the
+  // first that resolves the passage's page fixes both the wrong-doc and wrong-page
+  // failure modes. Falls back to the citation-best / primary lease instrument at
+  // page 1 only when nothing locates (scanned/paraphrase) ‚Äî prior behavior, no false anchor.
+  let pick: (typeof docs)[number] | undefined
+  let page: number | null = null
+  if (hasProbe) {
+    const order = [...ranked, ...docs.filter(d => !ranked.includes(d))]
+    for (const d of order) {
+      const p = await resolvePage(d.id, fragment)
+      if (p) { pick = d; page = p; break }
+    }
+  }
+  if (!pick) {
+    pick = ranked[0]
+      ?? docs.find(d => {
+        const t = `${d.title ?? ''} ${d.file_name ?? ''}`.toLowerCase()
+        return /lease/.test(t) && !/(amend|estoppel|guaranty|snda|subordinat|option|notice|assignment|memorandum|commencement)/.test(t)
+      })
+      ?? docs[0]
+  }
+  if (!pick?.storage_path) return
+  const { data: signed } = await supabase.storage.from('documents').createSignedUrl(pick.storage_path, 3600)
+  if (!signed?.signedUrl) return
+  // Send the verbatim fragment as the find-bar highlight even when the page didn't
+  // resolve (the live PDF text may be richer than the indexed chunks); never send
+  // note prose as the locator.
+  const locator = hasProbe ? probeWords.slice(0, 8).join(' ') : null
+  window.open(viewHref(signed.signedUrl, locator, page), '_blank', 'noopener')
+}
+// One-click into the lease PDF from a reconciliation row (worklist / verify check).
+// probeText = the clause language, used to land on the page it lives on.
+function LeaseFileLink({ citation, sourceDocIds, probeText, label = 'open lease ‚Üó' }: { citation?: string | null; sourceDocIds: string[]; probeText?: string | null; label?: string }) {
+  const [busy, setBusy] = useState(false)
+  if (!sourceDocIds.length) return null
+  return (
+    <button onClick={async () => { setBusy(true); try { await openBestSourceDoc(citation ?? '', sourceDocIds, probeText) } finally { setBusy(false) } }}
+      disabled={busy} title="Open the most relevant lease document for this item"
+      style={{ fontSize: 10, fontWeight: 600, padding: '1px 8px', marginLeft: 6, borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+      {busy ? 'opening‚Ä¶' : label}
+    </button>
+  )
+}
+
+// Open a document's signed PDF in a new tab.
+async function openDocPdf(storagePath: string | null) {
+  if (!storagePath) return
+  const { data } = await supabase.storage.from('documents').createSignedUrl(storagePath, 3600)
+  if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+}
+interface DocMeta { id: string; title: string | null; file_name: string | null; storage_path: string | null; file_mtime?: string | null; notes?: string | null }
+// The document's real date, for ordering the list. The abstraction (in notes)
+// extracts the instrument's own date ‚Äî effective/execution/etc. ‚Äî which beats
+// file_mtime (only the scan date: an old lease scanned in 2018 sorts as 2018).
+// Falls back to file_mtime, then undated (sinks to the bottom).
+const DATE_KEYS = ['effective_date', 'document_date', 'execution_date', 'agreement_date', 'commencement_date', 'lease_date', 'dated']
+function docDate(d: DocMeta): string | null {
+  const n = d.notes ?? ''
+  for (const k of DATE_KEYS) {
+    const m = new RegExp(`"${k}"\\s*:\\s*"(\\d{4}-\\d{2}-\\d{2})"`).exec(n)
+    if (m) return m[1]
+  }
+  const any = /"[a-z_]*date[a-z_]*"\s*:\s*"(\d{4}-\d{2}-\d{2})"/i.exec(n)
+  if (any) return any[1]
+  return d.file_mtime ? d.file_mtime.slice(0, 10) : null
+}
+// Newest first; undated rows fall to the end. Filename breaks ties.
+function byDocDateDesc(a: DocMeta, b: DocMeta): number {
+  const da = docDate(a) ?? '', db = docDate(b) ?? ''
+  return da === db ? (a.file_name ?? '').localeCompare(b.file_name ?? '') : db.localeCompare(da)
+}
+function DocRow({ d, used }: { d: DocMeta; used?: boolean }) {
+  // Prefer the concise filename as the link label ‚Äî documents.title holds an
+  // AI-generated summary sentence, too long to read as a document reference.
+  const label = d.file_name ?? d.title ?? 'Untitled document'
+  const summary = d.title && d.title !== d.file_name ? d.title : null
+  const date = docDate(d)
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', padding: '2px 4px', borderRadius: 5, minWidth: 0 }}>
+      {used !== undefined && (
+        <span style={{ fontSize: 9, fontWeight: 700, padding: '0 5px', borderRadius: 7, whiteSpace: 'nowrap', flexShrink: 0,
+          color: used ? 'var(--accent)' : 'var(--text-faint)', background: used ? 'var(--accent-dim)' : 'var(--surface-2)' }}>
+          {used ? 'used' : 'not used'}
+        </span>
+      )}
+      {date && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>{date}</span>}
+      <button onClick={() => void openDocPdf(d.storage_path)} disabled={!d.storage_path}
+        title={summary ? `${label}\n\n${summary}` : (d.storage_path ? 'Open the source PDF' : 'No stored file for this document')}
+        style={{ display: 'flex', alignItems: 'baseline', gap: 3, flex: 1, minWidth: 0, textAlign: 'left', fontSize: 11,
+          fontWeight: 500, color: d.storage_path ? 'var(--accent)' : 'var(--text-faint)', background: 'none', border: 'none',
+          padding: 0, cursor: d.storage_path ? 'pointer' : 'default' }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: d.storage_path ? 'underline' : 'none' }}>{label}</span>
+        {d.storage_path && <span style={{ flexShrink: 0 }}>‚Üó</span>}
+      </button>
+    </div>
+  )
+}
+// Resolve a tenant's full matched file set the SAME way the abstractor does ‚Äî
+// plan mode runs its suffix-stripped name + file_aliases matcher (property-
+// scoped). documents.tenant_id is essentially unpopulated (27/10842), and raw
+// tenant-name ILIKE is unreliable (MRI suffixes like "#4"/"10483" zero it out,
+// common anchors over-match), so the abstractor's own resolver is the only
+// trustworthy source. Returns matched docs INCLUDING ones the abstract didn't
+// rely on ‚Äî where a missed discrepancy would hide.
+async function fetchTenantFileSet(propertyId: string, tenant: string): Promise<Array<{ id: string; brief_status: string }>> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const res = await fetch(`${FN_BASE}/lease-abstract`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ property_id: propertyId, tenant, plan: true }),
+  })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok || j.error) throw new Error(j.error ?? `match failed (${res.status})`)
+  return Array.isArray(j.docs) ? j.docs.map((d: any) => ({ id: d.id, brief_status: d.brief_status })) : []
+}
+
+// The abstract's underlying source files, each opening the signed PDF in a new
+// tab (the reliable path when the quote-locator can't pinpoint a scanned page).
+// "Browse all matched documents" runs the abstractor's own matcher and flags
+// used / not-used, so a reviewer can chase a discrepancy in a file the abstract
+// didn't rely on.
+function SourceDocsPanel({ docIds, tenant, propertyId }: { docIds: string[]; tenant?: string; propertyId?: string | null }) {
+  const [showAll, setShowAll] = useState(false)
+  const sources = useQuery<DocMeta[]>(async () => {
+    if (!docIds.length) return []
+    const { data, error } = await supabase.from('documents')
+      .select('id, title, file_name, storage_path, file_mtime, notes').in('id', docIds)
+    if (error) throw new Error(error.message)
+    return (data ?? []) as DocMeta[]
+  }, [docIds.join(',')])
+  const canBrowse = !!tenant && !!propertyId
+  // Full matched set via the abstractor's resolver, loaded only on expand.
+  const all = useQuery<Array<DocMeta & { brief_status?: string }>>(async () => {
+    if (!showAll || !canBrowse) return []
+    const matched = await fetchTenantFileSet(propertyId!, tenant!)
+    if (!matched.length) return []
+    const briefBy = new Map(matched.map(m => [m.id, m.brief_status]))
+    const { data } = await supabase.from('documents')
+      .select('id, title, file_name, storage_path, file_mtime, notes').in('id', matched.map(m => m.id))
+    return ((data ?? []) as DocMeta[])
+      .map(d => ({ ...d, brief_status: briefBy.get(d.id) }))
+      .sort(byDocDateDesc)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAll, canBrowse, tenant, propertyId])
+  if (!docIds.length) return null
+  const srcSet = new Set(docIds)
+  return (
+    <Widget title="Source documents" chip={`${docIds.length}`}>
+      {sources.loading && <WidgetSkeleton rows={3} />}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1px 20px' }}>
+        {[...(sources.data ?? [])].sort(byDocDateDesc).map(d => <DocRow key={d.id} d={d} />)}
+      </div>
+      {canBrowse && (
+        <button onClick={() => setShowAll(s => !s)}
+          style={{ marginTop: 8, fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+          {showAll ? 'Hide matched documents ‚ñ¥' : 'Browse all matched documents ‚ñæ'}
+        </button>
+      )}
+      {showAll && canBrowse && (
+        <div style={{ marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>
+            Every document the abstractor matched for this tenant (name + file-alias match) ‚Äî including files it did not rely on. ‚Äúnot used‚Äù files are where a missed discrepancy would hide.
+          </div>
+          {all.loading && <WidgetSkeleton rows={4} />}
+          {all.error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{all.error}</div>}
+          {!all.loading && !all.error && (all.data ?? []).length === 0 && <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>No matched documents returned.</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1px 20px', maxHeight: 320, overflowY: 'auto' }}>
+            {(all.data ?? []).map(d => <DocRow key={d.id} d={d} used={srcSet.has(d.id)} />)}
+          </div>
+        </div>
+      )}
+    </Widget>
+  )
+}
+
+// Open items, color-graded by severity (discrepancies first, then confirms, then
+// informational gaps) and numbered so the section footnotes above can point here.
+// A verbatim quote inside an item gets a click-to-source link.
+function OpenItemsPanel({ items, sourceDocIds, resByKey }: { items: ParsedOpenItem[]; sourceDocIds: string[]; resByKey?: Map<string, Resolution> }) {
+  const order: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
+  const sorted = [...items].sort((a, b) => order[a.severity] - order[b.severity])
+  const counts = { discrepancy: 0, confirm: 0, info: 0 } as Record<OpenSeverity, number>
+  items.forEach(p => counts[p.severity]++)
+  const chip = [
+    counts.discrepancy ? `${counts.discrepancy} discrepancy` : null,
+    counts.confirm ? `${counts.confirm} confirm` : null,
+    `${items.length} total`,
+  ].filter(Boolean).join(' ¬∑ ')
+  return (
+    <div id="abstract-open-items">
+      <Widget title="Open items / missing documents" chip={chip}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {sorted.map(p => {
+            const m = OPEN_META[p.severity]
+            const q = quotedFragment(p.text)
+            const res = resByKey?.get(keyForOpenItem(p))
+            return (
+              <div key={p.n} id={`open-item-${p.n}`}
+                style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '6px 8px', borderRadius: 6, background: res ? 'transparent' : m.bg, opacity: res ? 0.6 : 1 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: m.color, minWidth: 16 }}>{p.n}.</span>
+                <span style={{ fontSize: 11, color: m.color }} title={m.label}>{m.icon}</span>
+                <span style={{ fontSize: 12, color: p.severity !== 'info' ? 'var(--text)' : 'var(--text-muted)', flex: 1, lineHeight: 1.45, fontWeight: p.severity === 'discrepancy' ? 600 : p.severity === 'confirm' ? 500 : 400, textDecoration: res ? 'line-through' : 'none' }}>
+                  {p.field && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 6 }}>{p.field}</span>}
+                  {p.text}
+                  {q && !res && <SourceLink quote={q} citation={p.field ?? ''} sourceDocIds={sourceDocIds} />}
+                </span>
+                {res && <span style={{ fontSize: 9, fontWeight: 700, color: RES_META[res.status].color, whiteSpace: 'nowrap' }}>{RES_META[res.status].label}</span>}
+              </div>
+            )
+          })}
+        </div>
+      </Widget>
+    </div>
+  )
+}
+
+// A work item = one thing to resolve, keyed by its stable item_key so the
+// generator's open item and the verifier's check about the SAME field collapse
+// into ONE row (resolving it clears both ‚Äî the single passthrough). Arithmetic
+// failures have no stable field, so they show but aren't individually
+// resolvable (they clear on re-verify once the underlying values are fixed).
+interface WorkItem {
+  key: string
+  resolvable: boolean
+  kind: 'open_item' | 'qa_check'
+  field: string | null
+  red: boolean               // counts toward the soft lock gate
+  severity: OpenSeverity
+  correctable: boolean       // field points at a scalar we can override inline
+  currentValue: string
+  isArray: boolean           // field points at an array of rows we can edit inline
+  arrayValue: any[] | null
+  citation: string | null    // best hint for the "open lease" link
+  quote: string | null       // VERBATIM source language to anchor the "open lease" deep-link (never note prose)
+  sources: Array<{ origin: 'open' | 'verify' | 'mri' | 'arith' | 'ensemble' | 'clause'; text: string; jumpId: string }>
+}
+const ORIGIN_LABEL: Record<string, string> = { open: 'Open item', verify: 'Verify', mri: 'MRI', arith: 'Arithmetic', ensemble: 'Cross-check', clause: 'Clause expert' }
+// A clause-specialist finding is ACTIONABLE (worklist item) when it proposes a
+// change or flags a gap/nuance, is not already human-settled, and was not refuted
+// by the cross-model adjudicator. Mirrors the edge fn's `actionable` rule.
+function isActionableClauseFinding(f: any): boolean {
+  if (!f?.field) return false
+  if (!['revise', 'cannot_verify', 'enrich'].includes(f.verdict)) return false
+  if (f.settled) return false
+  if (f.cross_model?.verdict === 'refute') return false
+  return true
+}
+// Red (attention) = a proposed correction, an unverifiable value, or a
+// high-severity missing nuance. A medium/low "enrich" surfaces amber (read it),
+// not red.
+function isRedClauseFinding(f: any): boolean {
+  return f.verdict === 'revise' || f.verdict === 'cannot_verify' || (f.verdict === 'enrich' && f.severity === 'high')
+}
+function clauseDomainOf(field: string): string {
+  if (/^exclusives/.test(field)) return 'exclusives'
+  if (/^guarant/.test(field)) return 'guaranty'
+  if (/co.?tenancy/i.test(field)) return 'co_tenancy'
+  if (field === 'options') return 'options'
+  return field
+}
+// Materiality tier of a RED clause finding, so reviewers see what matters first
+// instead of a flat pile. Deterministic; mirrors the portfolio calibration:
+//   'fix'       ‚Äî wrong value or missing document (revise/cannot_verify; option
+//                 STATUS change). Act first.
+//   'nuance'    ‚Äî value right but a high-severity material detail missing
+//                 (high-sev enrich). Read + decide.
+//   'reconcile' ‚Äî option NOTICE-DATE recomputation / MRI reconciliation. Correct
+//                 but low-materiality; batch-clear.
+function clauseFindingTier(f: any): 'fix' | 'nuance' | 'reconcile' {
+  if (f.verdict === 'enrich') return 'nuance'
+  if (f.verdict === 'revise' && clauseDomainOf(String(f.field ?? '')) === 'options') {
+    const txt = `${f.correct_value ?? ''} ${f.rationale ?? ''}`.toLowerCase()
+    const dateMath = /notice_by|notice deadline|notice date|days prior|reconcile|off by one|365 day|270 day|210 day|180 day|90 day/.test(txt)
+    const structural = /status|exercised|superseded|missing|fabricat|remove|no renewal|no option/.test(txt)
+    if (dateMath && !structural) return 'reconcile'
+  }
+  return 'fix'
+}
+const CLAUSE_TIER_META: Record<string, { label: string; rank: number; color: string }> = {
+  fix: { label: 'Must-fix', rank: 0, color: 'var(--red, #ef4444)' },
+  nuance: { label: 'Nuance', rank: 1, color: 'var(--amber, #f59e0b)' },
+  reconcile: { label: 'Reconcile', rank: 2, color: 'var(--text-faint)' },
+}
+
+function buildWorklist(openItems: ParsedOpenItem[], qa: any, effective: any, fieldConfidence?: any, clauseFindings?: any): WorkItem[] {
+  const map = new Map<string, WorkItem>()
+  const rank: Record<OpenSeverity, number> = { discrepancy: 0, confirm: 1, info: 2 }
+  const ensure = (key: string, field: string | null, kind: 'open_item' | 'qa_check', severity: OpenSeverity, red: boolean) => {
+    let w = map.get(key)
+    if (!w) {
+      const v = field ? getPath(effective, field) : undefined
+      const isArr = Array.isArray(v)
+      w = { key, resolvable: true, kind, field, red, severity,
+        correctable: !!field && !isArr && (v == null || typeof v !== 'object'),
+        currentValue: v == null ? '' : String(v),
+        isArray: isArr, arrayValue: isArr ? v : null, citation: null, quote: null, sources: [] }
+      map.set(key, w)
+    } else {
+      if (red) w.red = true
+      if (rank[severity] < rank[w.severity]) w.severity = severity
+    }
+    return w
+  }
+  for (const p of openItems) {
+    ensure(keyForOpenItem(p), p.field, 'open_item', p.severity, p.severity !== 'info')
+      .sources.push({ origin: 'open', text: `${p.field ? `${p.field}: ` : ''}${p.text}`, jumpId: `open-item-${p.n}` })
+  }
+  for (const c of (Array.isArray(qa?.field_checks) ? qa.field_checks : [])) {
+    if (!c?.verdict || c.verdict === 'confirmed' || !c.field) continue
+    const w = ensure(keyForField(c.field), c.field, 'qa_check', 'discrepancy', true)
+    if (!w.citation && c.citation) w.citation = c.citation
+    if (!w.quote && c.source_quote) w.quote = c.source_quote
+    w.sources.push({ origin: 'verify', text: `${VERDICT_META[c.verdict]?.label ?? c.verdict}: ${c.field}${c.note ? ` ‚Äî ${c.note}` : ''}`, jumpId: 'abstract-verification' })
+  }
+  for (const m of (Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : [])) {
+    if (!m?.field) continue
+    ensure(keyForField(m.field), m.field, 'qa_check', 'discrepancy', true)
+      .sources.push({ origin: 'mri', text: `${m.field} ‚Äî abstract ${String(m.abstract_value ?? '‚Äî')} vs MRI ${String(m.mri_value ?? '‚Äî')}${m.note ? ` ‚Äî ${m.note}` : ''}`, jumpId: 'abstract-verification' })
+  }
+  ;(Array.isArray(qa?.arithmetic) ? qa.arithmetic : []).filter((x: any) => x?.ok === false).forEach((x: any, i: number) => {
+    const w = ensure(`arith:${i}`, null, 'qa_check', 'discrepancy', true)
+    w.resolvable = false
+    w.sources.push({ origin: 'arith', text: `${x.check}${x.detail ? ` ‚Äî ${x.detail}` : ''}`, jumpId: 'abstract-verification' })
+  })
+  // Ensemble cross-check disagreements (abstract-ensemble): a lens contradicted
+  // the stored value on a high-stakes field. Keyed field:<path> so they merge
+  // with any generator/verifier item about the same field (one resolution clears
+  // all). Marked red ‚Äî a low-confidence field is an attention item.
+  for (const d of (Array.isArray(fieldConfidence?.disagreements) ? fieldConfidence.disagreements : [])) {
+    if (!d?.field) continue
+    const w = ensure(keyForField(d.field), d.field, 'qa_check', 'discrepancy', true)
+    if (!w.citation && d.citation) w.citation = d.citation
+    if (!w.quote && d.quote) w.quote = d.quote
+    w.sources.push({ origin: 'ensemble', text: `${d.field} ‚Äî stored ${String(d.abstract_value ?? '‚Äî')} ‚Üí cross-check says ${String(d.correct_value ?? '‚Äî')}${d.votes ? ` (${d.votes})` : ''}${d.citation ? ` ‚Äî ${d.citation}` : ''}`, jumpId: 'abstract-confidence' })
+  }
+  // Clause-specialist findings (abstract-clause-verify): a single-clause expert
+  // proposed a correction (revise), flagged an unverifiable value (cannot_verify),
+  // or surfaced a material missing nuance (enrich). Keyed field:<path> so they
+  // merge with any generator/verifier/ensemble item about the same field.
+  for (const f of (Array.isArray(clauseFindings?.findings) ? clauseFindings.findings : [])) {
+    if (!isActionableClauseFinding(f)) continue
+    const red = isRedClauseFinding(f)
+    const w = ensure(keyForField(f.field), f.field, 'qa_check', red ? 'discrepancy' : 'confirm', red)
+    if (!w.citation && f.citation) w.citation = f.citation
+    if (!w.quote && f.quote) w.quote = f.quote
+    const VERB: Record<string, string> = { revise: 'Revise', cannot_verify: 'Cannot verify', enrich: 'Add nuance' }
+    const detail = f.verdict === 'enrich'
+      ? (f.missing_nuance ?? f.rationale ?? '')
+      : (f.correct_value != null ? `‚Üí ${String(f.correct_value)}` : (f.rationale ?? ''))
+    const xm = f.cross_model?.verdict === 'confirm' ? ' ‚úì2nd-model' : ''
+    w.sources.push({ origin: 'clause', text: `${VERB[f.verdict] ?? f.verdict} ¬∑ ${f.specialist}: ${f.field} ‚Äî ${detail}${f.citation ? ` ‚Äî ${f.citation}` : ''}${xm}`, jumpId: 'abstract-clause-findings' })
+  }
+  return [...map.values()].sort((a, b) => rank[a.severity] - rank[b.severity])
+}
+
+const VERB_BTN: React.CSSProperties = { fontSize: 10, fontWeight: 600, padding: '2px 9px', borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)', cursor: 'pointer', whiteSpace: 'nowrap' }
+const RES_INPUT: React.CSSProperties = { width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 5, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' }
+
+// Inline editor for an array field (options, base_rent_schedule): edit each
+// row's scalar cells; save writes element overrides (e.g. options.0.notice_by)
+// in one batch and marks the item corrected.
+function ArrayRowEditor({ row, field, rows, reviewerId, itemKey, kind, onSaved, onCancel }: {
+  row: AbstractRow; field: string; rows: any[]; reviewerId?: string
+  itemKey: string; kind: 'open_item' | 'qa_check'; onSaved: () => void; onCancel: () => void
+}) {
+  const [edits, setEdits] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const cur = (i: number, k: string) => { const v = rows[i]?.[k]; return v == null ? '' : String(v) }
+  const val = (i: number, k: string) => edits[`${i}|${k}`] ?? cur(i, k)
+  const scalarKeys = (r: any) => (r && typeof r === 'object')
+    ? Object.keys(r).filter(k => r[k] == null || typeof r[k] !== 'object') : []
+  async function save() {
+    setBusy(true); setErr(null)
+    try {
+      const entries: Record<string, any> = {}
+      for (const [ik, raw] of Object.entries(edits)) {
+        const sep = ik.indexOf('|'); const i = ik.slice(0, sep); const k = ik.slice(sep + 1)
+        const trimmed = raw.trim()
+        if (trimmed === cur(Number(i), k)) continue
+        let v: any = trimmed
+        if (v !== '' && /^-?\d/.test(v) && !Number.isNaN(Number(v))) v = Number(v)
+        entries[`${field}.${i}.${k}`] = v === '' ? null : v
+      }
+      if (Object.keys(entries).length) await saveFieldOverrides(row, entries, reviewerId)
+      await upsertResolution(row.id, itemKey, kind, 'corrected',
+        `Edited ${Object.keys(entries).length} cell(s) in ${field}`, reviewerId)
+      onSaved()
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  return (
+    <div style={{ marginTop: 6, borderLeft: '2px solid var(--accent)', paddingLeft: 8 }}>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 4 }}>Editing <b>{field}</b> ‚Äî blank clears a cell. Changed cells save as corrections.</div>
+      <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ borderTop: i ? '1px solid var(--border)' : 'none', padding: '6px 0' }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase' }}>Row {i + 1}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '6px 10px', marginTop: 4 }}>
+              {scalarKeys(r).map(k => (
+                <div key={k}>
+                  <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase' }}>{k}</div>
+                  <input value={val(i, k)} onChange={e => setEdits(s => ({ ...s, [`${i}|${k}`]: e.target.value }))} style={RES_INPUT} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {err && <span style={{ fontSize: 11, color: 'var(--red)' }}>{err}</span>}
+      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <button onClick={() => void save()} disabled={busy}
+          style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+          {busy ? 'Saving‚Ä¶' : 'Save row edits'}
+        </button>
+        <button onClick={onCancel} disabled={busy}
+          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// "Discuss with AI" (abstract-discuss edge fn): the reviewer explains a
+// discrepancy in plain English; the AI re-reads the abstract's SOURCE documents
+// and returns a GROUNDED finding (agree / correct / insufficient) with a
+// verbatim citation ‚Äî it must justify against the documents, not merely accept
+// the assertion, so it will push back when the documents disagree. Applying
+// writes the value as a human override + a 'corrected' resolution (this does
+// NOT retrain the model; it re-checks and records a human-authored correction).
+function DiscussPanel({ row, field, itemKey, kind, currentValue, reviewerId, propertyId, onClose, onSaved }: {
+  row: AbstractRow; field: string; itemKey: string; kind: 'open_item' | 'qa_check'; currentValue: string
+  reviewerId?: string; propertyId: string | null; onClose: () => void; onSaved: () => void
+}) {
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [finding, setFinding] = useState<any>(null)
+
+  async function ask() {
+    if (!note.trim() || !propertyId) return
+    setBusy(true); setErr(null); setFinding(null)
+    try {
+      const res = await fetch(`${FN_BASE}/abstract-discuss`, {
+        method: 'POST', headers: await authHeadersJson(),
+        body: JSON.stringify({ property_id: propertyId, tenant: row.tenant_name, field, current_value: currentValue, note: note.trim() }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.error) throw new Error(json.error ?? `Request failed (${res.status})`)
+      setFinding(json.finding ?? null)
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  async function applyCorrection() {
+    const cv = finding?.corrected_value
+    if (cv == null || String(cv).trim() === '') return
+    setApplying(true); setErr(null)
+    try {
+      let v: any = String(cv).trim()
+      if (v !== '' && /^-?\d/.test(v) && !Number.isNaN(Number(v))) v = Number(v)
+      await saveFieldOverride(row, field, v, reviewerId)
+      const cite = finding?.citation ? ` [${finding.citation}]` : ''
+      await upsertResolution(row.id, itemKey, kind, 'corrected', `AI-verified: ${String(cv)}${cite}`, reviewerId)
+      onSaved()
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setApplying(false) }
+  }
+
+  const VERDICT_UI: Record<string, { label: string; color: string }> = {
+    corrects: { label: 'Documents support a correction', color: 'var(--amber)' },
+    agrees: { label: 'Stored value is supported', color: 'var(--green, #22c55e)' },
+    insufficient: { label: 'Documents do not settle it', color: 'var(--text-muted)' },
+  }
+  const vui = finding?.verdict ? VERDICT_UI[finding.verdict as string] : undefined
+  const hasProposed = finding?.corrected_value != null && String(finding.corrected_value).trim() !== ''
+
+  return (
+    <div style={{ marginTop: 6, borderLeft: '2px solid var(--accent)', paddingLeft: 10 }}>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 4 }}>
+        Explain the discrepancy for <b>{field}</b> (stored: {currentValue || '‚Äî'}). The AI re-reads the source documents and answers grounded in them ‚Äî it will push back if the documents disagree.
+      </div>
+      <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
+        placeholder="e.g. The expiration is 2036 per the Third Amendment ¬ß2, not 2031 ‚Äî the renewal option was exercised."
+        style={{ ...RES_INPUT, resize: 'vertical', fontFamily: 'inherit' }} />
+      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <button onClick={() => void ask()} disabled={busy || applying || !note.trim() || !propertyId}
+          style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+          {busy ? 'Checking documents‚Ä¶' : finding ? 'Ask again' : 'Ask AI'}
+        </button>
+        <button onClick={onClose} disabled={busy || applying}
+          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Close</button>
+      </div>
+      {err && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 5 }}>{err}</div>}
+      {finding && (
+        <div style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', borderRadius: 8, padding: '8px 10px' }}>
+          {vui && <div style={{ fontSize: 11, fontWeight: 700, color: vui.color, marginBottom: 3 }}>
+            {vui.label}{finding.confidence ? ` ¬∑ ${finding.confidence} confidence` : ''}{typeof finding.agrees_with_reviewer === 'boolean' ? (finding.agrees_with_reviewer ? ' ¬∑ matches your point' : ' ¬∑ differs from your point') : ''}
+          </div>}
+          {finding.explanation && <div style={{ color: 'var(--text)', lineHeight: 1.45 }}>{finding.explanation}</div>}
+          {finding.source_quote && <div style={{ marginTop: 5, fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)', borderLeft: '2px solid var(--border-2)', paddingLeft: 8 }}>‚Äú{finding.source_quote}‚Äù</div>}
+          {finding.citation && <div style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-faint)' }}>{finding.citation}</div>}
+          {hasProposed && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Proposed value: <b style={{ color: 'var(--text)' }}>{String(finding.corrected_value)}</b></span>
+              <button onClick={() => void applyCorrection()} disabled={applying}
+                style={{ fontSize: 11, fontWeight: 600, padding: '3px 11px', borderRadius: 6, border: 'none', background: 'var(--green, #22c55e)', color: '#fff', cursor: 'pointer' }}>
+                {applying ? 'Applying‚Ä¶' : 'Apply correction'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// One worklist row: either the resolved view (status + note + undo) or the
+// source line(s) + the four resolution verbs with an inline form.
+function WorklistRow({ row, w, resolution, reviewerId, propertyId, onSaved, sourceDocIds, onRequestUpload, uploadBusy }: {
+  row: AbstractRow; w: WorkItem; resolution?: Resolution
+  reviewerId?: string; propertyId: string | null; onSaved: () => void; sourceDocIds: string[]
+  onRequestUpload?: () => void; uploadBusy?: boolean
+}) {
+  const [mode, setMode] = useState<null | ResStatus>(null)
+  const [note, setNote] = useState('')
+  const [val, setVal] = useState(w.currentValue)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [editRows, setEditRows] = useState(false)
+  const [discussing, setDiscussing] = useState(false)
+  const color = w.red ? OPEN_META[w.severity].color : 'var(--text-muted)'
+
+  if (resolution) {
+    const meta = RES_META[resolution.status]
+    return (
+      <div style={{ padding: '5px 8px', display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: meta.color, minWidth: 96, whiteSpace: 'nowrap' }}>{meta.label}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-faint)', flex: 1, textDecoration: 'line-through' }}>{w.sources[0]?.text}</span>
+        {resolution.note && <span style={{ fontSize: 11, color: 'var(--text-faint)', fontStyle: 'italic' }} title={resolution.note}>‚Äú{resolution.note.slice(0, 48)}{resolution.note.length > 48 ? '‚Ä¶' : ''}‚Äù</span>}
+        {resolution.task_id && <span style={{ fontSize: 10, color: 'var(--amber)' }}>task created</span>}
+        <button onClick={async () => { setBusy(true); try { await clearResolution(row.id, w.key); onSaved() } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) } }}
+          disabled={busy} style={{ fontSize: 10, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}>undo</button>
+        {err && <span style={{ fontSize: 11, color: 'var(--red)' }}>{err}</span>}
+      </div>
+    )
+  }
+
+  async function apply(status: ResStatus) {
+    setBusy(true); setErr(null)
+    try {
+      if (status === 'corrected') {
+        if (!w.field) throw new Error('No field to correct')
+        let v: any = val.trim()
+        if (v !== '' && /^-?\d/.test(v) && !Number.isNaN(Number(v))) v = Number(v)
+        await saveFieldOverride(row, w.field, v, reviewerId)
+        await upsertResolution(row.id, w.key, w.kind, 'corrected', note.trim() || `Corrected to "${val.trim()}"`, reviewerId)
+      } else if (status === 'needs_doc') {
+        const taskId = await createDocTask(
+          `Abstract follow-up: ${row.tenant_name} ‚Äî ${w.field ?? 'missing document'}`,
+          `${w.sources.map(s => `[${ORIGIN_LABEL[s.origin]}] ${s.text}`).join('\n')}${note.trim() ? `\n\nNote: ${note.trim()}` : ''}`,
+          propertyId, reviewerId ?? '')
+        await upsertResolution(row.id, w.key, w.kind, 'needs_doc', note.trim() || null, reviewerId, taskId)
+      } else {
+        await upsertResolution(row.id, w.key, w.kind, status, note.trim() || null, reviewerId)
+      }
+      onSaved()
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ padding: '6px 8px', borderRadius: 6, background: w.red ? OPEN_META[w.severity].bg : 'transparent' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {w.sources.map((s, i) => (
+          <a key={i} href={`#${s.jumpId}`} onClick={e => scrollToId(e, s.jumpId)}
+            style={{ fontSize: 12, color: 'var(--text)', textDecoration: 'none', lineHeight: 1.4 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 6 }}>{ORIGIN_LABEL[s.origin]}</span>
+            {s.text} <span style={{ color: 'var(--text-faint)' }}>‚Üí</span>
+          </a>
+        ))}
+        <div><LeaseFileLink citation={w.citation} sourceDocIds={sourceDocIds} probeText={w.quote || w.currentValue || null} label="open lease ‚Üó" /></div>
+      </div>
+      {w.resolvable ? (
+        discussing && w.field ? (
+          <DiscussPanel row={row} field={w.field} itemKey={w.key} kind={w.kind} currentValue={w.currentValue}
+            reviewerId={reviewerId} propertyId={propertyId}
+            onClose={() => setDiscussing(false)} onSaved={() => { setDiscussing(false); onSaved() }} />
+        ) : editRows && w.field && w.arrayValue ? (
+          <ArrayRowEditor row={row} field={w.field} rows={w.arrayValue} reviewerId={reviewerId}
+            itemKey={w.key} kind={w.kind} onSaved={() => { setEditRows(false); onSaved() }} onCancel={() => setEditRows(false)} />
+        ) : mode === null ? (
+          <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+            {w.correctable && <button style={VERB_BTN} onClick={() => { setMode('corrected'); setVal(w.currentValue) }}>Correct</button>}
+            {w.isArray && <button style={VERB_BTN} onClick={() => setEditRows(true)}>Edit rows</button>}
+            {w.field && propertyId && <button style={VERB_BTN} onClick={() => setDiscussing(true)} title="Explain the discrepancy; the AI re-reads the source documents and proposes a grounded correction">üí¨ Discuss with AI</button>}
+            <button style={VERB_BTN} onClick={() => setMode('accepted')}>Accept</button>
+            <button style={VERB_BTN} onClick={() => setMode('waived')}>Waive</button>
+            <button style={VERB_BTN} onClick={() => setMode('needs_doc')}>Needs doc</button>
+            {onRequestUpload && <button style={{ ...VERB_BTN, borderColor: 'var(--accent)', color: 'var(--accent)' }} disabled={uploadBusy} onClick={onRequestUpload} title="Upload the missing lease/amendment and re-run the abstract on the spot">‚¨Ü Upload doc &amp; re-run</button>}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 }}>
+            {mode === 'corrected' && <input value={val} onChange={e => setVal(e.target.value)} placeholder="corrected value" style={RES_INPUT} />}
+            <input value={note} onChange={e => setNote(e.target.value)} style={RES_INPUT}
+              placeholder={mode === 'accepted' ? 'why it is fine (e.g. confirmed vs MRI / Third Amendment)' : mode === 'waived' ? 'reason' : mode === 'needs_doc' ? 'what to obtain (optional)' : 'note (optional)'} />
+            {err && <span style={{ fontSize: 11, color: 'var(--red)' }}>{err}</span>}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => void apply(mode)} disabled={busy || (mode === 'corrected' && !val.trim())}
+                style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+                {busy ? 'Saving‚Ä¶' : mode === 'corrected' ? 'Save correction' : mode === 'needs_doc' ? 'Create task & resolve' : mode === 'accepted' ? 'Accept' : 'Waive'}
+              </button>
+              <button onClick={() => { setMode(null); setErr(null) }} disabled={busy}
+                style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
+        )
+      ) : (
+        <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 3 }}>Clears on re-verify once the underlying values are corrected.</div>
+      )}
+    </div>
+  )
+}
+
+// The single passthrough: one always-open box consolidating everything a
+// reviewer must resolve. Red (discrepancy/confirm/verify/MRI) leads and gates
+// locking; missing-document / note items follow; resolved items fold away.
+function ResolutionWorklist({ row, worklist, resByKey, reviewerId, propertyId, onSaved, sourceDocIds, onRequestUpload, uploadBusy }: {
+  row: AbstractRow; worklist: WorkItem[]; resByKey: Map<string, Resolution>
+  reviewerId?: string; propertyId: string | null; onSaved: () => void; sourceDocIds: string[]
+  onRequestUpload?: () => void; uploadBusy?: boolean
+}) {
+  const [showResolved, setShowResolved] = useState(false)
+  if (!worklist.length) return null
+  const unresolved = worklist.filter(w => !resByKey.has(w.key))
+  const resolved = worklist.filter(w => resByKey.has(w.key))
+  const red = unresolved.filter(w => w.red)
+  const info = unresolved.filter(w => !w.red)
+  const hot = red.length > 0
+  const rowProps = { row, reviewerId, propertyId, onSaved, sourceDocIds, onRequestUpload, uploadBusy }
+  return (
+    <div style={{ border: `1px solid ${hot ? 'var(--red, #ef4444)' : 'var(--border)'}`, background: hot ? 'rgba(239,68,68,0.06)' : 'var(--surface)', borderRadius: 12, padding: '10px 14px' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: hot ? 'var(--red, #ef4444)' : 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+        Human review queue ‚Äî {red.length} decision{red.length === 1 ? '' : 's'}{info.length ? ` ¬∑ ${info.length} missing/notes` : ''}{resolved.length ? ` ¬∑ ${resolved.length} resolved` : ''}
+      </div>
+      {red.length === 0 && info.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--green, #22c55e)', fontWeight: 600 }}>‚úì All items resolved.</div>
+      )}
+      {red.map(w => <WorklistRow key={w.key} w={w} {...rowProps} />)}
+      {info.length > 0 && (
+        <div style={{ marginTop: red.length ? 8 : 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Missing documents / notes</div>
+          {info.map(w => <WorklistRow key={w.key} w={w} {...rowProps} />)}
+        </div>
+      )}
+      {resolved.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => setShowResolved(s => !s)}
+            style={{ fontSize: 11, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+            {showResolved ? '‚ñæ' : '‚ñ∏'} {resolved.length} resolved
+          </button>
+          {showResolved && resolved.map(w => <WorklistRow key={w.key} w={w} resolution={resByKey.get(w.key)} {...rowProps} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Renders the verification verdict: headline status + confidence, then the
+// checks that FAILED first (discrepancies/unsupported/needs-source), arithmetic
+// + amendment-currency, fabrication risk, and recommended fixes. Confirmed
+// checks collapse behind a toggle so the eye lands on what needs a human.
+// Click-to-source: locate a verifier's verbatim quote inside the abstract's
+// source documents (text chunks carry page_number) and open the actual PDF at
+// that page (browsers honor #page=N on inline PDFs). Field-level trust: see the
+// clause, not just a citation string.
+//
+// The locator is CITATION-AWARE: amendment chains share boilerplate ("Tenant is
+// hereby granted‚Ä¶" appears in every renewal grant), so a bare text match
+// regularly lands in the WRONG instrument (Batteries Plus: a "Second Amendment
+// ¬ß4" quote opened the First Amendment). Documents whose title matches the
+// cited instrument (ordinal + type tokens) are searched preferentially, and
+// among multiple matches the best-cited document wins.
+const CITE_ORDINALS: Array<[string, string]> = [
+  ['first', '1st'], ['second', '2nd'], ['third', '3rd'], ['fourth', '4th'],
+  ['fifth', '5th'], ['sixth', '6th'], ['seventh', '7th'], ['eighth', '8th'],
+]
+const CITE_TYPES = ['amendment', 'amend', 'amd', 'supplement', 'guaranty', 'snda', 'subordination',
+  'estoppel', 'commencement', 'memorandum', 'assignment', 'exercise', 'renewal notice', 'termination']
+function rankDocsByCitation<T extends { id: string; title: string | null; file_name: string | null }>(docs: T[], citation: string): T[] {
+  const cit = (citation || '').toLowerCase()
+  const citOrds = CITE_ORDINALS.filter(([a, b]) => cit.includes(a) || cit.includes(b))
+  const score = (d: any) => {
+    const t = `${d.title ?? ''} ${d.file_name ?? ''}`.toLowerCase()
+    let s = 0
+    for (const [a, b] of CITE_ORDINALS) {
+      const inCit = citOrds.some(([x, y]) => x === a && y === b)
+      const inDoc = t.includes(a) || t.includes(b)
+      if (inCit && inDoc) s += 4
+      // citation names an ordinal, doc carries a DIFFERENT ordinal ‚Üí wrong instrument
+      else if (citOrds.length && !inCit && inDoc) s -= 3
+    }
+    for (const tok of CITE_TYPES) if (cit.includes(tok) && t.includes(tok)) s += 2
+    return s
+  }
+  return [...docs].sort((a, b) => score(b) - score(a))
+}
+// Locate a quote and return everything the popup needs: the full indexed text
+// of the page it lives on (instant display, no PDF load), the doc + page, and
+// a signed PDF deep-link. Null = not locatable (scanned wording mismatch).
+interface LocatedSource {
+  content: string
+  page: number | null
+  docTitle: string
+  pdfUrl: string | null
+  matchStart: number
+  matchLen: number
+}
+async function locateQuoteData(quote: string, citation: string, sourceDocIds: string[]): Promise<LocatedSource | null> {
+  if (!quote || !sourceDocIds.length) return null
+  // Verifiers abridge quotes with "‚Ä¶"/"..." mid-quote; the needle must come
+  // from ONE contiguous verbatim fragment (the longest), or the literal dots
+  // poison the pattern and force the loose fallback.
+  const fragment = quote.split(/\.{3,}|‚Ä¶/).map(f => f.trim()).sort((a, b) => b.length - a.length)[0] ?? quote
+  const words = fragment.replace(/[%_]/g, ' ').replace(/\s+/g, ' ').trim().split(' ')
+  const { data: docRows } = await supabase.from('documents')
+    .select('id, title, file_name, storage_path')
+    .in('id', sourceDocIds)
+  const ranked = rankDocsByCitation((docRows ?? []) as any[], citation)
+  const rankIdx = new Map(ranked.map((d, i) => [d.id, i]))
+  for (const n of [12, 8, 4]) {                  // distinctive first, looser fallback
+    if (words.length < Math.min(n, 3)) continue
+    const pat = '%' + words.slice(0, n).join('%') + '%'
+    const { data } = await supabase.from('document_chunks')
+      .select('document_id, page_number, content')
+      .in('document_id', sourceDocIds)
+      .eq('kind', 'text')
+      .ilike('content', pat)
+      .limit(20)
+    if (!data?.length) continue
+    // best-cited document wins; earliest page within it
+    const hit = [...data].sort((a, b) =>
+      (rankIdx.get(a.document_id) ?? 99) - (rankIdx.get(b.document_id) ?? 99) ||
+      (a.page_number ?? 9999) - (b.page_number ?? 9999))[0]
+    const doc = ranked.find(d => d.id === hit.document_id) as any
+    let pdfUrl: string | null = null
+    if (doc?.storage_path) {
+      const { data: signed } = await supabase.storage.from('documents')
+        .createSignedUrl(doc.storage_path, 3600)
+      // pdf.js viewer: land on the page AND highlight the located language.
+      if (signed?.signedUrl) pdfUrl = viewHref(signed.signedUrl, fragment.replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).join(' ') || null, hit.page_number)
+    }
+    // Highlight: find the fragment inside the chunk (case-insensitive probe on
+    // its head; verbatim quotes land exactly, paraphrases just show the page).
+    const content: string = hit.content ?? ''
+    const probe = fragment.slice(0, 60).toLowerCase()
+    let matchStart = probe.length >= 12 ? content.toLowerCase().indexOf(probe) : -1
+    let matchLen = 0
+    if (matchStart >= 0) matchLen = Math.min(fragment.length, content.length - matchStart)
+    else matchStart = 0
+    return {
+      content, page: hit.page_number ?? null,
+      docTitle: doc?.title ?? doc?.file_name ?? 'document', pdfUrl, matchStart, matchLen,
+    }
+  }
+  return null
+}
+
+// In-app provision viewer: the exact lease language in its page context, with
+// the located passage highlighted and a deep link to the PDF page.
+function SourceModal({ loc, onClose }: { loc: LocatedSource; onClose: () => void }) {
+  const pre = loc.matchLen ? loc.content.slice(0, loc.matchStart) : loc.content
+  const mid = loc.matchLen ? loc.content.slice(loc.matchStart, loc.matchStart + loc.matchLen) : ''
+  const post = loc.matchLen ? loc.content.slice(loc.matchStart + loc.matchLen) : ''
+  return (
+    <div onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface, #fff)', border: '1px solid var(--border-2)', borderRadius: 10, maxWidth: 760, width: '100%', maxHeight: '78vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={loc.docTitle}>{loc.docTitle}</span>
+          {loc.page && <span style={{ fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>page {loc.page}</span>}
+          <button onClick={onClose}
+            style={{ fontSize: 14, border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0 2px' }}>‚úï</button>
+        </div>
+        <div style={{ padding: '12px 16px', overflowY: 'auto', fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
+          {pre}
+          {mid && <mark style={{ background: 'rgba(245,158,11,0.35)', color: 'var(--text)', padding: '1px 0', borderRadius: 2 }}>{mid}</mark>}
+          {post}
+        </div>
+        <div style={{ display: 'flex', gap: 8, padding: '10px 16px', borderTop: '1px solid var(--border)', justifyContent: 'flex-end' }}>
+          {!loc.matchLen && <span style={{ fontSize: 11, color: 'var(--text-faint)', marginRight: 'auto', alignSelf: 'center' }}>Exact passage not pinpointed (paraphrase or scanned wording) ‚Äî showing the located page's text.</span>}
+          {loc.pdfUrl && (
+            <button onClick={() => window.open(loc.pdfUrl!, '_blank')}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+              Open PDF{loc.page ? ` at page ${loc.page}` : ''} ‚Üó
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Click-to-provision link: locates the quoted language and pops the SourceModal
+// (exact clause in page context, highlighted, with a PDF deep link). Used by
+// both the Verification panel and every clause field on the abstract itself.
+function SourceLink({ quote, citation, sourceDocIds, label }: {
+  quote: string; citation?: string; sourceDocIds: string[]; label?: string
+}) {
+  const [state, setState] = useState<'idle' | 'busy' | 'miss'>('idle')
+  const [loc, setLoc] = useState<LocatedSource | null>(null)
+  if (!quote || !sourceDocIds.length) return null
+  return (
+    <>
+      <button
+        onClick={async () => {
+          setState('busy')
+          const found = await locateQuoteData(quote, citation ?? '', sourceDocIds).catch(() => null)
+          if (found) { setLoc(found); setState('idle') } else setState('miss')
+        }}
+        disabled={state === 'busy'}
+        title={state === 'miss' ? 'Language not located in indexed text (scanned page wording may differ)' : 'Show this provision in the lease'}
+        style={{ fontSize: 10, fontWeight: 600, padding: '1px 8px', marginLeft: 6, borderRadius: 9, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: state === 'miss' ? 'var(--text-faint)' : 'var(--accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        {state === 'busy' ? 'locating‚Ä¶' : state === 'miss' ? 'not located' : (label ?? 'view source ‚Üó')}
+      </button>
+      {loc && <SourceModal loc={loc} onClose={() => setLoc(null)} />}
+    </>
+  )
+}
+
+function QaPanel({ qa, status, at, sourceDocIds, resByKey }: { qa: any; status: string | null; at: string | null; sourceDocIds: string[]; resByKey?: Map<string, Resolution> }) {
+  const [showConfirmed, setShowConfirmed] = useState(false)
+  // Collapsed by default so the abstract reads clean; auto-open only when the
+  // verdict is "issues" (a real problem a human must see). The summary + any
+  // stale-amendment warning stay visible even when collapsed.
+  const [open, setOpen] = useState(status === 'issues')
+  const meta = status ? QA_META[status] : null
+  const checks: any[] = Array.isArray(qa?.field_checks) ? qa.field_checks : []
+  const flagged = checks.filter(c => c?.verdict && c.verdict !== 'confirmed')
+  const confirmed = checks.filter(c => c?.verdict === 'confirmed')
+  const arith: any[] = Array.isArray(qa?.arithmetic) ? qa.arithmetic : []
+  const arithFails = arith.filter(a => a?.ok === false)
+  const fixes: string[] = Array.isArray(qa?.recommended_fixes) ? qa.recommended_fixes : []
+  const stale = qa?.amendment_currency?.current === false
+  // MRI reconciliation is a data-conflict signal, NOT an abstract defect. New
+  // verdicts carry a structured `mri_reconciliation` array; older ones fold MRI
+  // conflicts into field_checks notes ‚Äî split those out so they don't read as
+  // document errors. Document-only flags stay in "Flagged".
+  const mriRe = /\bMRI\b|system[- ]of[- ]record/i
+  const mriRecon: any[] = Array.isArray(qa?.mri_reconciliation) ? qa.mri_reconciliation : []
+  const flaggedMri = mriRecon.length ? [] : flagged.filter(c => mriRe.test(c?.note || ''))
+  const flaggedDoc = mriRecon.length ? flagged : flagged.filter(c => !mriRe.test(c?.note || ''))
+  const hasMri = mriRecon.length > 0 || flaggedMri.length > 0
+
+  const Check = ({ c }: { c: any }) => {
+    const vm = VERDICT_META[c.verdict] ?? { color: 'var(--text-muted)', label: c.verdict }
+    const res = c.field && c.verdict !== 'confirmed' ? resByKey?.get(keyForField(c.field)) : undefined
+    return (
+      <div style={{ padding: '7px 0', borderTop: '1px solid var(--border)', opacity: res ? 0.6 : 1 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: vm.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{vm.label}</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', textDecoration: res ? 'line-through' : 'none' }}>{c.field}</span>
+          {c.severity && c.verdict !== 'confirmed' && <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>({c.severity})</span>}
+          <LeaseFileLink citation={c.citation} sourceDocIds={sourceDocIds} probeText={c.quote ?? (c.abstract_value != null ? String(c.abstract_value) : null)} />
+          {res && <span style={{ fontSize: 9, fontWeight: 700, color: RES_META[res.status].color, whiteSpace: 'nowrap' }}>¬∑ {RES_META[res.status].label}</span>}
+        </div>
+        {c.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.45 }}>{c.note}</div>}
+        {c.abstract_value != null && c.abstract_value !== '' && (
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 2 }}>Abstract: <span style={{ color: 'var(--text-muted)' }}>{String(c.abstract_value)}</span></div>
+        )}
+        {c.source_quote && (
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 8, borderLeft: '2px solid var(--border-2)', fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
+            ‚Äú{c.source_quote}‚Äù{c.citation ? <span style={{ fontStyle: 'normal', color: 'var(--text-faint)' }}> ‚Äî {c.citation}</span> : null}
+            <SourceLink quote={c.source_quote} citation={c.citation} sourceDocIds={sourceDocIds} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <Widget title="Verification"
+      chip={meta ? meta.label : qa?.confidence ? `${qa.confidence} confidence` : undefined}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 6 }}>
+        {meta && <span style={{ fontSize: 11, fontWeight: 700, color: meta.color, padding: '1px 8px', borderRadius: 10, background: meta.bg }}>{meta.label}</span>}
+        {qa?.confidence && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{qa.confidence} confidence</span>}
+        {hasMri && <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 10, color: 'var(--accent)', background: 'var(--accent-dim)' }}>MRI conflict</span>}
+        {at && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>¬∑ checked {new Date(at).toLocaleString()}</span>}
+        {(flaggedDoc.length + arithFails.length + fixes.length + (mriRecon.length || flaggedMri.length)) > 0 && (
+          <button onClick={() => setOpen(o => !o)}
+            style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+            {open ? 'Hide details ‚ñæ' : `Show details ‚ñ∏ (${flaggedDoc.length + arithFails.length + fixes.length + (mriRecon.length || flaggedMri.length)})`}
+          </button>
+        )}
+      </div>
+      {qa?.summary && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 8 }}>{qa.summary}</div>}
+
+      {stale && (
+        <div style={{ fontSize: 12, color: 'var(--red, #ef4444)', fontWeight: 600, marginBottom: 6 }}>
+          ‚ö† Latest-amendment terms may NOT be reflected{qa?.amendment_currency?.note ? ` ‚Äî ${qa.amendment_currency.note}` : ''}
+        </div>
+      )}
+
+      {open && (<>
+
+      {flaggedDoc.length > 0 && (
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Flagged vs. documents ({flaggedDoc.length})</div>
+          {flaggedDoc.map((c, i) => <Check key={i} c={c} />)}
+        </div>
+      )}
+
+      {hasMri && (
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+            MRI reconciliation ({mriRecon.length || flaggedMri.length})
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 3 }}>Abstract disagrees with the MRI system-of-record ‚Äî a data conflict to reconcile, not necessarily an abstract error.</div>
+          {mriRecon.length > 0
+            ? mriRecon.map((m, i) => (
+                <div key={i} style={{ padding: '6px 0', borderTop: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                    {m.field} {m.governs && <span style={{ fontSize: 10, fontWeight: 700, color: m.governs === 'mri' ? 'var(--red, #ef4444)' : 'var(--text-faint)' }}>¬∑ {m.governs === 'abstract' ? 'documents govern' : m.governs === 'mri' ? 'MRI likely correct ‚Äî abstract wrong' : 'unclear'}</span>}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>Abstract: {String(m.abstract_value ?? '‚Äî')} ¬∑ MRI: {String(m.mri_value ?? '‚Äî')}</div>
+                  {m.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.45 }}>{m.note}</div>}
+                </div>
+              ))
+            : flaggedMri.map((c, i) => <Check key={i} c={c} />)}
+        </div>
+      )}
+
+      {arithFails.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--red, #ef4444)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Arithmetic checks failed</div>
+          {arithFails.map((x, i) => <div key={i} style={{ fontSize: 12, color: 'var(--text-muted)', padding: '3px 0' }}>‚úó {x.check}{x.detail ? ` ‚Äî ${x.detail}` : ''}</div>)}
+        </div>
+      )}
+
+      {fixes.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Recommended fixes</div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {fixes.map((x, i) => <li key={i} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>{x}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {confirmed.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => setShowConfirmed(s => !s)}
+            style={{ fontSize: 11, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+            {showConfirmed ? '‚ñæ' : '‚ñ∏'} {confirmed.length} confirmed {confirmed.length === 1 ? 'field' : 'fields'}
+          </button>
+          {showConfirmed && confirmed.map((c, i) => <Check key={i} c={c} />)}
+        </div>
+      )}
+
+      </>)}
+    </Widget>
+  )
+}
+
+// Reviewer corrections are stored as a dotted-path ‚Üí value map and layered over
+// the AI abstract for display/export; the AI JSON itself is never mutated.
+const getPath = (o: any, path: string) => path.split('.').reduce((x, k) => (x == null ? undefined : x[k]), o)
+function applyOverrides(abstract: any, overrides: Record<string, any> | null | undefined) {
+  if (!overrides || !Object.keys(overrides).length) return abstract
+  const clone = JSON.parse(JSON.stringify(abstract ?? {}))
+  for (const [path, val] of Object.entries(overrides)) {
+    const parts = path.split('.')
+    let o = clone
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (o[parts[i]] == null || typeof o[parts[i]] !== 'object') o[parts[i]] = {}
+      o = o[parts[i]]
+    }
+    o[parts[parts.length - 1]] = val
+  }
+  return clone
+}
+
+// High-value scalar fields a reviewer most often corrects (the ones QA flags:
+// names, suite, SF, the term dates). Deliberately not a full nested-JSON editor.
+const REVIEW_FIELDS: Array<{ path: string; label: string; num?: boolean }> = [
+  { path: 'trade_name', label: 'Trade name (dba)' },
+  { path: 'tenant_legal_name', label: 'Tenant legal name' },
+  { path: 'suite', label: 'Suite' },
+  { path: 'square_footage', label: 'Square footage', num: true },
+  { path: 'term.rent_commencement', label: 'Rent commencement' },
+  { path: 'term.expiration', label: 'Expiration' },
+  { path: 'term.term_years', label: 'Term (years)', num: true },
+]
+
+function ReviewPanel({ row, onSaved, reviewerId, unresolvedRedCount = 0 }: { row: AbstractRow; onSaved: () => void; reviewerId?: string; unresolvedRedCount?: number }) {
+  const effective = applyOverrides(row.abstract, row.overrides) ?? {}
+  const [edits, setEdits] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {}
+    for (const f of REVIEW_FIELDS) { const v = getPath(effective, f.path); init[f.path] = v == null ? '' : String(v) }
+    return init
+  })
+  const [note, setNote] = useState(row.review_note ?? '')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  // Soft lock gate: unresolved red items don't block locking, but the reviewer
+  // must acknowledge them with a one-line reason.
+  const [gateOpen, setGateOpen] = useState(false)
+  const [gateReason, setGateReason] = useState('')
+
+  async function save(opts: { lock?: boolean; verified?: boolean; lockReason?: string }) {
+    setSaving(true); setErr(null)
+    try {
+      // Store an override only where the reviewer's value differs from the AI value.
+      const overrides: Record<string, any> = {}
+      for (const f of REVIEW_FIELDS) {
+        const raw = (edits[f.path] ?? '').trim()
+        if (raw === '') continue
+        const val = f.num ? Number(raw) : raw
+        if (f.num && Number.isNaN(val as number)) continue
+        const aiVal = getPath(row.abstract, f.path)
+        if (String(aiVal ?? '') !== String(val)) overrides[f.path] = val
+      }
+      const reviewNote = [
+        note.trim() || null,
+        opts.lockReason ? `[locked over ${unresolvedRedCount} unresolved item(s): ${opts.lockReason.trim()}]` : null,
+      ].filter(Boolean).join(' ') || null
+      const patch: any = {
+        overrides: Object.keys(overrides).length ? overrides : null,
+        review_note: reviewNote,
+        reviewed_by: reviewerId ?? null,
+        reviewed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      if (opts.verified !== undefined) patch.human_verified = opts.verified
+      if (opts.lock !== undefined) patch.locked = opts.lock
+      const { error } = await supabase.from('lease_abstracts').update(patch).eq('id', row.id)
+      if (error) throw new Error(error.message)
+      setGateOpen(false); setGateReason('')
+      onSaved()
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setSaving(false) }
+  }
+
+  // Lock entrypoint: clean ‚Üí lock directly; unresolved red ‚Üí open the gate.
+  function requestLock() {
+    if (unresolvedRedCount > 0) setGateOpen(true)
+    else void save({ verified: true, lock: true })
+  }
+
+  const overrideCount = row.overrides ? Object.keys(row.overrides).length : 0
+  return (
+    <Widget title="Review & correct"
+      chip={row.human_verified ? 'human-verified' : overrideCount ? `${overrideCount} correction${overrideCount === 1 ? '' : 's'}` : undefined}>
+      {!open ? (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {row.human_verified
+              ? `Verified${row.reviewed_at ? ` ${new Date(row.reviewed_at).toLocaleDateString()}` : ''}${row.locked ? ' ¬∑ locked' : ''}.`
+              : 'Correct any field and mark the abstract human-verified.'}
+          </span>
+          <button onClick={() => setOpen(true)}
+            style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)', cursor: 'pointer' }}>
+            {overrideCount || row.human_verified ? 'Edit review' : 'Review & correct'}
+          </button>
+          {row.locked && (
+            <button onClick={() => void save({ lock: false })} disabled={saving}
+              style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
+              {saving ? '‚Ä¶' : 'Unlock'}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Blank = keep the AI value. A value that differs from the AI abstract is saved as a correction and shown in green throughout.</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px 14px' }}>
+            {REVIEW_FIELDS.map(f => {
+              const aiVal = getPath(row.abstract, f.path)
+              const changed = (edits[f.path] ?? '').trim() !== '' && String(aiVal ?? '') !== (edits[f.path] ?? '').trim()
+              return (
+                <div key={f.path}>
+                  <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{f.label}</div>
+                  <input value={edits[f.path] ?? ''} onChange={e => setEdits(s => ({ ...s, [f.path]: e.target.value }))}
+                    placeholder={aiVal == null ? '‚Äî' : String(aiVal)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 5, background: 'var(--surface-2)', color: 'var(--text)', border: `1px solid ${changed ? 'var(--green, #22c55e)' : 'var(--border-2)'}` }} />
+                  {changed && <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 1 }}>AI: {aiVal == null ? '‚Äî' : String(aiVal)}</div>}
+                </div>
+              )
+            })}
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Reviewer note</div>
+            <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
+              style={{ width: '100%', fontSize: 12, padding: '6px 8px', borderRadius: 5, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)', resize: 'vertical' }} />
+          </div>
+          {err && <div style={{ fontSize: 12, color: 'var(--red)' }}>{err}</div>}
+          {gateOpen && (
+            <div style={{ border: '1px solid var(--red, #ef4444)', background: 'rgba(239,68,68,0.06)', borderRadius: 8, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--red, #ef4444)', fontWeight: 600 }}>
+                {unresolvedRedCount} unresolved discrepancy/confirm item{unresolvedRedCount === 1 ? '' : 's'} in the worklist above. Locking anyway ‚Äî add a one-line reason.
+              </span>
+              <input value={gateReason} onChange={e => setGateReason(e.target.value)} placeholder="reason for locking with items unresolved"
+                style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 5, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' }} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => void save({ verified: true, lock: true, lockReason: gateReason })} disabled={saving || !gateReason.trim()}
+                  style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, border: 'none', background: 'var(--red, #ef4444)', color: '#fff', cursor: 'pointer' }}>
+                  {saving ? '‚Ä¶' : 'Lock anyway'}
+                </button>
+                <button onClick={() => { setGateOpen(false); setGateReason('') }} disabled={saving}
+                  style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => void save({})} disabled={saving}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--surface-2)', color: 'var(--text)', cursor: 'pointer' }}>
+              {saving ? 'Saving‚Ä¶' : 'Save corrections'}
+            </button>
+            <button onClick={requestLock} disabled={saving || gateOpen}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--green, #22c55e)', color: '#fff', cursor: saving || gateOpen ? 'default' : 'pointer', opacity: gateOpen ? 0.5 : 1 }}>
+              {saving ? '‚Ä¶' : unresolvedRedCount > 0 ? `Mark verified & lock (${unresolvedRedCount} open)` : 'Mark verified & lock'}
+            </button>
+            <button onClick={() => { setOpen(false); setErr(null); setGateOpen(false) }} disabled={saving}
+              style={{ fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </Widget>
+  )
+}
+
+function Grid({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px 16px' }}>{children}</div>
+}
+function Fact({ k, v, wide, sub, foot }: { k: string; v: any; wide?: boolean; sub?: string | null; foot?: number[] }) {
+  return (
+    <div style={{ gridColumn: wide ? '1 / -1' : undefined }}>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{k}<Footnote nums={foot ?? []} /></div>
+      <div style={{ fontSize: 13, color: 'var(--text)' }}>{v == null || v === '' ? '‚Äî' : String(v)}</div>
+      {sub ? <div style={{ fontSize: 10.5, color: 'var(--text-faint)', marginTop: 1, lineHeight: 1.35 }}>{sub}</div> : null}
+    </div>
+  )
+}
+// Every template field renders ‚Äî an empty field says so explicitly rather than
+// disappearing (gaps also land in the Open Items section). `src` adds a
+// "view in lease ‚Üó" link that pops the provision's actual language in context.
+function LongFact({ k, v, src, foot }: {
+  k: string; v: any
+  src?: { quote?: string | null; citation?: string | null; docIds?: string[] | null }
+  foot?: number[]
+}) {
+  const missing = v == null || v === ''
+  const quote = src?.quote ?? (typeof v === 'string' ? v : '')
+  const linkable = !missing && !!quote && quote.length >= 25 && !!src?.docIds?.length
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+        {k}
+        <Footnote nums={foot ?? []} />
+        {linkable && <SourceLink quote={quote} citation={src?.citation ?? ''} sourceDocIds={src!.docIds!} label="view in lease ‚Üó" />}
+      </div>
+      <div style={{ fontSize: 12.5, color: missing ? 'var(--text-faint)' : 'var(--text-muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontStyle: missing ? 'italic' : 'normal' }}>
+        {missing ? <>Not found in reviewed documents ‚Äî <OpenItemsJump /></> : String(v)}
+      </div>
+    </div>
+  )
+}
+
+function MissingNote({ what }: { what: string }) {
+  return <div style={{ fontSize: 12, color: 'var(--text-faint)', fontStyle: 'italic' }}>{what} ‚Äî <OpenItemsJump /></div>
+}
+function MiniTable({ head, rows }: { head: string[]; rows: any[][] }) {
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+      <thead><tr style={{ textAlign: 'left', color: 'var(--text-faint)', fontSize: 10.5 }}>
+        {head.map(h => <th key={h} style={{ padding: '3px 8px', fontWeight: 600 }}>{h}</th>)}
+      </tr></thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+            {r.map((c, j) => <td key={j} style={{ padding: '5px 8px', color: 'var(--text)', verticalAlign: 'top' }}>{c == null || c === '' ? '‚Äî' : String(c)}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
