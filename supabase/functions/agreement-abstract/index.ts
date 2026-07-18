@@ -22,12 +22,18 @@ const BRIEF_BUDGET = 280_000
 const RAWTEXT_BUDGET = 150_000
 const RAW_PER_DOC_CAP = 40_000
 
+// STREAMING synthesis. A non-streaming fetch made the Supabase edge function
+// wait for the whole message with no bytes flowing → the 150s "request idle
+// timeout" killed large abstracts (e.g. the 6-doc Kohl's REA) before they
+// finished. Streaming the tool_use input_json_delta events keeps bytes flowing
+// so the idle timer never trips, which in turn lets us raise max_tokens for
+// dense instruments without converting truncation into a timeout.
 async function anthropicJson(key: string, model: string, content: any[], maxTokens: number, looksRight: (o: any) => boolean): Promise<any> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model, max_tokens: maxTokens,
+      model, max_tokens: maxTokens, stream: true,
       tools: [{
         name: 'submit_abstract',
         description: 'Submit the completed agreement abstract.',
@@ -37,14 +43,43 @@ async function anthropicJson(key: string, model: string, content: any[], maxToke
       messages: [{ role: 'user', content }],
     }),
   })
-  const d = await r.json()
-  if (!r.ok) throw new Error('Anthropic API error: ' + JSON.stringify(d))
-  if (d.stop_reason === 'max_tokens') throw new Error('Abstract truncated at max_tokens — retry')
-  const block = (d.content ?? []).find((c: { type: string }) => c.type === 'tool_use')
-  if (!block) throw new Error('Model returned no tool_use block')
+  if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error('Anthropic API error: ' + JSON.stringify(d)) }
+  if (!r.body) throw new Error('Anthropic API error: empty response body')
+
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  let jsonParts = ''         // accumulated tool_use input (input_json_delta)
+  let stopReason: string | null = null
+  let sawToolUse = false
+  let streaming = true
+  while (streaming) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let nl: number
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim()
+      buf = buf.slice(nl + 1)
+      if (!line.startsWith('data:')) continue
+      const data = line.slice(5).trim()
+      if (!data || data === '[DONE]') continue
+      let ev: any
+      try { ev = JSON.parse(data) } catch { continue }
+      if (ev.type === 'error') throw new Error('Anthropic API error: ' + JSON.stringify(ev.error ?? ev))
+      else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') sawToolUse = true
+      else if (ev.type === 'content_block_delta' && ev.delta?.type === 'input_json_delta') jsonParts += ev.delta.partial_json ?? ''
+      else if (ev.type === 'message_delta' && ev.delta?.stop_reason) stopReason = ev.delta.stop_reason
+      else if (ev.type === 'message_stop') { streaming = false; break }
+    }
+  }
+
+  if (stopReason === 'max_tokens') throw new Error('Abstract truncated at max_tokens — retry')
+  if (!sawToolUse || !jsonParts) throw new Error('Model returned no tool_use block')
+  let out: any
+  try { out = JSON.parse(jsonParts) } catch { throw new Error('Model returned unparseable tool JSON — retry') }
   // Generic envelope unwrap + validity gate (observed variants: named key,
   // literal $PARAMETER_NAME placeholders). Throw on garbage so callers retry.
-  let out = block.input ?? {}
   if (!looksRight(out)) {
     const kids = Object.values(out).filter(looksRight)
     if (kids.length === 1) out = kids[0]
@@ -299,14 +334,18 @@ ${rawParts.length ? `\nRAW TEXT OF UNBRIEFED DOCUMENTS:\n${rawParts.join('\n\n')
       ? (o: any) => o && typeof o === 'object' && !Array.isArray(o) && ('distributions_waterfall' in o || 'parties_members' in o || 'entity' in o)
       : (o: any) => o && typeof o === 'object' && !Array.isArray(o) && ('fees' in o || 'manager' in o || 'termination' in o)
 
+    // Output ceiling: dense multi-doc instruments (e.g. the 6-doc Kohl's REA
+    // with the enriched approval_rights block) exceed a 16K cap. Streaming
+    // removes the 150s idle-timeout risk that a big cap would otherwise create.
+    const MAX_OUT = Number(Deno.env.get('ABSTRACT_MAX_TOKENS')) || 32000
     const isCapError = (e: unknown) =>
       /page|too long|too large|exceed|prompt is too long/i.test(e instanceof Error ? e.message : String(e))
     let abstract: any
     try {
-      abstract = await anthropicJson(anthropicKey, MODEL, [...attachments, { type: 'text', text: prompt }], 16000, looksRight)
+      abstract = await anthropicJson(anthropicKey, MODEL, [...attachments, { type: 'text', text: prompt }], MAX_OUT, looksRight)
     } catch (e) {
       if (!attachments.length || !isCapError(e)) throw e
-      abstract = await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }], 16000, looksRight)
+      abstract = await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }], MAX_OUT, looksRight)
       attachments = []
     }
 
