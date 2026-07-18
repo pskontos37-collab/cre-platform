@@ -145,9 +145,8 @@ const PMA_SCHEMA = `{
  "open_items": [str]
 }`
 
-serve(async (req) => {
+async function handle(req: Request): Promise<Response> {
   const CORS = corsHeaders(req)
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   try {
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
     const caller = await requireUser(req, sb)
@@ -382,4 +381,37 @@ ${rawParts.length ? `\nRAW TEXT OF UNBRIEFED DOCUMENTS:\n${rawParts.join('\n\n')
       status, headers: { ...CORS, 'Content-Type': 'application/json' },
     })
   }
+}
+
+// Keep-alive streaming wrapper. Synthesis of a dense multi-doc instrument (the
+// 6-doc Kohl's REA) takes longer than Supabase's 150s request-idle timeout,
+// which is measured on bytes sent to the CLIENT — a plain handler that returns
+// one JSON at the very end sends nothing outbound for the whole run and gets
+// killed. We return a streaming Response immediately and drip JSON-insignificant
+// whitespace every few seconds while handle() works, then append the real body.
+// Callers JSON-parse the body (leading whitespace is ignored); the HTTP status
+// is 200 and errors are conveyed in the body's `error` field.
+serve((req) => {
+  const CORS = corsHeaders(req)
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    async start(controller) {
+      const safeEnqueue = (s: string) => { try { controller.enqueue(encoder.encode(s)) } catch (_) { /* closed */ } }
+      safeEnqueue(' ')                                   // first byte immediately
+      const ka = setInterval(() => safeEnqueue(' '), 10000)
+      let bodyText: string
+      try {
+        const resp = await handle(req)
+        bodyText = await resp.text()
+      } catch (err) {
+        bodyText = JSON.stringify({ error: err instanceof Error ? err.message : String(err) })
+      } finally {
+        clearInterval(ka)
+      }
+      safeEnqueue('\n' + bodyText)
+      controller.close()
+    },
+  })
+  return new Response(stream, { headers: { ...CORS, 'Content-Type': 'application/json' } })
 })
