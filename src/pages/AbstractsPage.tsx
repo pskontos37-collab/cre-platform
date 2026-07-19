@@ -179,6 +179,21 @@ export function AbstractsPage() {
     }
     return m
   }, [resolutions.data])
+  // Resolution-aware verification counts per abstract — the SAME derivation
+  // AbstractView uses for its header (applyOverrides → parseOpenItems →
+  // buildWorklist → resolution overlay), computed once here so the tenant list
+  // and Verify-all summary can never disagree with the header.
+  const verifCounts = useMemo(() => {
+    const m = new Map<string, VerifCounts>()
+    for (const row of abstracts.data ?? []) {
+      const eff = applyOverrides(row.abstract, row.overrides) ?? {}
+      const wl = buildWorklist(parseOpenItems(eff.open_items ?? []), row.qa, eff, row.field_confidence, row.clause_findings)
+      const reds = wl.filter(w => w.red)
+      const resolved = new Set((resByAbstract.get(row.id) ?? []).map(r => r.item_key))
+      m.set(row.id, { unresolved: reds.filter(w => !resolved.has(w.key)).length, redTotal: reds.length })
+    }
+    return m
+  }, [abstracts.data, resByAbstract])
   const [selected, setSelected] = useState<string | null>(null)
   // Keep the active property inside the current View scope. If the top filter
   // narrows to a set that excludes the current property (or none is chosen yet),
@@ -598,6 +613,7 @@ export function AbstractsPage() {
         />
         <VerifyAllButton
           abstracts={abstracts.data ?? []}
+          verifCounts={verifCounts}
           verifying={verifying}
           onVerify={verify}
         />
@@ -666,7 +682,7 @@ export function AbstractsPage() {
                                   {unresolvedRed.data?.[t.toLowerCase()]}
                                 </span>
                               )}
-                              <VerificationBadge row={a} /></span>
+                              <VerificationBadge row={a} counts={verifCounts.get(a.id)} /></span>
                           : <button onClick={e => { e.stopPropagation(); void generate(t) }}
                               style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                               Generate
@@ -874,8 +890,9 @@ function GenerateAllButton({ tenants, byTenant, generating, onGenerate }: {
 // Sequentially verifies every abstract that has not been verified since its
 // last generation. Surfaces batch problems (e.g. stale post-amendment terms
 // across a whole property) in one pass. Keep the tab open (~1-2 min each).
-function VerifyAllButton({ abstracts, verifying, onVerify }: {
+function VerifyAllButton({ abstracts, verifCounts, verifying, onVerify }: {
   abstracts: AbstractRow[]
+  verifCounts: Map<string, VerifCounts>
   verifying: Set<string>
   onVerify: (t: string) => Promise<void>
 }) {
@@ -900,10 +917,12 @@ function VerifyAllButton({ abstracts, verifying, onVerify }: {
   if (!unverified.length) {
     // "QA ran everywhere" is not "QA found nothing" (audit: a portfolio state
     // must not read clean while tenants carry open flags). Disclose the split.
-    // Exclude human-approved/locked rows: a reviewer decided them, so they render
-    // a green badge — counting them here would contradict the tenant list.
-    const flagged = abstracts.filter(a =>
-      !(a.locked || a.human_verified) && (verificationNeedsReview(a) || a.qa_status === 'review')).length
+    // Flagged = exactly the rows whose badge renders non-green, via the SAME
+    // shared tier derivation — the summary can never contradict the list.
+    const flagged = abstracts.filter(a => {
+      const tier = verificationTier(a, verifCounts.get(a.id))
+      return tier === 'red' || tier === 'soft' || tier === 'approved-open'
+    }).length
     return flagged
       ? <span style={{ fontSize: 11, color: 'var(--amber)' }}>AI QA ran on all generated abstracts — {flagged} flagged for review</span>
       : <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>AI QA ran on all generated abstracts — no open flags ✓</span>
@@ -1030,34 +1049,63 @@ function verificationNeedsReview(row: any): boolean {
     || ((row?.field_confidence?.summary?.low ?? 0) > 0)
     || ((row?.clause_findings?.summary?.actionable ?? 0) > 0)
 }
+// Resolution-aware verification counts for one abstract row, computed the same
+// way for EVERY surface (tenant list, abstract header, Verify-all summary):
+//   unresolved — red worklist items with no resolution recorded;
+//   redTotal   — red worklist items before the resolution overlay. Distinguishes
+//                "count=0 because a human resolved them" (redTotal>0) from
+//                "count=0 because the worklist cannot express the problem"
+//                (redTotal=0 — e.g. a truncated/no-verdict field_check row).
+type VerifCounts = { unresolved: number; redTotal: number }
+
+// ONE tier derivation shared by the badge and the Verify-all summary, so the
+// three surfaces can never contradict each other (the review's #1/#8/#12 class).
+function verificationTier(row: any, st?: VerifCounts):
+  'approved' | 'approved-open' | 'none' | 'red' | 'soft' | 'clear' {
+  const ran = !!(row?.qa_status || row?.field_confidence || row?.clause_findings)
+  const approved = row?.human_verified === true || row?.locked === true
+  // Fail-closed signals NO worklist row can express — clearable only by a
+  // successful re-run, never by resolving items: an incomplete verifier run, a
+  // stale-amendment verdict, or an 'issues' status whose causes produced zero
+  // red rows (e.g. an uninterpretable field_check the worklist skips).
+  const failClosed = row?.qa?.verifier_incomplete === true
+    || row?.qa?.amendment_currency?.current === false
+    || (row?.qa_status === 'issues' && st != null && st.redTotal === 0)
+  const red = st != null ? (st.unresolved > 0 || failClosed) : verificationNeedsReview(row)
+  if (approved) return red ? 'approved-open' : 'approved'
+  if (!ran) return 'none'
+  if (red) return 'red'
+  if (row?.qa_status === 'review') return 'soft'
+  return 'clear'
+}
+
 // Label discipline (audit finding #1): "Verified"/"Approved" is reserved for a
 // HUMAN decision. A clean machine outcome says "AI checks clear" — a checkmark
 // that admits what it is. Soft (review-level) flags get their own amber tier so
 // they can never read as clean.
-function VerificationBadge({ row, count }: { row: any; count?: number }) {
-  const ran = !!(row?.qa_status || row?.field_confidence || row?.clause_findings)
-  const approved = row?.human_verified === true || row?.locked === true
-  // Two fail-closed verifier states produce NO worklist rows (buildWorklist reads
-  // field_checks/mri/arith/ensemble/clause only), so the resolution-aware `count`
-  // structurally can't represent them — OR them in explicitly, else a fail-closed
-  // abstract would read green in the header (which passes a count) while the
-  // tenant list shows red. This is the audit's false-green, re-closed.
-  const failClosed = row?.qa?.verifier_incomplete === true || row?.qa?.amendment_currency?.current === false
-  const red = count != null ? (count > 0 || failClosed) : verificationNeedsReview(row)
-  const soft = row?.qa_status === 'review'
-  const openLabel = count != null && count > 0 ? `⚑ ${count} to review` : '⚑ Review'
+function VerificationBadge({ row, counts }: { row: any; counts?: VerifCounts }) {
+  const tier = verificationTier(row, counts)
+  const n = counts?.unresolved ?? 0
   let label: string, color: string, title: string
-  if (approved && red) {
-    // Human-locked but open verification items remain (the "lock anyway" path).
-    // Show BOTH so the lock never masks unresolved reds.
-    label = count != null && count > 0 ? `🔒 Approved · ⚑ ${count}` : '🔒 Approved · ⚑ open'
-    color = 'var(--amber)'; title = 'Human-locked, but open verification items remain — see the worklist'
+  switch (tier) {
+    case 'approved-open':
+      // Human-locked but open verification items remain (the "lock anyway" path).
+      // Show BOTH so the lock never masks them.
+      label = n > 0 ? `🔒 Approved · ⚑ ${n}` : '🔒 Approved · ⚑ open'
+      color = 'var(--amber)'; title = 'Human-locked, but open verification items remain — see the worklist'
+      break
+    case 'approved':
+      label = '🔒 Human approved'; color = 'var(--green, #22c55e)'; title = 'Reviewed and locked by a human'; break
+    case 'none':
+      label = 'Not verified'; color = 'var(--text-faint)'; title = 'No verification run yet — Verify, Cross-check or Clause-check'; break
+    case 'red':
+      label = n > 0 ? `⚑ ${n} to review` : '⚑ Review'
+      color = 'var(--red, #ef4444)'; title = 'Open items across Verify, Cross-check and Clause-check — see the worklist'; break
+    case 'soft':
+      label = '● Review'; color = 'var(--amber)'; title = 'Verification raised soft flags worth a look — see the worklist'; break
+    default:
+      label = '✓ AI checks clear'; color = 'var(--green, #22c55e)'; title = 'Machine checks passed — not human approval'
   }
-  else if (approved) { label = '🔒 Human approved'; color = 'var(--green, #22c55e)'; title = 'Reviewed and locked by a human' }
-  else if (!ran) { label = 'Not verified'; color = 'var(--text-faint)'; title = 'No verification run yet — Verify, Cross-check or Clause-check' }
-  else if (red) { label = openLabel; color = 'var(--red, #ef4444)'; title = 'Open items across Verify, Cross-check and Clause-check — see the worklist' }
-  else if (soft) { label = '● Review'; color = 'var(--amber)'; title = 'Verification raised soft flags worth a look — see the worklist' }
-  else { label = '✓ AI checks clear'; color = 'var(--green, #22c55e)'; title = 'Machine checks passed — not human approval' }
   return (
     <span title={title} style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>{label}</span>
   )
@@ -1331,7 +1379,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
             : '0 source documents'}{row.human_verified ? '' : ' · verify against the source lease before relying on it'}
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <VerificationBadge row={row} count={unresolvedRedCount} />
+          <VerificationBadge row={row} counts={{ unresolved: unresolvedRedCount, redTotal: worklist.filter(w => w.red).length }} />
           {onCrossCheck && (
             <button onClick={onCrossCheck} disabled={crossChecking || busy}
               title="Two independent lenses re-check the high-stakes fields and score their agreement with the stored value"
