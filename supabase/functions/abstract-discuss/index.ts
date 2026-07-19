@@ -22,7 +22,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 // A reasoning task over legal text — use the strongest model. Shares QA_MODEL
 // with abstract-verify so the discussion and the verifier agree on capability.
@@ -139,7 +139,7 @@ serve(async (req) => {
     const currentValueIn: string = body.current_value == null ? '' : String(body.current_value)
     if (!propertyId || !tenant || !field) throw new Error('property_id, tenant and field are required')
     if (!reviewerNote) throw new Error('a note explaining the discrepancy is required')
-    if (!canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+    if (!canWriteProperty(caller, propertyId)) throw new AuthError('No write access to this property', 403)   // spend gate (review #13): AI 'Discuss' spends model credits — operate access, not view
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')

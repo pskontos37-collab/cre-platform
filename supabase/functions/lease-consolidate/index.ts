@@ -10,7 +10,7 @@
 // across the base lease + its amendments.
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const DEFAULT_MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-opus-4-8'
 
@@ -27,7 +27,7 @@ serve(async (req) => {
     const tenant     = url.searchParams.get('tenant')
     const model      = url.searchParams.get('model') ?? DEFAULT_MODEL
     if (!propertyId || !tenant) throw new Error('?propertyId= and ?tenant= are required')
-    if (!canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+    if (!canWriteProperty(caller, propertyId)) throw new AuthError('No write access to this property', 403)   // spend gate (review #13): consolidation spends model credits — operate access, not view
 
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY secret not set')
