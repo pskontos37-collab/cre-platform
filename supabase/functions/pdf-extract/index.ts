@@ -104,12 +104,8 @@ const TEXT_CHUNK_OVERLAP = Number(Deno.env.get('TEXT_CHUNK_OVERLAP') ?? 200)
 // text, and the abstractor never folded the amendment in. 300 comfortably
 // separates real text from a thin scan layer while staying well under a dense
 // page; still env-overridable.
-const MIN_CHARS_PER_PAGE = Number(Deno.env.get('MIN_CHARS_PER_PAGE') ?? 300)   // avg below → treat as scanned/needs OCR
-// Second trigger: a MIXED scan (a couple of text pages — cover/execution —
-// hiding a scanned body) can average above the floor yet be mostly imaged.
-// If at least this fraction of pages are near-empty, OCR anyway.
-const OCR_EMPTY_PAGE_FRACTION = Number(Deno.env.get('OCR_EMPTY_PAGE_FRACTION') ?? 0.4)
-const OCR_EMPTY_PAGE_CHARS    = Number(Deno.env.get('OCR_EMPTY_PAGE_CHARS')    ?? 100)  // a page under this is "near-empty"
+const MIN_CHARS_PER_PAGE = Number(Deno.env.get('MIN_CHARS_PER_PAGE') ?? 300)   // substantive-page avg below → scanned/needs OCR
+const OCR_EMPTY_PAGE_CHARS    = Number(Deno.env.get('OCR_EMPTY_PAGE_CHARS')    ?? 100)  // a page under this is "near-empty" (excluded from the substantive average)
 // unpdf loads the whole PDF into worker memory; very large docs OOM the isolate
 // (WORKER_RESOURCE_LIMIT, uncatchable). Preempt by page count and flag for a
 // dedicated large-doc pass.
@@ -391,10 +387,18 @@ serve(async (req) => {
     if (reindexText || isOcr) {
       if (!reindexDocId) throw new Error('?documentId= is required for reindex/OCR')
       const { data: ownerDoc, error: ownerErr } =
-        await sb.from('documents').select('property_id').eq('id', reindexDocId).maybeSingle()
+        await sb.from('documents').select('property_id, storage_path').eq('id', reindexDocId).maybeSingle()
       if (ownerErr) throw new Error('document lookup failed: ' + ownerErr.message)
       if (!ownerDoc) throw new AuthError('Document not found', 404)
       if (!canWriteProperty(caller, (ownerDoc.property_id as string | null) ?? null)) throw new AuthError('No write access to this document', 403)   // WRITE gate (audit S2): reindex/OCR deletes + rewrites chunks
+      // PROVENANCE (review #5): the bytes to (re)index must be the document's OWN
+      // stored object, never a caller-supplied path pointing at some other object.
+      // Every legit caller (frontend + reindex_text.ps1/ocr_text.ps1) passes
+      // storagePath = "documents/<storage_path>"; require the match so a scoped
+      // writer can't index a foreign object's text into a document they own.
+      const ownStorageKey = ownerDoc.storage_path ? `documents/${ownerDoc.storage_path}` : null
+      if (!ownStorageKey) throw new Error('Document has no stored file to reindex/OCR')
+      if (storageKey !== ownStorageKey) throw new AuthError('storagePath does not match the document', 403)
       ownerPropertyId = (ownerDoc.property_id as string | null)
     } else if (store) {
       if (!canWriteProperty(caller, propertyId ?? null)) throw new AuthError('No write access to this property', 403)   // WRITE gate (audit S2): store mode inserts documents+chunks
@@ -466,19 +470,26 @@ serve(async (req) => {
       const totalChars = pages.reduce((s, p) => s + p.text.length, 0)
 
       const avgPerPage = nPages ? totalChars / nPages : 0
-      // Scanned / image-only PDF: MuPDF yields almost nothing. Don't store empty
-      // chunks — report it so the caller can route these to an OCR pass. Two
-      // triggers: (1) low AVERAGE text per page (whole doc is a thin scan), and
-      // (2) a high FRACTION of near-empty pages (a mixed scan whose few text
-      // pages pull the average up). Either one routes to OCR.
+      // Scanned / image-only PDF: route to an OCR pass. Decide on the SUBSTANTIVE
+      // pages only — those with real text (>= OCR_EMPTY_PAGE_CHARS). If those are
+      // themselves thin (< MIN_CHARS_PER_PAGE), the document is a genuine scan
+      // (incl. a thin embedded-text layer like the 8-page Fourth Amendment at
+      // ~224 chars/pg). A pure scan has NO substantive page → averages 0 → OCR.
+      // Excluding near-empty pages from the average is the fix for review #7: a
+      // text-native lease with blank/image EXHIBITS or signature pages (dense
+      // body + empty tails) no longer gets misrouted to vision OCR, which would
+      // discard its perfect embedded text. (Trade-off: a mixed scan whose few
+      // text pages are dense is under-covered rather than destroying good text.)
       const nearEmptyPages = pages.filter(p => p.text.length < OCR_EMPTY_PAGE_CHARS).length
-      const emptyFraction = nPages ? nearEmptyPages / nPages : 0
-      const needsOcr = avgPerPage < MIN_CHARS_PER_PAGE || emptyFraction >= OCR_EMPTY_PAGE_FRACTION
+      const substantive = pages.filter(p => p.text.length >= OCR_EMPTY_PAGE_CHARS)
+      const avgSubstantive = substantive.length
+        ? substantive.reduce((s, p) => s + p.text.length, 0) / substantive.length : 0
+      const needsOcr = avgSubstantive < MIN_CHARS_PER_PAGE
       if (needsOcr) {
         return new Response(JSON.stringify({
           success: true, reindex_text: true, document_id: reindexDocId, page_count: nPages,
-          avg_chars_per_page: Math.round(avgPerPage), near_empty_pages: nearEmptyPages,
-          needs_ocr: true, text_chunks: 0,
+          avg_chars_per_page: Math.round(avgPerPage), avg_substantive_chars: Math.round(avgSubstantive),
+          near_empty_pages: nearEmptyPages, needs_ocr: true, text_chunks: 0,
         }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
       }
 
