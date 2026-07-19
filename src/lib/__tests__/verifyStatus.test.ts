@@ -24,9 +24,14 @@ describe('hasFieldEvidence — a verdict must carry real field evidence', () => 
     expect(hasFieldEvidence({ field_checks: [] })).toBe(false)     // examined nothing
     expect(hasFieldEvidence({ field_checks: 'oops' })).toBe(false) // malformed
   })
-  it('accepts a verdict with at least one field_check', () => {
+  it('accepts a verdict with at least one recognized-verdict field_check', () => {
     expect(hasFieldEvidence(clean)).toBe(true)
     expect(hasFieldEvidence({ field_checks: [{ field: 'x', verdict: 'confirmed' }] })).toBe(true)
+  })
+  it('rejects rows that carry no recognized verdict (review finding #3)', () => {
+    expect(hasFieldEvidence({ field_checks: [{ field: 'rent' }] })).toBe(false)            // truncated: no verdict
+    expect(hasFieldEvidence({ field_checks: [{ field: 'rent', verdict: 'mismatch' }] })).toBe(false) // off-vocabulary
+    expect(hasFieldEvidence({ field_checks: [{ verdict: 'confirm' }] })).toBe(false)       // typo, not 'confirmed'
   })
 })
 
@@ -41,6 +46,15 @@ describe('deriveStatus — FAIL CLOSED (never green without evidence)', () => {
     expect(deriveStatus({ field_checks: [] })).toBe('issues')       // examined nothing
     expect(deriveStatus({ field_checks: null })).toBe('issues')
     expect(deriveStatus({ notField: 1 })).toBe('issues')
+  })
+  it('field_checks with no/off-vocabulary verdicts are NOT verified (review finding #3)', () => {
+    expect(deriveStatus({ ...clean, field_checks: [{ field: 'rent' }] })).toBe('issues')                 // no verdict
+    expect(deriveStatus({ ...clean, field_checks: [{ field: 'rent', verdict: 'mismatch' }] })).toBe('issues') // off-vocabulary
+    // one valid row + one uninterpretable row → still fails closed
+    expect(deriveStatus({ ...clean, field_checks: [
+      { field: 'expiration', verdict: 'confirmed', severity: 'high' },
+      { field: 'rent' },
+    ] })).toBe('issues')
   })
 })
 
