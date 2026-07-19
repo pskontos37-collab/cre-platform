@@ -34,8 +34,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: gitleaks scan (blocking)
         run: |
-          curl -sSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+          set -euo pipefail
+          # --fail: a 5xx/redirect must NOT be saved as the "tarball" (else tar
+          #   dies with a cryptic 'not in gzip format' and blocks the deploy for a
+          #   transient blip). --retry: ride out GitHub-release hiccups (review #11).
+          curl --fail --retry 3 --retry-delay 2 --retry-all-errors -sSL \
+            -o gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
           tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks version   # fail loudly if the download is bad, not with a scan error
           ./gitleaks dir . --redact --no-banner --exit-code 1
 
   check:
