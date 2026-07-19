@@ -15,7 +15,6 @@ $cfg=@{}; foreach($l in (Get-Content "$repo\.env" | Where-Object {$_ -match '='}
 $tok=$cfg['SUPABASE_ACCESS_TOKEN']; $ref=$cfg['SUPABASE_PROJECT_REF']
 $fnDir = "$repo\supabase\functions"
 $idxPath  = "$fnDir\$Slug\index.ts"
-$authPath = "$fnDir\_shared\auth.ts"
 if (-not (Test-Path $idxPath))  { throw "missing $idxPath" }
 
 $meta = @{ name=$Slug; entrypoint_path="$Slug/index.ts"; verify_jwt=$VerifyJwt } | ConvertTo-Json -Compress
@@ -35,8 +34,16 @@ function Add-FilePart($relName,$file){
   $form.Add($fc,'file',$relName)
 }
 Add-FilePart "$Slug/index.ts" $idxPath
-Add-FilePart "_shared/auth.ts" $authPath
-Write-Output ("uploading parts: {0}/index.ts, _shared/auth.ts" -f $Slug)
+# Include EVERY _shared/*.ts module, not just auth.ts. Functions now import
+# multiple shared modules (auth.ts, verifyStatus.ts, and more). The Supabase
+# bundler only compiles what is actually imported, so uploading them all is
+# safe and means a new shared module never silently breaks a deploy.
+$partNames = @("$Slug/index.ts")
+foreach ($sf in (Get-ChildItem "$fnDir\_shared" -Filter *.ts -File | Sort-Object Name)) {
+  Add-FilePart ("_shared/" + $sf.Name) $sf.FullName
+  $partNames += ("_shared/" + $sf.Name)
+}
+Write-Output ("uploading parts: {0}" -f ($partNames -join ', '))
 $reqm = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post,$uri)
 $reqm.Headers.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer',$tok)
 $reqm.Content = $form

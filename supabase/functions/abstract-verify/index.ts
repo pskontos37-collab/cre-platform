@@ -19,6 +19,7 @@
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { deriveStatus, hasFieldEvidence } from '../_shared/verifyStatus.ts'
 
 // Verification is a reasoning task, not a formatting one — use the strongest
 // model available. Override with QA_MODEL if needed.
@@ -141,28 +142,10 @@ const QA_SCHEMA = `{
  "recommended_fixes": [str]                       // concrete edits to make the abstract correct (empty if none)
 }`
 
-// verdict → row status. 'issues' = something a human must fix before relying on
-// the abstract; 'review' = softer flags worth a look; 'verified' = clean.
-function deriveStatus(qa: any): string {
-  const checks = Array.isArray(qa?.field_checks) ? qa.field_checks : []
-  const arith = Array.isArray(qa?.arithmetic) ? qa.arithmetic : []
-  const badVerdict = (v: string) => v === 'discrepancy' || v === 'unsupported'
-  // ISSUES = something a human must fix before relying on the abstract: a
-  // HIGH-severity discrepancy/unsupported claim, failed arithmetic, or a stale
-  // (superseded-amendment) term.
-  const highIssue = checks.some((c: any) => badVerdict(c?.verdict) && c?.severity === 'high')
-  const arithFail = arith.some((a: any) => a?.ok === false)
-  const stale = qa?.amendment_currency?.current === false
-  if (highIssue || arithFail || stale) return 'issues'
-  // REVIEW = softer flags worth a look: medium/low discrepancies, needs-source,
-  // or derived-value disclosures. fabrication_risk is NOT an issues trigger — post
-  // grounding-fix it mostly holds "computed, not quoted verbatim" notes, and a
-  // genuinely invented fact also surfaces as a HIGH 'unsupported' field_check above.
-  const softFlag = checks.some((c: any) => badVerdict(c?.verdict) || c?.verdict === 'needs_source')
-  const fabrication = Array.isArray(qa?.fabrication_risk) && qa.fabrication_risk.length > 0
-  if (softFlag || fabrication) return 'review'
-  return 'verified'
-}
+// Verdict → status logic lives in _shared/verifyStatus.ts (pure, no imports) so
+// the exact same fail-closed rules are unit-tested by Vitest in src/. deriveStatus
+// FAILS CLOSED: an empty/malformed/no-evidence verdict returns 'issues', never
+// 'verified' — the fix for the false-green path.
 
 serve(async (req) => {
   const CORS = corsHeaders(req)
@@ -423,10 +406,21 @@ ${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs — each extracted 
 
     const qaStatus = deriveStatus(qa)
 
+    // If the verifier returned nothing usable, persist a VISIBLE reason so the
+    // resulting non-verified state is self-explanatory (a human sees "re-run
+    // verify") rather than a mysterious red badge over an empty worklist.
+    const qaOut = hasFieldEvidence(qa)
+      ? qa
+      : {
+          ...(qa && typeof qa === 'object' && !Array.isArray(qa) ? qa : {}),
+          verifier_incomplete: true,
+          verifier_note: 'Verification did not return field-level evidence — NOT verified. Re-run verify.',
+        }
+
     // ── 5. Save ──
     const { error: upErr } = await sb.from('lease_abstracts')
       .update({
-        qa,
+        qa: qaOut,
         qa_status: qaStatus,
         qa_model: MODEL,
         qa_at: new Date().toISOString(),
@@ -438,7 +432,7 @@ ${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs — each extracted 
 
     return new Response(JSON.stringify({
       success: true, tenant, property_id: propertyId,
-      qa_status: qaStatus, pdf_sources: attachments.length, docs_reviewed: docs.length, qa,
+      qa_status: qaStatus, pdf_sources: attachments.length, docs_reviewed: docs.length, qa: qaOut,
     }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   } catch (err: unknown) {
