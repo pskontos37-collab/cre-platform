@@ -108,6 +108,32 @@ serve(async (req) => {
     if (!recipients.length) throw new AuthError('At least one valid recipient email is required', 400)
     if (recipients.length > MAX_RECIPIENTS) throw new AuthError(`Too many recipients (max ${MAX_RECIPIENTS})`, 400)
 
+    // RECIPIENT VALIDATION (review #9): every recipient must be a known tenant
+    // contact for THIS property. The server resolves the allowed set independently
+    // (the same sources the picker uses: tenant_contacts + active work-order portal
+    // users) rather than trusting the caller-supplied list — so the endpoint can't
+    // be used as a general mass-email relay to arbitrary addresses. Fail closed
+    // and name the offenders rather than silently dropping them.
+    const [tcRes, puRes] = await Promise.all([
+      sb.from('tenant_contacts').select('email').eq('property_id', propertyId).not('email', 'is', null),
+      sb.from('work_order_portal_users').select('email').eq('property_id', propertyId).eq('is_active', true),
+    ])
+    if (tcRes.error) throw new Error('recipient allowlist load failed: ' + tcRes.error.message)
+    if (puRes.error) throw new Error('recipient allowlist load failed: ' + puRes.error.message)
+    const allowed = new Set<string>()
+    for (const row of [...(tcRes.data ?? []), ...(puRes.data ?? [])] as Array<{ email: string | null }>) {
+      const e = String(row.email ?? '').trim().toLowerCase()
+      if (e) allowed.add(e)
+    }
+    const rejected = recipients.filter(r => !allowed.has(r.email))
+    if (rejected.length) {
+      const sample = rejected.slice(0, 5).map(r => r.email).join(', ')
+      throw new AuthError(
+        `${rejected.length} recipient(s) are not tenant contacts on file for this property and were not sent to: ${sample}${rejected.length > 5 ? '…' : ''}. Add them under Contacts first.`,
+        400,
+      )
+    }
+
     const RESEND = Deno.env.get('RESEND_API_KEY')
     if (!RESEND) throw new Error('RESEND_API_KEY not set — add it as a function secret to enable sending')
 
