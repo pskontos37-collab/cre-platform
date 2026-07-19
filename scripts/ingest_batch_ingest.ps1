@@ -75,6 +75,9 @@ function IngestResult($custom_id, $msg) {
   $title = if ($abs.summary) { ($abs.summary -replace '\s+', ' ').Trim() } else { $meta.file_name }
   if ($title.Length -gt 280) { $title = $title.Substring(0, 280) }
   $blob = (Blob $abs).Trim(); if (-not $blob) { $blob = $title }
+  # stamp provenance into the stored abstraction JSON, matching ingest_local_docs.ps1 exactly
+  $abs | Add-Member -NotePropertyName _tenant_folder -NotePropertyValue $meta.tenant -Force
+  $abs | Add-Member -NotePropertyName _source -NotePropertyValue ($meta.fp.Substring(5)) -Force
   # embed FIRST (so a failure never leaves an orphan documents row)
   $ebody = @{ model = $VOYAGE_MODEL; input = $blob.Substring(0, [Math]::Min(32000, $blob.Length)); input_type = 'document'; output_dimension = 1024 } | ConvertTo-Json
   $er = Invoke-RestMethod -Method Post -Uri "https://api.voyageai.com/v1/embeddings" -Headers @{ Authorization = "Bearer $VOYAGE_KEY" } -ContentType "application/json" -Body ([System.Text.Encoding]::UTF8.GetBytes($ebody)) -TimeoutSec 120
