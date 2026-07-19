@@ -1,4 +1,6 @@
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { AuthError, requireUser } from '../_shared/auth.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -98,6 +100,13 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
   try {
+    // AUTH (audit S2, added 2026-07-18): previously NO caller check — anyone with
+    // the public anon key could enumerate arbitrary Drive folders through the
+    // org's Google service account. Retired debug tooling: full-access callers only.
+    const authSb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+    const caller = await requireUser(req, authSb)
+    if (caller.access !== 'all') throw new AuthError('Not permitted', 403)
+
     const sa       = JSON.parse(Deno.env.get('GOOGLE_SERVICE_ACCOUNT') ?? '{}')
     const url      = new URL(req.url)
     const mode     = url.searchParams.get('mode') ?? 'debug'
@@ -163,8 +172,9 @@ serve(async (req) => {
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
+    const status = err instanceof AuthError ? err.status : 500
     return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...CORS, 'Content-Type': 'application/json' },
+      status, headers: { ...CORS, 'Content-Type': 'application/json' },
     })
   }
 })

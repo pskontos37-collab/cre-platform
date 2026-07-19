@@ -9,12 +9,17 @@
 //                            returns the caller's read scope.
 //   requireAdmin(req, sb) -> same, but insists on role='admin'.
 //   canReadProperty(...)  -> per-document gate mirroring the documents_select RLS.
+//   canWriteProperty(...) -> mutation gate: "may view" is NOT "may change".
 //   corsHeaders(req)      -> CORS locked to an origin allowlist (no more "*").
+//
+// The pure read/write decisions live in ./access.ts (no imports) so the exact
+// rules are unit-tested by Vitest in src/; this module re-exports them.
 //
 // On failure the require* helpers throw AuthError; each function's catch turns
 // its .status into the HTTP status.
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+export { canReadProperty, canWriteProperty } from './access.ts'
 
 export class AuthError extends Error {
   status: number
@@ -108,14 +113,6 @@ export async function requireAdmin(req: Request, sb: SupabaseClient): Promise<Ca
   const caller = await requireUser(req, sb)
   if (caller.role !== 'admin') throw new AuthError('Admin access required', 403)
   return caller
-}
-
-// A document is readable if the caller has full access, or the doc is
-// company-wide (null property), or its property is in the caller's set.
-export function canReadProperty(caller: Caller, propertyId: string | null): boolean {
-  if (caller.access === 'all') return true
-  if (propertyId == null) return true
-  return caller.access.has(propertyId)
 }
 
 // CORS locked to an origin allowlist. Override with the ALLOWED_ORIGINS secret

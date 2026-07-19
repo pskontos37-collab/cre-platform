@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import * as XLSX from 'npm:xlsx@0.18.5'
+import { AuthError, requireUser } from '../_shared/auth.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -213,6 +214,13 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     )
 
+    // AUTH (audit S2, added 2026-07-18): this retired Google-Drive import path
+    // previously had NO caller check — anyone holding the public anon key could
+    // trigger service-role writes into rent-roll/import tables. Imports are a
+    // portfolio-wide operation: full-access callers only.
+    const caller = await requireUser(req, sb)
+    if (caller.access !== 'all') throw new AuthError('Not permitted to run imports', 403)
+
     // ── status: return catalog from DB ───────────────────────
     if (mode === 'status') {
       const { data, error } = await sb.from('drive_file_catalog')
@@ -365,8 +373,9 @@ serve(async (req) => {
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
+    const status = err instanceof AuthError ? err.status : 500
     return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...CORS, 'Content-Type': 'application/json' },
+      status, headers: { ...CORS, 'Content-Type': 'application/json' },
     })
   }
 })

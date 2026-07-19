@@ -31,7 +31,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MODEL = Deno.env.get('COI_MODEL') ?? 'claude-sonnet-5'
 
@@ -168,7 +168,7 @@ serve(async (req) => {
     if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')
 
     let propertyId: string | null = body.property_id ?? null
-    if (propertyId && !canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+    if (!canWriteProperty(caller, propertyId ?? null)) throw new AuthError('No write access to this property', 403)   // WRITE gate (audit S2); unrouted (null-property) COIs need full access
     // Auto-routing (no property_id) is cross-property, so it's privileged-only.
     if (!propertyId && !caller.isPrivileged) throw new AuthError('property_id is required for your role', 403)
 

@@ -17,7 +17,7 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { PDFDocument } from 'https://esm.sh/pdf-lib@1.17.1'
 import { extractText, getDocumentProxy } from 'https://esm.sh/unpdf@0.12.1'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 // MuPDF is imported LAZILY. A top-level `npm:mupdf` import evaluates the WASM
 // module at boot, which fails on the current Supabase edge runtime (BOOT_ERROR).
@@ -394,10 +394,10 @@ serve(async (req) => {
         await sb.from('documents').select('property_id').eq('id', reindexDocId).maybeSingle()
       if (ownerErr) throw new Error('document lookup failed: ' + ownerErr.message)
       if (!ownerDoc) throw new AuthError('Document not found', 404)
-      if (!canReadProperty(caller, ownerDoc.property_id as string | null)) throw new AuthError('No access to this document', 403)
+      if (!canWriteProperty(caller, (ownerDoc.property_id as string | null) ?? null)) throw new AuthError('No write access to this document', 403)   // WRITE gate (audit S2): reindex/OCR deletes + rewrites chunks
       ownerPropertyId = (ownerDoc.property_id as string | null)
     } else if (store) {
-      if (!canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+      if (!canWriteProperty(caller, propertyId ?? null)) throw new AuthError('No write access to this property', 403)   // WRITE gate (audit S2): store mode inserts documents+chunks
     } else if (!caller.isPrivileged) {
       throw new AuthError('Not permitted to extract arbitrary storage objects by path', 403)
     }

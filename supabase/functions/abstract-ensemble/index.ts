@@ -30,7 +30,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MODEL = Deno.env.get('QA_MODEL') ?? 'claude-opus-4-8'
 const QA_OPENAI_MODEL = Deno.env.get('QA_OPENAI_MODEL') ?? 'gpt-4.1'
@@ -42,6 +42,14 @@ const BRIEF_BUDGET = 150_000
 // nuanced/contested exclusives flag. Widen via env without a redeploy.
 const AUTO_APPLY_FIELDS = new Set(
   (Deno.env.get('AUTO_APPLY_FIELDS') ?? 'term.expiration,guarantor.name').split(',').map(s => s.trim()).filter(Boolean))
+// HARD KILL SWITCH (audit finding S4, 2026-07-18). Server-side automated
+// corrections stay DISABLED until the golden-set benchmark exists — history
+// records a real incident where the first auto-applied "correction" changed a
+// correct 2029 expiration to a wrong 2024 date. The UI already stopped sending
+// auto_apply=true; this closes the remaining server capability for any caller
+// that still requests it. Re-enable deliberately via ENSEMBLE_AUTO_APPLY=1
+// (a function-secret change, i.e. an explicit human decision) once benchmarked.
+const AUTO_APPLY_ENABLED = (Deno.env.get('ENSEMBLE_AUTO_APPLY') ?? '0') === '1'
 
 // Layer reviewer overrides (dotted-path -> value) over the AI abstract so the
 // lenses cross-check the HUMAN-CORRECTED values (a corrected field must read as
@@ -173,7 +181,9 @@ serve(async (req) => {
     const propertyId: string = body.property_id ?? ''
     const tenant: string = (body.tenant ?? '').trim()
     if (!propertyId || !tenant) throw new Error('property_id and tenant are required')
-    if (!canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+    // WRITE gate (audit S2): this endpoint mutates lease_abstracts (field_confidence,
+    // and the auto-apply override path) and spends AI credits — read access is not enough.
+    if (!canWriteProperty(caller, propertyId)) throw new AuthError('No write access to this property', 403)
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')
@@ -389,7 +399,8 @@ ${CHECK_SCHEMA}`
     // audit trail and is undoable. Anything short of unanimous stays
     // detection-only in the worklist for a human to adjudicate. ──
     const autoApplied: any[] = []
-    if (body.auto_apply === true && !row.locked) {
+    const autoApplyRequested = body.auto_apply === true
+    if (autoApplyRequested && AUTO_APPLY_ENABLED && !row.locked) {
       const existingOverrides = (row.overrides && typeof row.overrides === 'object') ? row.overrides as Record<string, any> : {}
       const newOverrides: Record<string, any> = {}
       for (const h of highStakes) {
@@ -459,7 +470,7 @@ ${CHECK_SCHEMA}`
       .eq('property_id', propertyId).eq('tenant_name', tenant)
     if (upErr) throw new Error('save failed: ' + upErr.message)
 
-    return new Response(JSON.stringify({ success: true, tenant, property_id: propertyId, summary: fieldConfidence.summary, disagreements, reconfirm, registry_rejected: registryRejected, auto_applied: autoApplied, lens_errors: lensErrors }),
+    return new Response(JSON.stringify({ success: true, tenant, property_id: propertyId, summary: fieldConfidence.summary, disagreements, reconfirm, registry_rejected: registryRejected, auto_applied: autoApplied, auto_apply_disabled: autoApplyRequested && !AUTO_APPLY_ENABLED ? 'Server-side auto-apply is disabled pending golden-set benchmark (set ENSEMBLE_AUTO_APPLY=1 to re-enable)' : undefined, lens_errors: lensErrors }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } })
 
   } catch (err: unknown) {

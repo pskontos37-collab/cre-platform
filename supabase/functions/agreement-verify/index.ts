@@ -8,7 +8,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MODEL = Deno.env.get('QA_MODEL') ?? 'claude-opus-4-8'
 const CHAR_BUDGET = 300_000
@@ -126,7 +126,7 @@ serve(async (req) => {
     const table = kind === 'rea' ? 'rea_agreements' : kind === 'jv' ? 'deals' : kind === 'svc' ? 'service_agreements' : 'management_agreements'
     const { data: row, error } = await sb.from(table).select('*').eq('id', id).maybeSingle()
     if (error || !row) throw new Error(`${table} row not found`)
-    if (row.property_id && !canReadProperty(caller, row.property_id)) throw new AuthError('No access', 403)
+    if (!canWriteProperty(caller, row.property_id ?? null)) throw new AuthError('No write access to this agreement', 403)   // WRITE gate (audit S2); null-property rows (e.g. JV deals) need full access
     // For 'svc' the tracker row's extracted fields ARE the abstract under review.
     const subjectAbstract = kind === 'svc'
       ? {

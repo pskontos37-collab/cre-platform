@@ -15,7 +15,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MODEL = Deno.env.get('ABSTRACT_MODEL') ?? 'claude-sonnet-5'
 const BRIEF_BUDGET = 280_000
@@ -206,7 +206,7 @@ async function handle(req: Request): Promise<Response> {
         budget_variance_pct: row.budget_variance_pct, monthly_report_due_day: row.monthly_report_due_day,
       }
     }
-    if (row.property_id && !canReadProperty(caller, row.property_id)) throw new AuthError('No access', 403)
+    if (!canWriteProperty(caller, row.property_id ?? null)) throw new AuthError('No write access to this agreement', 403)   // WRITE gate (audit S2); null-property rows (e.g. JV deals) need full access
     if (!docIds.length) throw new Error('agreement has no linked source documents')
 
     const { data: docRows } = await sb.from('documents')

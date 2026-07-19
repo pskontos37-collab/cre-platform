@@ -16,7 +16,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MODEL = Deno.env.get('ABSTRACT_MODEL') ?? 'claude-sonnet-5'
 const CHAR_BUDGET = 280_000
@@ -84,7 +84,7 @@ serve(async (req) => {
       .eq('id', documentId)
       .single()
     if (dErr || !doc) throw new Error('document not found')
-    if (!canReadProperty(caller, doc.property_id ?? null)) throw new AuthError('No access to this document', 403)
+    if (!canWriteProperty(caller, doc.property_id ?? null)) throw new AuthError('No write access to this document', 403)   // WRITE gate (audit S2)
 
     // ── 2. Cache ──
     if (!force) {

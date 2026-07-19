@@ -23,7 +23,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MAX_BYTES = 20 * 1024 * 1024
 
@@ -49,7 +49,7 @@ serve(async (req) => {
       else throw new Error(`property_hint "${body.property_hint}" matched ${props?.length ?? 0} properties — pass property_id`)
     }
     if (!propertyId) throw new Error('property_id or a resolvable property_hint is required')
-    if (!canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+    if (!canWriteProperty(caller, propertyId)) throw new AuthError('No write access to this property', 403)   // WRITE gate (audit S2): this endpoint mutates state / spends AI credits
 
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
     if (bytes.length > MAX_BYTES) throw new Error(`attachment is ${(bytes.length / 1048576).toFixed(1)}MB — exceeds the 20MB inbox cap`)

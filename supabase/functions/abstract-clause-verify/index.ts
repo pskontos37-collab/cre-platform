@@ -32,7 +32,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MODEL = Deno.env.get('QA_MODEL') ?? 'claude-opus-4-8'
 const QA_OPENAI_MODEL = Deno.env.get('QA_OPENAI_MODEL') ?? 'gpt-4.1'
@@ -194,7 +194,7 @@ serve(async (req) => {
     const only: string[] | null = Array.isArray(body.only) && body.only.length ? body.only.map((s: any) => String(s)) : null
     const crossModel: boolean = body.cross_model !== false     // default ON (accuracy over cost)
     if (!propertyId || !tenant) throw new Error('property_id and tenant are required')
-    if (!canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+    if (!canWriteProperty(caller, propertyId)) throw new AuthError('No write access to this property', 403)   // WRITE gate (audit S2): this endpoint mutates state / spends AI credits
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!anthropicKey) throw new Error('Missing ANTHROPIC_API_KEY secret')

@@ -19,7 +19,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canReadProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 
 const MODEL = Deno.env.get('BRIEF_MODEL') ?? Deno.env.get('ABSTRACT_MODEL') ?? 'claude-sonnet-5'
 // TIMING CONSTRAINT: the edge runtime kills a request after 150s without
@@ -213,8 +213,11 @@ serve(async (req) => {
       .eq('id', documentId).maybeSingle()
     if (dErr) throw new Error('document load failed: ' + dErr.message)
     if (!doc) throw new Error('document not found')
-    if (doc.property_id && !canReadProperty(caller, doc.property_id)) {
-      throw new AuthError('No access to this document', 403)
+    // WRITE gate (audit S2): briefs are written to doc_briefs and AI credits are
+    // spent — read access is not enough. Unconditional: null-property (company-
+    // wide) documents need full access to (re)brief.
+    if (!canWriteProperty(caller, doc.property_id ?? null)) {
+      throw new AuthError('No write access to this document', 403)
     }
 
     // ── 2. Full text: prefer the verbatim kind='text' layer; fall back to

@@ -64,7 +64,13 @@ serve(async (req) => {
   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   try {
-    await requireUser(req, sb)   // any active user may send
+    // WRITE gate (audit S2): this sends EXTERNAL EMAIL with a caller-supplied
+    // recipient, body and attachment from the company address — an outbound
+    // communication, not a read. Full-access callers only (admin / asset_manager /
+    // global grant / service token). All current operators are privileged, so
+    // this changes nothing today; it closes the relay for future scoped users.
+    const caller = await requireUser(req, sb)
+    if (caller.access !== 'all') throw new AuthError('Not permitted to send external email', 403)
 
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {}
     const to = String(body.to ?? '').trim()
