@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
+import { useFilteredPropertyIds } from '../hooks/useFilteredPropertyIds'
 import { useQuery } from '../hooks/useQuery'
 import { supabase } from '../lib/supabase'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
@@ -151,9 +152,19 @@ export const CLAUSES: Array<{ key: string; label: string; render: (a: any) => st
 
 export function AbstractsPage() {
   const { appUser } = useAuth()
-  const { data: properties } = useProperties()
+  const { data: allProperties } = useProperties()
+  // Respect the global View scope (top bar): the page only offers — and pins to —
+  // properties inside the current portfolio/property selection, so the page picker
+  // is a drill-down within that scope rather than a second, competing filter.
+  const scopedIds = useFilteredPropertyIds(allProperties ?? null)
+  const properties = useMemo(() => {
+    const set = new Set(scopedIds)
+    return (allProperties ?? []).filter(p => set.has(p.id))
+  }, [allProperties, scopedIds])
+  // When the scope resolves to exactly one property, the page hides its own picker
+  // and shows the name as static context — no redundant control.
+  const singleScoped = properties.length === 1
   const [propertyId, setPropertyId] = useState<string | null>(null)
-  useEffect(() => { if (!propertyId && properties?.length) setPropertyId(properties[0].id) }, [properties, propertyId])
 
   const [bump, setBump] = useState(0)
   const tenants = useTenantsForProperty(propertyId)
@@ -169,6 +180,16 @@ export function AbstractsPage() {
     return m
   }, [resolutions.data])
   const [selected, setSelected] = useState<string | null>(null)
+  // Keep the active property inside the current View scope. If the top filter
+  // narrows to a set that excludes the current property (or none is chosen yet),
+  // snap to the first scoped property and clear any now-stale tenant selection.
+  useEffect(() => {
+    if (!properties.length) return
+    if (!propertyId || !properties.some(p => p.id === propertyId)) {
+      setPropertyId(properties[0].id)
+      setSelected(null)
+    }
+  }, [properties, propertyId])
   const [generating, setGenerating] = useState<Set<string>>(new Set())
   // Per-tenant progress detail during the two-stage generate (briefing N/M → synthesizing).
   const [phase, setPhase] = useState<Record<string, string>>({})
@@ -530,10 +551,19 @@ export function AbstractsPage() {
       />
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-        <select value={propertyId ?? ''} onChange={e => { setPropertyId(e.target.value); setSelected(null) }}
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '7px 10px' }}>
-          {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        {singleScoped ? (
+          <span
+            title="Property is set by the View selector at the top of the page"
+            style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', padding: '7px 0' }}
+          >
+            {properties[0]?.name}
+          </span>
+        ) : (
+          <select value={propertyId ?? ''} onChange={e => { setPropertyId(e.target.value); setSelected(null) }}
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '7px 10px' }}>
+            {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
         {/* Quick tenant selection menu (✓ = abstract exists) */}
         <select value={selected ?? ''} onChange={e => { setSelected(e.target.value || null); setView('tenant') }}
           style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '7px 10px', maxWidth: 280 }}>
@@ -631,7 +661,7 @@ export function AbstractsPage() {
                                   {unresolvedRed.data?.[t.toLowerCase()]}
                                 </span>
                               )}
-                              {a.locked && <span title="Human-verified & locked" style={{ fontSize: 10 }}>🔒</span>}<QaBadge status={a.qa_status} /></span>
+                              <VerificationBadge row={a} /></span>
                           : <button onClick={e => { e.stopPropagation(); void generate(t) }}
                               style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                               Generate
@@ -862,7 +892,14 @@ function VerifyAllButton({ abstracts, verifying, onVerify }: {
   }
 
   if (!abstracts.length) return null
-  if (!unverified.length) return <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>AI QA complete for all generated abstracts ✓</span>
+  if (!unverified.length) {
+    // "QA ran everywhere" is not "QA found nothing" (audit: a portfolio state
+    // must not read clean while tenants carry open flags). Disclose the split.
+    const flagged = abstracts.filter(a => verificationNeedsReview(a) || a.qa_status === 'review').length
+    return flagged
+      ? <span style={{ fontSize: 11, color: 'var(--amber)' }}>AI QA ran on all generated abstracts — {flagged} flagged for review</span>
+      : <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>AI QA ran on all generated abstracts — no open flags ✓</span>
+  }
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <button onClick={() => void run()} disabled={running || verifying.size > 0}
@@ -975,20 +1012,41 @@ const CONF_FIELD_LABEL: Record<string, string> = {
 }
 const clip = (s: any, n = 140) => { const t = String(s ?? '—'); return t.length > n ? t.slice(0, n) + '…' : t }
 
-// Compact header pill summarizing the ensemble cross-check outcome.
-function ConfidenceBadge({ fc }: { fc: any }) {
-  if (!fc?.summary) return null
-  const s = fc.summary
-  const [label, color] = s.low > 0 ? [`⚑ ${s.low} low-confidence`, CONF_COLOR.low]
-    : s.medium > 0 ? [`${s.medium} medium-confidence`, CONF_COLOR.medium]
-    : ['✓ Cross-checked', CONF_COLOR.high]
+// Unified verification indicator — ONE badge for the whole verification surface.
+// Verify (adversarial audit), Cross-check (ensemble) and Clause-check (specialists)
+// all converge into the single worklist, so a single badge reflects their combined
+// state. In the abstract header we pass the exact unified worklist count; in the
+// tenant list we derive a coarse review/verified state from the stored summaries.
+function verificationNeedsReview(row: any): boolean {
+  return row?.qa_status === 'issues'
+    || ((row?.field_confidence?.summary?.low ?? 0) > 0)
+    || ((row?.clause_findings?.summary?.actionable ?? 0) > 0)
+}
+// Label discipline (audit finding #1): "Verified"/"Approved" is reserved for a
+// HUMAN decision. A clean machine outcome says "AI checks clear" — a checkmark
+// that admits what it is. Soft (review-level) flags get their own amber tier so
+// they can never read as clean.
+function VerificationBadge({ row, count }: { row: any; count?: number }) {
+  const ran = !!(row?.qa_status || row?.field_confidence || row?.clause_findings)
+  const approved = row?.human_verified === true || row?.locked === true
+  let label: string, color: string, title: string
+  if (approved) { label = '🔒 Human approved'; color = 'var(--green, #22c55e)'; title = 'Reviewed and locked by a human' }
+  else if (!ran) { label = 'Not verified'; color = 'var(--text-faint)'; title = 'No verification run yet — Verify, Cross-check or Clause-check' }
+  else {
+    const red = count != null ? count > 0 : verificationNeedsReview(row)
+    const soft = row?.qa_status === 'review'
+    if (red) { label = count != null ? `⚑ ${count} to review` : '⚑ Review'; color = 'var(--red, #ef4444)'; title = 'Open items across Verify, Cross-check and Clause-check — see the worklist' }
+    else if (soft) { label = '● Review'; color = 'var(--amber)'; title = 'Verification raised soft flags worth a look — see the worklist' }
+    else { label = '✓ AI checks clear'; color = 'var(--green, #22c55e)'; title = 'Machine checks passed — not human approval' }
+  }
   return (
-    <span title="Ensemble cross-check: two independent lenses vs the stored value"
-      style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>
-      {label}
-    </span>
+    <span title={title} style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>{label}</span>
   )
 }
+
+// (ConfidenceBadge and ClauseBadge — the per-source header pills — were retired
+// with QaBadge when VerificationBadge unified the three verification surfaces
+// into one indicator; their detail panels below remain.)
 
 // ── Clause-specialist surface (abstract-clause-verify, migration 20240113) ──
 const SPEC_LABEL: Record<string, string> = { exclusives: 'Exclusives', options: 'Options', guaranty: 'Guaranty', cotenancy: 'Co-tenancy' }
@@ -997,19 +1055,6 @@ const CLAUSE_VERDICT: Record<string, { label: string; color: string }> = {
   cannot_verify: { label: 'Cannot verify', color: 'var(--amber, #f59e0b)' },
   enrich: { label: 'Add nuance', color: 'var(--accent)' },
   confirm: { label: 'Confirmed', color: 'var(--green, #22c55e)' },
-}
-
-// Compact header pill summarizing the clause-specialist outcome.
-function ClauseBadge({ cf }: { cf: any }) {
-  if (!cf?.summary) return null
-  const a = cf.summary.actionable ?? 0
-  const [label, color] = a > 0 ? [`⚑ ${a} clause finding${a > 1 ? 's' : ''}`, CONF_COLOR.low] : ['✓ Clause-checked', CONF_COLOR.high]
-  return (
-    <span title="Single-clause specialists (exclusives, options, guaranty, co-tenancy) deep-audited each clause"
-      style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>
-      {label}
-    </span>
-  )
 }
 
 // Per-clause specialist findings detail. A SEPARATE provenance layer: N
@@ -1267,8 +1312,7 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
             : '0 source documents'}{row.human_verified ? '' : ' · verify against the source lease before relying on it'}
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <ConfidenceBadge fc={row.field_confidence} />
-          <ClauseBadge cf={row.clause_findings} />
+          <VerificationBadge row={row} count={unresolvedRedCount} />
           {onCrossCheck && (
             <button onClick={onCrossCheck} disabled={crossChecking || busy}
               title="Two independent lenses re-check the high-stakes fields and score their agreement with the stored value"
@@ -1492,17 +1536,14 @@ export function AbstractView({ row, onRegenerate, busy, onVerify, verifying, onC
   )
 }
 
-// Compact QA status pill for the tenant list. No verdict yet = a muted "verify"
-// hint so untested abstracts read as unverified, not implicitly trusted.
+// QA-status chip metadata (QaPanel + section titles). Label discipline (audit
+// finding #1): a machine-clean outcome says "AI checks clear", never "verified"
+// — that word is reserved for the human-approved state. The tenant-list badge
+// itself is VerificationBadge above (QaBadge was retired with it).
 const QA_META: Record<string, { label: string; color: string; bg: string }> = {
-  verified: { label: '✓ verified', color: 'var(--green, #22c55e)', bg: 'rgba(34,197,94,0.12)' },
-  issues:   { label: '⚠ issues',   color: 'var(--red, #ef4444)',   bg: 'rgba(239,68,68,0.12)' },
-  review:   { label: '● review',   color: 'var(--amber)',           bg: 'rgba(245,158,11,0.12)' },
-}
-function QaBadge({ status }: { status: string | null }) {
-  const m = status ? QA_META[status] : null
-  if (!m) return <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>unverified</span>
-  return <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 10, color: m.color, background: m.bg, whiteSpace: 'nowrap' }}>{m.label}</span>
+  verified: { label: '✓ AI checks clear', color: 'var(--green, #22c55e)', bg: 'rgba(34,197,94,0.12)' },
+  issues:   { label: '⚠ issues',          color: 'var(--red, #ef4444)',   bg: 'rgba(239,68,68,0.12)' },
+  review:   { label: '● review',          color: 'var(--amber)',           bg: 'rgba(245,158,11,0.12)' },
 }
 
 const VERDICT_META: Record<string, { color: string; label: string }> = {
@@ -2597,6 +2638,15 @@ function QaPanel({ qa, status, at, sourceDocIds, resByKey }: { qa: any; status: 
         )}
       </div>
       {qa?.summary && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 8 }}>{qa.summary}</div>}
+
+      {/* Fail-closed verifier outcome (abstract-verify): the run returned no
+          usable field evidence, so the status is 'issues' by construction.
+          Without this line the panel would show a red chip over an empty list. */}
+      {qa?.verifier_incomplete && (
+        <div style={{ fontSize: 12, color: 'var(--red, #ef4444)', fontWeight: 600, marginBottom: 6 }}>
+          ⚠ {qa?.verifier_note ?? 'Verification did not return field-level evidence — NOT verified. Re-run verify.'}
+        </div>
+      )}
 
       {stale && (
         <div style={{ fontSize: 12, color: 'var(--red, #ef4444)', fontWeight: 600, marginBottom: 6 }}>
