@@ -172,6 +172,22 @@ serve(async (req) => {
     // Auto-routing (no property_id) is cross-property, so it's privileged-only.
     if (!propertyId && !caller.isPrivileged) throw new AuthError('property_id is required for your role', 403)
 
+    // OBJECT OWNERSHIP (review #6): certificate_id and queue_id are caller-supplied
+    // and drive UPDATE/DELETE by id. Authorize against the TARGET row's real
+    // property — not just body.property_id — else a scoped writer could pass a
+    // foreign certificate_id and both overwrite it AND reassign it to their own
+    // property (row.property_id below is set to the authorized propertyId).
+    if (body.certificate_id) {
+      const { data: certRow } = await sb.from('coi_certificates').select('property_id').eq('id', body.certificate_id).maybeSingle()
+      if (!certRow) throw new AuthError('Certificate not found', 404)
+      if (!canWriteProperty(caller, certRow.property_id as string | null)) throw new AuthError('No write access to this certificate', 403)
+    }
+    if (body.queue_id) {
+      const { data: qRow } = await sb.from('coi_review_queue').select('suggested_property_id').eq('id', body.queue_id).maybeSingle()
+      if (!qRow) throw new AuthError('Review item not found', 404)
+      if (!canWriteProperty(caller, qRow.suggested_property_id as string | null)) throw new AuthError('No write access to this review item', 403)
+    }
+
     // ── 1. Resolve the PDF ──
     let pdfUrl: string = body.pdf_url ?? ''
     const documentId: string | null = body.document_id ?? null
