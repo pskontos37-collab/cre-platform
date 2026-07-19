@@ -64,13 +64,11 @@ serve(async (req) => {
   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   try {
-    // WRITE gate (audit S2): this sends EXTERNAL EMAIL with a caller-supplied
-    // recipient, body and attachment from the company address — an outbound
-    // communication, not a read. Full-access callers only (admin / asset_manager /
-    // global grant / service token). All current operators are privileged, so
-    // this changes nothing today; it closes the relay for future scoped users.
-    const caller = await requireUser(req, sb)
-    if (caller.access !== 'all') throw new AuthError('Not permitted to send external email', 403)
+    // Any ACTIVE authenticated staff member may send a vendor agreement for
+    // signature (review #10 — property managers issue vendor contracts, per the
+    // feature's design). requireUser already rejects the anon key and inactive
+    // accounts; the recipient `to` is validated below as a real address.
+    await requireUser(req, sb)
 
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {}
     const to = String(body.to ?? '').trim()
