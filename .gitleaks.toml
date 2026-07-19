@@ -1,0 +1,14 @@
+# gitleaks configuration (audit S1, 2026-07-18).
+# CI runs `gitleaks dir .` on the checkout as a BLOCKING gate (see ci.yml).
+# Local runs see .env — the designated, gitignored local secret store — so it
+# is allowlisted here; everything else that matches a rule must either be a
+# real leak (fix it) or carry an inline `gitleaks:allow` with a justification.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = ".env is the gitignored local secret store; never committed (verified 2026-07-18)"
+paths = [
+  '''^\.env$''',
+]

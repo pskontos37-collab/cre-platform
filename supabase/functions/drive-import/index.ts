@@ -29,7 +29,7 @@ async function getAccessToken(sa: Record<string, string>): Promise<string> {
   })
   const sigInput = `${header}.${payload}`
   const pem = sa.private_key
-    .replace('-----BEGIN PRIVATE KEY-----', '').replace('-----END PRIVATE KEY-----', '').replace(/\n/g, '')
+    .replace('-----BEGIN PRIVATE KEY-----', '').replace('-----END PRIVATE KEY-----', '').replace(/\n/g, '')   // gitleaks:allow — PEM header literals used to STRIP the marker, not key material
   const binaryKey = Uint8Array.from(atob(pem), c => c.charCodeAt(0))
   const cryptoKey = await crypto.subtle.importKey(
     'pkcs8', binaryKey, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']

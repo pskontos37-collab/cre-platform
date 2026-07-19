@@ -24,6 +24,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Secret scanning (audit S1) — BLOCKS preview and production deploys. Scans the
+  # checkout (tracked files) with gitleaks; .env never reaches CI (gitignored) and
+  # the two PEM-header string literals carry inline `gitleaks:allow` comments.
+  # Pinned version; verified locally against this tree on 2026-07-18 (0 findings).
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: gitleaks scan (blocking)
+        run: |
+          curl -sSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks dir . --redact --no-banner --exit-code 1
+
   check:
     runs-on: ubuntu-latest
     steps:
@@ -46,7 +60,7 @@ jobs:
         run: npm run build:ci
 
   preview:
-    needs: check
+    needs: [check, secrets]
     # Same-repository pull requests receive an isolated Vercel preview URL.
     # This intentionally omits --prod, so master and the live application are
     # never changed by the preview job.
@@ -71,7 +85,7 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
   deploy:
-    needs: check
+    needs: [check, secrets]
     # Deploy the COMMITTED master ref on every green push to master (and on manual
     # dispatch). This makes committed master HEAD the single source of truth for
     # production and retires the working-tree upload (scripts/deploy_vercel.ps1),

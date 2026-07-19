@@ -23,7 +23,7 @@ async function getAccessToken(sa: Record<string, string>): Promise<string> {
 
   const sigInput = `${header}.${payload}`
   const pem = sa.private_key
-    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----BEGIN PRIVATE KEY-----', '')   // gitleaks:allow — PEM header literal used to STRIP the marker, not key material
     .replace('-----END PRIVATE KEY-----', '')
     .replace(/\n/g, '')
 
