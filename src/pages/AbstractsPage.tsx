@@ -184,7 +184,12 @@ export function AbstractsPage() {
   // narrows to a set that excludes the current property (or none is chosen yet),
   // snap to the first scoped property and clear any now-stale tenant selection.
   useEffect(() => {
-    if (!properties.length) return
+    if (!properties.length) {
+      // Scope resolved to zero properties: drop the now-out-of-scope selection
+      // instead of leaving the excluded property's tenants/abstracts rendering.
+      if (propertyId !== null) { setPropertyId(null); setSelected(null) }
+      return
+    }
     if (!propertyId || !properties.some(p => p.id === propertyId)) {
       setPropertyId(properties[0].id)
       setSelected(null)
@@ -895,7 +900,10 @@ function VerifyAllButton({ abstracts, verifying, onVerify }: {
   if (!unverified.length) {
     // "QA ran everywhere" is not "QA found nothing" (audit: a portfolio state
     // must not read clean while tenants carry open flags). Disclose the split.
-    const flagged = abstracts.filter(a => verificationNeedsReview(a) || a.qa_status === 'review').length
+    // Exclude human-approved/locked rows: a reviewer decided them, so they render
+    // a green badge — counting them here would contradict the tenant list.
+    const flagged = abstracts.filter(a =>
+      !(a.locked || a.human_verified) && (verificationNeedsReview(a) || a.qa_status === 'review')).length
     return flagged
       ? <span style={{ fontSize: 11, color: 'var(--amber)' }}>AI QA ran on all generated abstracts — {flagged} flagged for review</span>
       : <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>AI QA ran on all generated abstracts — no open flags ✓</span>
@@ -1029,16 +1037,27 @@ function verificationNeedsReview(row: any): boolean {
 function VerificationBadge({ row, count }: { row: any; count?: number }) {
   const ran = !!(row?.qa_status || row?.field_confidence || row?.clause_findings)
   const approved = row?.human_verified === true || row?.locked === true
+  // Two fail-closed verifier states produce NO worklist rows (buildWorklist reads
+  // field_checks/mri/arith/ensemble/clause only), so the resolution-aware `count`
+  // structurally can't represent them — OR them in explicitly, else a fail-closed
+  // abstract would read green in the header (which passes a count) while the
+  // tenant list shows red. This is the audit's false-green, re-closed.
+  const failClosed = row?.qa?.verifier_incomplete === true || row?.qa?.amendment_currency?.current === false
+  const red = count != null ? (count > 0 || failClosed) : verificationNeedsReview(row)
+  const soft = row?.qa_status === 'review'
+  const openLabel = count != null && count > 0 ? `⚑ ${count} to review` : '⚑ Review'
   let label: string, color: string, title: string
-  if (approved) { label = '🔒 Human approved'; color = 'var(--green, #22c55e)'; title = 'Reviewed and locked by a human' }
-  else if (!ran) { label = 'Not verified'; color = 'var(--text-faint)'; title = 'No verification run yet — Verify, Cross-check or Clause-check' }
-  else {
-    const red = count != null ? count > 0 : verificationNeedsReview(row)
-    const soft = row?.qa_status === 'review'
-    if (red) { label = count != null ? `⚑ ${count} to review` : '⚑ Review'; color = 'var(--red, #ef4444)'; title = 'Open items across Verify, Cross-check and Clause-check — see the worklist' }
-    else if (soft) { label = '● Review'; color = 'var(--amber)'; title = 'Verification raised soft flags worth a look — see the worklist' }
-    else { label = '✓ AI checks clear'; color = 'var(--green, #22c55e)'; title = 'Machine checks passed — not human approval' }
+  if (approved && red) {
+    // Human-locked but open verification items remain (the "lock anyway" path).
+    // Show BOTH so the lock never masks unresolved reds.
+    label = count != null && count > 0 ? `🔒 Approved · ⚑ ${count}` : '🔒 Approved · ⚑ open'
+    color = 'var(--amber)'; title = 'Human-locked, but open verification items remain — see the worklist'
   }
+  else if (approved) { label = '🔒 Human approved'; color = 'var(--green, #22c55e)'; title = 'Reviewed and locked by a human' }
+  else if (!ran) { label = 'Not verified'; color = 'var(--text-faint)'; title = 'No verification run yet — Verify, Cross-check or Clause-check' }
+  else if (red) { label = openLabel; color = 'var(--red, #ef4444)'; title = 'Open items across Verify, Cross-check and Clause-check — see the worklist' }
+  else if (soft) { label = '● Review'; color = 'var(--amber)'; title = 'Verification raised soft flags worth a look — see the worklist' }
+  else { label = '✓ AI checks clear'; color = 'var(--green, #22c55e)'; title = 'Machine checks passed — not human approval' }
   return (
     <span title={title} style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 9, whiteSpace: 'nowrap', color, border: `1px solid ${color}`, background: 'transparent' }}>{label}</span>
   )
