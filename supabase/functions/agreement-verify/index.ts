@@ -9,6 +9,7 @@
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { deriveStatus, hasFieldEvidence } from '../_shared/verifyStatus.ts'
 
 const MODEL = Deno.env.get('QA_MODEL') ?? 'claude-opus-4-8'
 const CHAR_BUDGET = 300_000
@@ -99,13 +100,12 @@ const QA_SCHEMA = `{
  "recommended_fixes": [str]
 }`
 
-function deriveStatus(qa: any): string {
-  const checks = Array.isArray(qa?.field_checks) ? qa.field_checks : []
-  const bad = (v: string) => v === 'discrepancy' || v === 'unsupported'
-  if (checks.some((c: any) => bad(c?.verdict) && c?.severity === 'high') || qa?.amendment_currency?.current === false) return 'issues'
-  if (checks.some((c: any) => bad(c?.verdict) || c?.verdict === 'needs_source')) return 'review'
-  return 'verified'
-}
+// Status derivation is the SHARED fail-closed logic (_shared/verifyStatus.ts) —
+// the same fix applied to lease abstract-verify (audit A1 / review #3/#4). The
+// old local deriveStatus was fail-OPEN: a response with no field_checks (e.g.
+// {summary,confidence} — which the envelope check accepts) derived 'verified'.
+// The shared arithmetic/fabrication branches are inert here (this QA schema has
+// neither), so valid runs derive identically while junk now fails closed.
 
 serve(async (req) => {
   const CORS = corsHeaders(req)
@@ -295,13 +295,22 @@ ${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs):\n${briefParts.joi
     }
 
     const qaStatus = deriveStatus(qa)
+    // Persist a visible reason when the verdict fails closed, so the resulting
+    // non-verified state is self-explanatory rather than an empty red chip.
+    const qaOut = hasFieldEvidence(qa)
+      ? qa
+      : {
+          ...(qa && typeof qa === 'object' && !Array.isArray(qa) ? qa : {}),
+          verifier_incomplete: true,
+          verifier_note: 'Verification did not return field-level evidence — NOT verified. Re-run verify.',
+        }
     const { error: upErr } = await sb.from(table).update({
-      qa, qa_status: qaStatus, qa_model: callModel, qa_at: new Date().toISOString(),
+      qa: qaOut, qa_status: qaStatus, qa_model: callModel, qa_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('id', id)
     if (upErr) throw new Error('save failed: ' + upErr.message)
 
-    return new Response(JSON.stringify({ success: true, kind, id, qa_status: qaStatus, qa }), {
+    return new Response(JSON.stringify({ success: true, kind, id, qa_status: qaStatus, qa: qaOut }), {
       headers: { ...CORS, 'Content-Type': 'application/json' },
     })
 

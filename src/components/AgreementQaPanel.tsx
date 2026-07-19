@@ -8,10 +8,12 @@ import { useState } from 'react'
 // Same visual vocabulary as the lease-abstract QA panel so verification
 // reads identically everywhere in the app.
 
+// Label discipline (audit finding #1 / review #4): a machine-clean outcome says
+// "AI checks clear", never "verified" — that word is reserved for a human decision.
 const QA_META: Record<string, { label: string; color: string; bg: string }> = {
-  verified: { label: '✓ verified', color: 'var(--green, #22c55e)', bg: 'rgba(34,197,94,0.12)' },
-  issues:   { label: '⚠ issues',   color: 'var(--red, #ef4444)',   bg: 'rgba(239,68,68,0.12)' },
-  review:   { label: '● review',   color: 'var(--amber)',           bg: 'rgba(245,158,11,0.12)' },
+  verified: { label: '✓ AI checks clear', color: 'var(--green, #22c55e)', bg: 'rgba(34,197,94,0.12)' },
+  issues:   { label: '⚠ issues',          color: 'var(--red, #ef4444)',   bg: 'rgba(239,68,68,0.12)' },
+  review:   { label: '● review',          color: 'var(--amber)',           bg: 'rgba(245,158,11,0.12)' },
 }
 
 const VERDICT_META: Record<string, { color: string; label: string }> = {
@@ -59,6 +61,11 @@ export function AgreementQaPanel({ qa, qaStatus, qaAt }: {
         )}
       </div>
       {qa.summary && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 4 }}>{qa.summary}</div>}
+      {qa.verifier_incomplete && (
+        <div style={{ fontSize: 11.5, color: 'var(--red, #ef4444)', fontWeight: 600, marginTop: 4 }}>
+          ⚠ {qa.verifier_note ?? 'Verification did not return field-level evidence — NOT verified. Re-run verify.'}
+        </div>
+      )}
       {stale && (
         <div style={{ fontSize: 11.5, color: 'var(--red, #ef4444)', fontWeight: 600, marginTop: 4 }}>
           ⚠ Latest-amendment terms may not be reflected{qa.amendment_currency?.note ? ` — ${qa.amendment_currency.note}` : ''}
