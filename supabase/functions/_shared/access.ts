@@ -20,6 +20,8 @@ export interface CallerScope {
   // 'all' when privileged or holding a global entitlement; otherwise the
   // explicit set of property ids the caller may read.
   access: 'all' | Set<string>
+  // Separate WRITE scope, derived from entitlements.can_write (review #2).
+  writeAccess: 'all' | Set<string>
 }
 
 // A property is readable if the caller has full access, or the doc is
@@ -31,12 +33,12 @@ export function canReadProperty(caller: CallerScope, propertyId: string | null):
   return caller.access.has(propertyId)
 }
 
-// Mutations: full-access callers may write anywhere. Scope-limited staff may
-// write only to properties they hold access to — and NOT to company-wide
-// (null-property) targets, which read-side is everyone-visible but write-side
-// is privileged-only.
+// Mutations use the WRITE scope, NOT the read scope (review #2): a read-only
+// grant must never confer write. Full-write callers may write anywhere;
+// scope-limited staff write only to properties in their write set — and NOT to
+// company-wide (null-property) targets, which are write-privileged-only.
 export function canWriteProperty(caller: CallerScope, propertyId: string | null): boolean {
-  if (caller.access === 'all') return true
+  if (caller.writeAccess === 'all') return true
   if (propertyId == null) return false
-  return caller.access.has(propertyId)
+  return caller.writeAccess.has(propertyId)
 }

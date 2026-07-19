@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, requireUser } from '../_shared/auth.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -105,7 +105,7 @@ serve(async (req) => {
     // org's Google service account. Retired debug tooling: full-access callers only.
     const authSb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
     const caller = await requireUser(req, authSb)
-    if (caller.access !== 'all') throw new AuthError('Not permitted', 403)
+    if (!canWriteProperty(caller, null)) throw new AuthError('Not permitted', 403)   // company-wide action → full-write callers only (review #2/#14)
 
     const sa       = JSON.parse(Deno.env.get('GOOGLE_SERVICE_ACCOUNT') ?? '{}')
     const url      = new URL(req.url)

@@ -39,6 +39,10 @@ export interface Caller {
   // property_id = null is company-wide and readable by everyone (this mirrors
   // the documents_select RLS policy in 20240009_rls.sql).
   access: 'all' | Set<string>
+  // Separate WRITE scope (review #2): "may view" is not "may change". Derived
+  // from entitlements.can_write, NOT the read set — a read-only grant must not
+  // confer write. 'all' for privileged/service or a global can_write grant.
+  writeAccess: 'all' | Set<string>
 }
 
 const bearer = (req: Request) =>
@@ -68,7 +72,7 @@ export async function requireUser(req: Request, sb: SupabaseClient): Promise<Cal
 
   // Trusted service caller (batch/ingest scripts) → full access, no user lookup.
   if (isServiceToken(token)) {
-    return { id: 'service', email: null, role: 'service', isPrivileged: true, access: 'all' }
+    return { id: 'service', email: null, role: 'service', isPrivileged: true, access: 'all', writeAccess: 'all' }
   }
 
   const { data: { user }, error } = await sb.auth.getUser(token)
@@ -84,29 +88,36 @@ export async function requireUser(req: Request, sb: SupabaseClient): Promise<Cal
   const role = String(prof.role)
   const email = (prof.email as string | null) ?? user.email ?? null
   if (role === 'admin' || role === 'asset_manager') {
-    return { id: user.id, email, role, isPrivileged: true, access: 'all' }
+    return { id: user.id, email, role, isPrivileged: true, access: 'all', writeAccess: 'all' }
   }
 
-  // Non-privileged: expand read entitlements to a concrete property-id set.
+  // Non-privileged: expand entitlements into SEPARATE read and write scopes.
+  // can_read and can_write are distinct columns (entitlements, mig 20240008);
+  // the write gate must honor can_write, not the read set (review #2). A global
+  // grant confers all-read and/or all-write only for the column it actually sets.
   const { data: ents } = await sb
     .from('entitlements')
-    .select('scope, property_id, portfolio_id')
+    .select('scope, property_id, portfolio_id, can_read, can_write')
     .eq('user_id', user.id)
-    .eq('can_read', true)
-  const rows = (ents ?? []) as Array<{ scope: string; property_id: string | null; portfolio_id: string | null }>
+  const rows = (ents ?? []) as Array<{ scope: string; property_id: string | null; portfolio_id: string | null; can_read: boolean; can_write: boolean }>
 
-  if (rows.some(e => e.scope === 'global')) {
-    return { id: user.id, email, role, isPrivileged: false, access: 'all' }
+  // Resolve one scope set for a grant predicate (portfolio grants expand to
+  // their member properties).
+  const resolveScope = async (granted: (r: typeof rows[number]) => boolean): Promise<'all' | Set<string>> => {
+    const grant = rows.filter(granted)
+    if (grant.some(e => e.scope === 'global')) return 'all'
+    const props = new Set<string>()
+    for (const e of grant) if (e.scope === 'property' && e.property_id) props.add(e.property_id)
+    const portfolioIds = grant.filter(e => e.scope === 'portfolio' && e.portfolio_id).map(e => e.portfolio_id as string)
+    if (portfolioIds.length) {
+      const { data: pp } = await sb.from('properties').select('id').in('portfolio_id', portfolioIds)
+      for (const p of (pp ?? []) as Array<{ id: string }>) props.add(p.id)
+    }
+    return props
   }
-
-  const props = new Set<string>()
-  for (const e of rows) if (e.scope === 'property' && e.property_id) props.add(e.property_id)
-  const portfolioIds = rows.filter(e => e.scope === 'portfolio' && e.portfolio_id).map(e => e.portfolio_id as string)
-  if (portfolioIds.length) {
-    const { data: pp } = await sb.from('properties').select('id').in('portfolio_id', portfolioIds)
-    for (const p of (pp ?? []) as Array<{ id: string }>) props.add(p.id)
-  }
-  return { id: user.id, email, role, isPrivileged: false, access: props }
+  const access = await resolveScope(e => e.can_read === true)
+  const writeAccess = await resolveScope(e => e.can_write === true)
+  return { id: user.id, email, role, isPrivileged: false, access, writeAccess }
 }
 
 export async function requireAdmin(req: Request, sb: SupabaseClient): Promise<Caller> {

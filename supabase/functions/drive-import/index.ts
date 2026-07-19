@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import * as XLSX from 'npm:xlsx@0.18.5'
-import { AuthError, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, requireUser } from '../_shared/auth.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -219,7 +219,7 @@ serve(async (req) => {
     // trigger service-role writes into rent-roll/import tables. Imports are a
     // portfolio-wide operation: full-access callers only.
     const caller = await requireUser(req, sb)
-    if (caller.access !== 'all') throw new AuthError('Not permitted to run imports', 403)
+    if (!canWriteProperty(caller, null)) throw new AuthError('Not permitted to run imports', 403)   // company-wide write action → full-write callers only (review #2/#14)
 
     // ── status: return catalog from DB ───────────────────────
     if (mode === 'status') {

@@ -9,10 +9,13 @@ import type { CallerScope } from '../../../supabase/functions/_shared/access'
 const P1 = 'prop-1'
 const P2 = 'prop-2'
 
-const service: CallerScope = { isPrivileged: true, access: 'all' }          // service token / admin / AM
-const globalGrant: CallerScope = { isPrivileged: false, access: 'all' }     // staff with a global entitlement
-const scoped: CallerScope = { isPrivileged: false, access: new Set([P1]) }  // staff scoped to P1
-const noAccess: CallerScope = { isPrivileged: false, access: new Set() }    // staff with no grants
+const service: CallerScope = { isPrivileged: true, access: 'all', writeAccess: 'all' }         // service token / admin / AM
+const globalGrant: CallerScope = { isPrivileged: false, access: 'all', writeAccess: 'all' }    // global read + write
+const scoped: CallerScope = { isPrivileged: false, access: new Set([P1]), writeAccess: new Set([P1]) } // read + write P1
+const noAccess: CallerScope = { isPrivileged: false, access: new Set(), writeAccess: new Set() }        // no grants
+// Read-only grants — the crux of review #2: viewing must not confer changing.
+const globalReadOnly: CallerScope = { isPrivileged: false, access: 'all', writeAccess: new Set() }      // sees all, writes nothing
+const scopedReadOnly: CallerScope = { isPrivileged: false, access: new Set([P1]), writeAccess: new Set() } // reads P1, no write
 
 describe('canReadProperty', () => {
   it('full-access callers read everything', () => {
@@ -23,6 +26,10 @@ describe('canReadProperty', () => {
   it('company-wide (null property) data is readable by every staffer', () => {
     expect(canReadProperty(scoped, null)).toBe(true)
     expect(canReadProperty(noAccess, null)).toBe(true)
+  })
+  it('a read-only grant still reads (read scope is unchanged by can_write)', () => {
+    expect(canReadProperty(globalReadOnly, P2)).toBe(true)
+    expect(canReadProperty(scopedReadOnly, P1)).toBe(true)
   })
   it('scope-limited staff read only their properties', () => {
     expect(canReadProperty(scoped, P1)).toBe(true)
@@ -47,5 +54,11 @@ describe('canWriteProperty — "may view" is not "may change"', () => {
     // read allows null for everyone; write must not — this asymmetry is the point.
     expect(canWriteProperty(scoped, null)).toBe(false)
     expect(canWriteProperty(noAccess, null)).toBe(false)
+  })
+  it('a READ-ONLY grant confers NO write — the review #2 fix', () => {
+    // Before: writeAccess was the read set, so these were all true (the bug).
+    expect(canWriteProperty(globalReadOnly, P1)).toBe(false)   // sees everything, changes nothing
+    expect(canWriteProperty(globalReadOnly, null)).toBe(false)
+    expect(canWriteProperty(scopedReadOnly, P1)).toBe(false)   // can read P1 but not write it
   })
 })
