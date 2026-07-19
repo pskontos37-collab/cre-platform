@@ -96,7 +96,20 @@ async function embedBatch(texts: string[], key: string): Promise<number[][]> {
 // the page its start falls on, for the PDF-viewer jump.
 const TEXT_CHUNK_CHARS   = Number(Deno.env.get('TEXT_CHUNK_CHARS')   ?? 1400)
 const TEXT_CHUNK_OVERLAP = Number(Deno.env.get('TEXT_CHUNK_OVERLAP') ?? 200)
-const MIN_CHARS_PER_PAGE = Number(Deno.env.get('MIN_CHARS_PER_PAGE') ?? 80)   // below → treat as scanned/needs OCR
+// OCR gate. A dense legal page runs 1,500-3,500 chars; a scanned page with only
+// a thin embedded text layer (stamps, headers, a few OCR-at-scan-time glyphs)
+// yields tens to a few hundred. The old 80 floor let genuinely-scanned
+// instruments slip through: e.g. an 8-page Fourth Amendment gave 1,789 chars
+// (~224/page) — above 80, so OCR was skipped, the brief was built from near-empty
+// text, and the abstractor never folded the amendment in. 300 comfortably
+// separates real text from a thin scan layer while staying well under a dense
+// page; still env-overridable.
+const MIN_CHARS_PER_PAGE = Number(Deno.env.get('MIN_CHARS_PER_PAGE') ?? 300)   // avg below → treat as scanned/needs OCR
+// Second trigger: a MIXED scan (a couple of text pages — cover/execution —
+// hiding a scanned body) can average above the floor yet be mostly imaged.
+// If at least this fraction of pages are near-empty, OCR anyway.
+const OCR_EMPTY_PAGE_FRACTION = Number(Deno.env.get('OCR_EMPTY_PAGE_FRACTION') ?? 0.4)
+const OCR_EMPTY_PAGE_CHARS    = Number(Deno.env.get('OCR_EMPTY_PAGE_CHARS')    ?? 100)  // a page under this is "near-empty"
 // unpdf loads the whole PDF into worker memory; very large docs OOM the isolate
 // (WORKER_RESOURCE_LIMIT, uncatchable). Preempt by page count and flag for a
 // dedicated large-doc pass.
@@ -362,8 +375,32 @@ serve(async (req) => {
     // for these chunks is backfilled separately (scripts/backfill_text_embeddings).
     const skipEmbed = url.searchParams.get('skipEmbed') === '1'
     if (!storageKey) throw new Error('?storagePath= is required (Google Drive ingestion was retired 2026-07-01)')
-    if (store && propertyId && !canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
-    if (reindexText && propertyId && !canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+
+    // AUTHORIZATION. Service-token callers (ingest/batch scripts) have access:'all'
+    // and pass every branch below; this gate constrains USER-JWT callers.
+    //   reindex/OCR — mutate an EXISTING document's chunks (delete + replace). The
+    //                 caller-supplied ?propertyId= is NOT trusted: resolve the
+    //                 document's REAL property from the DB and authorize THAT, then
+    //                 tag the new chunks with it. Closes the object-ownership hole
+    //                 where a user could target another property's document.
+    //   store       — new-ingestion write; authorize the target property.
+    //   default     — extract-and-return an arbitrary storage object by raw path,
+    //                 which bypasses property scoping. Ingestion/admin only.
+    const isOcr = url.searchParams.get('ocrText') === '1'
+    let ownerPropertyId: string | null = propertyId
+    if (reindexText || isOcr) {
+      if (!reindexDocId) throw new Error('?documentId= is required for reindex/OCR')
+      const { data: ownerDoc, error: ownerErr } =
+        await sb.from('documents').select('property_id').eq('id', reindexDocId).maybeSingle()
+      if (ownerErr) throw new Error('document lookup failed: ' + ownerErr.message)
+      if (!ownerDoc) throw new AuthError('Document not found', 404)
+      if (!canReadProperty(caller, ownerDoc.property_id as string | null)) throw new AuthError('No access to this document', 403)
+      ownerPropertyId = (ownerDoc.property_id as string | null)
+    } else if (store) {
+      if (!canReadProperty(caller, propertyId)) throw new AuthError('No access to this property', 403)
+    } else if (!caller.isPrivileged) {
+      throw new AuthError('Not permitted to extract arbitrary storage objects by path', 403)
+    }
 
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY secret not set')
@@ -430,11 +467,18 @@ serve(async (req) => {
 
       const avgPerPage = nPages ? totalChars / nPages : 0
       // Scanned / image-only PDF: MuPDF yields almost nothing. Don't store empty
-      // chunks — report it so the caller can route these to an OCR pass.
-      if (avgPerPage < MIN_CHARS_PER_PAGE) {
+      // chunks — report it so the caller can route these to an OCR pass. Two
+      // triggers: (1) low AVERAGE text per page (whole doc is a thin scan), and
+      // (2) a high FRACTION of near-empty pages (a mixed scan whose few text
+      // pages pull the average up). Either one routes to OCR.
+      const nearEmptyPages = pages.filter(p => p.text.length < OCR_EMPTY_PAGE_CHARS).length
+      const emptyFraction = nPages ? nearEmptyPages / nPages : 0
+      const needsOcr = avgPerPage < MIN_CHARS_PER_PAGE || emptyFraction >= OCR_EMPTY_PAGE_FRACTION
+      if (needsOcr) {
         return new Response(JSON.stringify({
           success: true, reindex_text: true, document_id: reindexDocId, page_count: nPages,
-          avg_chars_per_page: Math.round(avgPerPage), needs_ocr: true, text_chunks: 0,
+          avg_chars_per_page: Math.round(avgPerPage), near_empty_pages: nearEmptyPages,
+          needs_ocr: true, text_chunks: 0,
         }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
       }
 
@@ -453,7 +497,7 @@ serve(async (req) => {
       // chunk_index offset keeps text chunks clear of the low-index summary chunks.
       const rows = chunks.map((c, i) => ({
         document_id: reindexDocId,
-        property_id: propertyId ?? null,
+        property_id: ownerPropertyId ?? null,   // DB-resolved owner property, not caller-supplied
         chunk_index: 1000 + i,
         content: c.content,
         embedding_voyage: skipEmbed ? null : `[${vecs[i].join(',')}]`,
@@ -565,7 +609,7 @@ serve(async (req) => {
       const { error: delErr } = await sb.from('document_chunks').delete().eq('document_id', reindexDocId).eq('kind', 'text')
       if (delErr) throw new Error('clear old text chunks failed: ' + delErr.message)
       const rows = chunks.map((c, i) => ({
-        document_id: reindexDocId, property_id: propertyId ?? null, chunk_index: 1000 + i,
+        document_id: reindexDocId, property_id: ownerPropertyId ?? null, chunk_index: 1000 + i,
         content: c.content, embedding_voyage: skipEmbed ? null : `[${vecs[i].join(',')}]`, page_number: c.page, kind: 'text',
       }))
       const { error: rpcErr } = await sb.rpc('insert_text_chunks', { p_rows: rows })
