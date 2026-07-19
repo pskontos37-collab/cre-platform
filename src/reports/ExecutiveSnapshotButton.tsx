@@ -155,10 +155,12 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
             .map(f => ({ propertyName: r.propertyName, triggerReason: f.trigger_reason })),
           delinquency: (delinq.data ?? []).filter(d => d.propertyName === r.propertyName)
             .map(d => ({ tenantName: d.tenantName, propertyName: d.propertyName, pastDue: d.pastDue })),
-          health: (health.data?.rows ?? []).filter(h => h.propertyName === r.propertyName).map(h => ({
-            tenantName: h.tenantName, propertyName: h.propertyName, ratio: h.ratio,
+          // Only fully-covered tenants carry a real ratio into the report; an
+          // incomplete-coverage tenant has ratio/band = null (deterministic guard).
+          health: (health.data?.rows ?? []).filter(h => h.propertyName === r.propertyName && h.ratio != null && h.band != null).map(h => ({
+            tenantName: h.tenantName, propertyName: h.propertyName, ratio: h.ratio!,
             baseRent: h.baseRent, recoveries: h.recoveries,
-            occupancyCost: h.occupancyCost, ttmSales: h.ttmSales, band: h.band, hasRecoveries: h.hasRecoveries,
+            occupancyCost: h.occupancyCost, ttmSales: h.ttmSales, band: h.band!, hasRecoveries: h.hasRecoveries,
           })),
           returns: r._ret ? { lp: roleOf(r._ret.lp), gp: roleOf(r._ret.gp), promoteEquity: r._ret.promote?.currentEquity ?? null } : null,
         }))
@@ -229,24 +231,29 @@ export function ExecutiveSnapshotButton({ propertyIds, propertyNames, totalAcces
             promoteEquity: returns.totals.promote.currentEquity,
           }
         : null,
-      health: health.data && health.data.rows.length > 0
-        ? {
-            portfolioRatio: health.data.portfolioRatio,
-            ttmLabel: health.data.ttmLabel,
-            reporterCount: health.data.rows.length,
-            rows: health.data.rows.map(h => ({
-              tenantName: h.tenantName,
-              propertyName: h.propertyName,
-              ratio: h.ratio,
-              baseRent: h.baseRent,
-              recoveries: h.recoveries,
-              occupancyCost: h.occupancyCost,
-              ttmSales: h.ttmSales,
-              band: h.band,
-              hasRecoveries: h.hasRecoveries,
-            })),
-          }
-        : null,
+      health: (() => {
+        // Fully-covered tenants only — an incomplete-coverage tenant has no ratio
+        // and must not appear as a distorted number in the PDF (audit: D&B).
+        const covered = (health.data?.rows ?? []).filter(h => h.ratio != null && h.band != null)
+        return health.data && covered.length > 0
+          ? {
+              portfolioRatio: health.data.portfolioRatio,
+              ttmLabel: health.data.ttmLabel,
+              reporterCount: covered.length,
+              rows: covered.map(h => ({
+                tenantName: h.tenantName,
+                propertyName: h.propertyName,
+                ratio: h.ratio!,
+                baseRent: h.baseRent,
+                recoveries: h.recoveries,
+                occupancyCost: h.occupancyCost,
+                ttmSales: h.ttmSales,
+                band: h.band!,
+                hasRecoveries: h.hasRecoveries,
+              })),
+            }
+          : null
+      })(),
       byProperty: byPropertyRows,
       propertyDetails,
     }

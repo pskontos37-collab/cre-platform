@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { useQuery } from './useQuery'
+import { occupancyCostRatio, type CoverageStatus } from '../lib/leaseMath'
 import {
   computeNOI,
   computeDSCR,
@@ -808,15 +809,18 @@ export interface HealthRatioRow {
   baseRent: number
   recoveries: number
   occupancyCost: number
-  ratio: number            // occupancyCost / ttmSales
+  ratio: number | null      // occupancyCost / ttmSales — NULL when coverage is incomplete
+  monthsCovered: number      // reported months in the 12-month window
+  coverageStatus: CoverageStatus  // 'ok' | 'insufficient_coverage' | 'zero_sales'
   hasRecoveries: boolean    // false → occupancy cost is rent-only (a floor)
-  band: HealthBand
+  band: HealthBand | null    // null when there is no ratio to band
 }
 
 export interface HealthRatioData {
   rows: HealthRatioRow[]
-  portfolioRatio: number   // Σ occupancy cost ÷ Σ TTM sales across shown tenants
+  portfolioRatio: number   // Σ occupancy cost ÷ Σ TTM sales across FULLY-COVERED tenants only
   ttmLabel: string         // e.g. "Jun 2025 – May 2026"
+  insufficientCount: number // tenants excluded from the ratio for incomplete sales coverage
 }
 
 // Occupancy-cost-ratio thresholds. General-retail rules of thumb: under ~10% is
@@ -872,10 +876,17 @@ export function useHealthRatio(propertyIds: string[], propertyNames: Record<stri
     const latest = Math.max(...withMonth.map((r: any) => monthKey(r.period_year, r.period_month)))
     const windowKeys = new Set(Array.from({ length: 12 }, (_, i) => latest - i))
 
+    // Sum sales AND count how many of the 12 window months are actually reported
+    // per lease. Coverage drives whether a ratio may be computed at all — the
+    // audit's Dave & Buster's failure was dividing full-year occupancy cost by a
+    // partial-year sales sum (7 of 12 months) and showing it as a TTM ratio.
     const ttmSalesByLease: Record<string, number> = {}
+    const coveredByLease: Record<string, Set<number>> = {}
     for (const r of withMonth as any[]) {
-      if (windowKeys.has(monthKey(r.period_year, r.period_month)))
-        ttmSalesByLease[r.lease_id] = (ttmSalesByLease[r.lease_id] ?? 0) + Number(r.reported_sales ?? 0)
+      const k = monthKey(r.period_year, r.period_month)
+      if (!windowKeys.has(k)) continue
+      ttmSalesByLease[r.lease_id] = (ttmSalesByLease[r.lease_id] ?? 0) + Number(r.reported_sales ?? 0)
+      ;(coveredByLease[r.lease_id] ??= new Set<number>()).add(k)   // a reported month (even $0) counts as covered
     }
 
     // Recoveries: use each lease's most recent reconciliation year, actual over estimated.
@@ -893,12 +904,15 @@ export function useHealthRatio(propertyIds: string[], propertyNames: Record<stri
     const rows: HealthRatioRow[] = (leases as any[])
       .map(lease => {
         const ttmSales = ttmSalesByLease[lease.id] ?? 0
+        const monthsCovered = coveredByLease[lease.id]?.size ?? 0
         const schedules = [...(lease.lease_rent_schedule ?? [])]
           .sort((a: any, b: any) => String(b.effective_date).localeCompare(String(a.effective_date)))
         const baseRent = Number(schedules[0]?.annual_rent ?? 0)
         const recoveries = recByLease[lease.id] ?? 0
         const occupancyCost = baseRent + recoveries
-        const ratio = ttmSales > 0 ? occupancyCost / ttmSales : 0
+        // Deterministic (src/lib/leaseMath): a TTM ratio needs all 12 months;
+        // fewer → insufficient_coverage and NO ratio, never an inflated number.
+        const cov = occupancyCostRatio({ occupancyCost, sales: ttmSales, monthsCovered, monthsRequired: 12 })
         return {
           leaseId:       lease.id,
           tenantName:    lease.tenant?.name ?? 'Unknown',
@@ -907,23 +921,34 @@ export function useHealthRatio(propertyIds: string[], propertyNames: Record<stri
           baseRent,
           recoveries,
           occupancyCost,
-          ratio,
+          ratio:         cov.ratio,
+          monthsCovered,
+          coverageStatus: cov.status,
           hasRecoveries: recoveries > 0,
-          band:          healthBand(ratio),
+          band:          cov.ratio != null ? healthBand(cov.ratio) : null,
         }
       })
-      // Need both sides of the ratio to say anything meaningful.
-      .filter(r => r.ttmSales > 0 && r.occupancyCost > 0)
-      .sort((a, b) => b.ratio - a.ratio)   // worst (highest cost burden) first
+      // Keep tenants with occupancy cost and at least one reported month; an
+      // incomplete-coverage tenant is SHOWN (with a coverage note), not silently
+      // dropped and not silently ratio'd.
+      .filter(r => r.occupancyCost > 0 && r.monthsCovered > 0)
+      .sort((a, b) =>
+        // computable ratios first (worst burden first), incomplete-coverage last
+        (a.ratio == null ? 1 : 0) - (b.ratio == null ? 1 : 0) ||
+        (b.ratio ?? 0) - (a.ratio ?? 0))
 
-    const totalCost  = rows.reduce((s, r) => s + r.occupancyCost, 0)
-    const totalSales = rows.reduce((s, r) => s + r.ttmSales, 0)
+    // Blend the portfolio ratio over FULLY-COVERED tenants only — mixing partial
+    // sales into the denominator would distort it exactly as the per-row bug did.
+    const okRows = rows.filter(r => r.coverageStatus === 'ok')
+    const totalCost  = okRows.reduce((s, r) => s + r.occupancyCost, 0)
+    const totalSales = okRows.reduce((s, r) => s + r.ttmSales, 0)
+    const insufficientCount = rows.length - okRows.length
 
     const ly = Math.floor((latest - 11) / 12), lm = (latest - 11) % 12
     const ey = Math.floor(latest / 12),        em = latest % 12
     const ttmLabel = `${MONTHS[lm]} ${ly} – ${MONTHS[em]} ${ey}`
 
-    return { rows, portfolioRatio: totalSales > 0 ? totalCost / totalSales : 0, ttmLabel }
+    return { rows, portfolioRatio: totalSales > 0 ? totalCost / totalSales : 0, ttmLabel, insufficientCount }
   }, [propertyIds.join(','), JSON.stringify(propertyNames)])
 }
 
