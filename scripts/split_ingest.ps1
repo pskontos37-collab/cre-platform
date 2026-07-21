@@ -1,4 +1,4 @@
-param([int]$Limit = 0, [int]$PageBatch = 24, [int]$SegPages = 12)
+param([int]$Limit = 0, [int]$PageBatch = 24, [int]$SegPages = 12, [switch]$KeepPartial)
 # Ingest oversized/100+pg PDFs (leases, reports) that fail the local one-shot path.
 # Upload each to Supabase Storage, then call the pdf-extract edge fn in PAGE BATCHES:
 #   batch 1 (pages 1..PageBatch)      -> ?store=1 ... creates ONE documents row, returns its id + page_count
@@ -69,20 +69,27 @@ foreach($p in $paths){
       Log "FAIL batch1 ($mb MB) $name :: $err"; continue
     }
     $docId = $o1.stored_document_id; $pg = [int]$o1.page_count
-    # batches 2..N: append the remaining pages into the same row
+    # batches 2..N: append the remaining pages into the same row.
+    # Default: any batch failure rolls the whole doc back (all-or-nothing, resumable).
+    # -KeepPartial: skip a failing batch and keep going, so a doc with a few
+    # un-renderable pages (e.g. giant drawing sheets that OOM the worker) still lands
+    # with every page that CAN be processed. Missing pages are logged.
     $partial = $false
+    $skipped = New-Object System.Collections.ArrayList
     for($s = $PageBatch + 1; $s -le $pg; $s += $PageBatch){
       $e = [math]::Min($s + $PageBatch - 1, $pg)
       $o2 = Extract "appendDocId=$docId&$common&pageStart=$s&pageEnd=$e"
       if(-not $o2.success){
-        $partial = $true; $err2 = if($o2.error){ $o2.error } elseif($o2.message){ "$($o2.code): $($o2.message)" } else { 'append failed' }; $err2 = ($err2 -replace '\s+',' '); if($err2.Length -gt 200){$err2=$err2.Substring(0,200)}
-        Log "FAIL append pp$s-$e ($mb MB) $name :: $err2"; break
+        $err2 = if($o2.error){ $o2.error } elseif($o2.message){ "$($o2.code): $($o2.message)" } else { 'append failed' }; $err2 = ($err2 -replace '\s+',' '); if($err2.Length -gt 200){$err2=$err2.Substring(0,200)}
+        if($KeepPartial){ [void]$skipped.Add("$s-$e"); Log "SKIP pp$s-$e ($mb MB) $name :: $err2"; continue }
+        $partial = $true; Log "FAIL append pp$s-$e ($mb MB) $name :: $err2"; break
       }
     }
     & curl.exe -s -X DELETE "$BASE/storage/v1/object/$BUCKET/$objkey" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | Out-Null
     if($partial){ DelDoc $docId; $fail++; Log "ROLLBACK $name (a batch failed; row+chunks deleted so re-run retries)"; continue }
     [void]$done.Add($fp)   # so a duplicate path later in the list is skipped
-    $ok++; Log "OK ($mb MB, ${pg}pg, $([math]::Ceiling($pg / [double]$PageBatch)) batches) $name -> $docId"
+    if($skipped.Count -gt 0){ $ok++; Log "PARTIAL-KEPT ($mb MB, ${pg}pg, missing pp: $($skipped -join ', ')) $name -> $docId" }
+    else { $ok++; Log "OK ($mb MB, ${pg}pg, $([math]::Ceiling($pg / [double]$PageBatch)) batches) $name -> $docId" }
   } catch { $fail++; Log "FAIL $name :: $($_.Exception.Message)" }
   if($Limit -gt 0 -and ($ok+$fail) -ge $Limit){ Log "hit Limit=$Limit"; break }
 }
