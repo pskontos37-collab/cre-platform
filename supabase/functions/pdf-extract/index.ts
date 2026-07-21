@@ -370,6 +370,15 @@ serve(async (req) => {
     // needs no vector; FTS/keyword search also works without it. Semantic recall
     // for these chunks is backfilled separately (scripts/backfill_text_embeddings).
     const skipEmbed = url.searchParams.get('skipEmbed') === '1'
+    // Large-doc recovery params (all optional; absent => existing single-request behavior).
+    // The store path processes an ENTIRE doc's segments in ONE request, so a 200+pp doc
+    // blows Supabase's 150s idle timeout. These let a client (split_ingest.ps1) drive one
+    // request per small page-batch, each finishing under the timeout, appending into ONE row.
+    const pageStart   = Number(url.searchParams.get('pageStart') ?? 0)   // 1-based inclusive; 0 = from first page
+    const pageEnd     = Number(url.searchParams.get('pageEnd')   ?? 0)   // inclusive; 0 = to last page
+    const appendDocId = url.searchParams.get('appendDocId')              // append chunks + merge notes into this existing doc (no new row)
+    const segPagesParam = Number(url.searchParams.get('segPages') ?? 0)  // override pages-per-segment (smaller => less time/memory/tokens per Claude call)
+    const forceMu     = url.searchParams.get('engine') === 'mu'          // force the low-memory MuPDF engine (pdf-lib OOMs on image-heavy 8-12MB scans)
     if (!storageKey) throw new Error('?storagePath= is required (Google Drive ingestion was retired 2026-07-01)')
 
     // AUTHORIZATION. Service-token callers (ingest/batch scripts) have access:'all'
@@ -400,6 +409,12 @@ serve(async (req) => {
       if (!ownStorageKey) throw new Error('Document has no stored file to reindex/OCR')
       if (storageKey !== ownStorageKey) throw new AuthError('storagePath does not match the document', 403)
       ownerPropertyId = (ownerDoc.property_id as string | null)
+    } else if (appendDocId) {
+      // append mode — writes chunks + rewrites notes on an EXISTING doc; authorize THAT doc's real property (not caller-supplied propertyId).
+      const { data: apDoc, error: apErr } = await sb.from('documents').select('property_id').eq('id', appendDocId).maybeSingle()
+      if (apErr) throw new Error('append doc lookup failed: ' + apErr.message)
+      if (!apDoc) throw new AuthError('appendDocId not found', 404)
+      if (!canWriteProperty(caller, (apDoc.property_id as string | null) ?? null)) throw new AuthError('No write access to the append target', 403)
     } else if (store) {
       if (!canWriteProperty(caller, propertyId ?? null)) throw new AuthError('No write access to this property', 403)   // WRITE gate (audit S2): store mode inserts documents+chunks
     } else if (!caller.isPrivileged) {
@@ -641,7 +656,7 @@ serve(async (req) => {
     // 2. Parse the PDF (page count) then extract. Oversized docs are split into
     //    page-range segments so each request stays under the 100-page / 200k-token limits.
     //    Engine chosen by size: pdf-lib for normal docs, MuPDF (low-memory) for large ones.
-    const useMu = bytes.length > LARGE_BYTES
+    const useMu = forceMu || bytes.length > LARGE_BYTES
     // Large-doc engine loaded on demand only (top-level npm:mupdf breaks edge boot).
     const mupdf = useMu ? await loadMupdf() : null
     let pageCount = 0
@@ -684,25 +699,48 @@ serve(async (req) => {
     const segMeta: { start: number; end: number }[] = []
     const usages: unknown[] = []
 
+    const segStep = segPagesParam > 0 ? segPagesParam : (useMu ? LARGE_SEG_PAGES : SEG_PAGES)
+
     const extractWhole = async () => {
       const { extraction, usage } = await callClaude(toBase64(bytes), model, apiKey)
       extractions.push(extraction); segMeta.push({ start: 1, end: pageCount }); usages.push(usage)
     }
-    const segStep = useMu ? LARGE_SEG_PAGES : SEG_PAGES
-    const extractSplit = async () => {
-      extractions.length = 0; segMeta.length = 0; usages.length = 0
-      for (let start = 0; start < pageCount; start += segStep) {
-        const end = Math.min(start + segStep, pageCount)
-        const subBytes = await segmentBytes(start, end)
+    // Extract one page range [s,e). On a token-limit error, recursively halve the range —
+    // a single dense/OCR segment can exceed 200k tokens even well under the page limit.
+    const extractRange = async (s: number, e: number): Promise<void> => {
+      const subBytes = await segmentBytes(s, e)
+      try {
         const { extraction, usage } = await callClaude(toBase64(subBytes), model, apiKey)
-        extractions.push(extraction); segMeta.push({ start: start + 1, end }); usages.push(usage)
+        extractions.push(extraction); segMeta.push({ start: s + 1, end: e }); usages.push(usage)
+      } catch (err) {
+        const m = err instanceof Error ? err.message : String(err)
+        if (m.includes('prompt is too long') && (e - s) > 1) {
+          const mid = Math.floor((s + e) / 2)
+          await extractRange(s, mid)
+          await extractRange(mid, e)
+        } else throw err
+      }
+    }
+    // Segment [from,to) into segStep-page ranges (each may sub-split on the token limit).
+    const extractPageRange = async (from: number, to: number) => {
+      extractions.length = 0; segMeta.length = 0; usages.length = 0
+      for (let start = from; start < to; start += segStep) {
+        await extractRange(start, Math.min(start + segStep, to))
       }
     }
 
+    // Range mode (?pageStart/?pageEnd or ?appendDocId): process ONLY the requested pages,
+    // always segmented. Lets a client drive one request per page-batch so no single request
+    // runs long enough to hit the 150s idle timeout, and peak memory stays bounded.
+    const rangeStart = pageStart > 0 ? Math.min(pageStart - 1, pageCount) : 0
+    const rangeEnd   = pageEnd   > 0 ? Math.min(pageEnd, pageCount)       : pageCount
+    const isRange = pageStart > 0 || pageEnd > 0 || !!appendDocId
+
     let wasSplit = false
     try {
+      if (isRange) { wasSplit = true; await extractPageRange(rangeStart, rangeEnd) }
       // Large (MuPDF) docs always split — avoids sending a ~30MB blob whole.
-      if (useMu || pageCount > PAGE_LIMIT) { wasSplit = true; await extractSplit() }
+      else if (useMu || pageCount > PAGE_LIMIT) { wasSplit = true; await extractPageRange(0, pageCount) }
       else await extractWhole()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -711,7 +749,7 @@ serve(async (req) => {
           { status: 422, headers: { ...CORS, 'Content-Type': 'application/json' } })
       }
       // Under the page limit but over the token limit -> fall back to splitting.
-      if (!wasSplit && msg.includes('prompt is too long')) { wasSplit = true; await extractSplit() }
+      if (!wasSplit && msg.includes('prompt is too long')) { wasSplit = true; await extractPageRange(0, pageCount) }
       else throw e
     }
 
@@ -720,19 +758,36 @@ serve(async (req) => {
 
     // 3. Optionally persist one documents row + one embedding chunk PER segment
     //    (passage-level chunks; for a non-split doc this is a single chunk as before).
-    let documentId: string | null = null
+    let documentId: string | null = appendDocId ?? null
     let embeddedChunks = 0
-    if (store) {
-      const { data, error } = await sb.from('documents').insert({
-        property_id: propertyId ?? null,
-        file_path:   filePathOverride ?? sourceId,   // 'file:\\server\...' for local, else 'storage:'/'drive:'
-        doc_type:    toDocTypeEnum(extraction.doc_type),
-        title:       String(extraction.summary ?? '').slice(0, 200),
-        notes:       JSON.stringify(wasSplit ? { ...extraction, _segments: extractions, _segMeta: segMeta } : extraction),
-        is_indexed:  false,
-      }).select('id').single()
-      if (error) throw new Error('documents insert failed: ' + error.message)
-      documentId = data?.id ?? null
+    if (store || appendDocId) {
+      let chunkOffset = 0
+      let existingNotes: Record<string, unknown> = {}
+      if (appendDocId) {
+        // APPEND: no new row. Continue chunk_index after the existing chunks, and merge
+        // this batch's segments into the stored abstraction (below) so notes cover the
+        // whole document rather than only the first batch.
+        const { data: apDoc, error: apErr } = await sb.from('documents').select('notes').eq('id', appendDocId).maybeSingle()
+        if (apErr) throw new Error('append doc lookup failed: ' + apErr.message)
+        if (!apDoc) throw new Error('appendDocId not found: ' + appendDocId)
+        try { existingNotes = JSON.parse(String(apDoc.notes ?? '{}')) } catch { existingNotes = {} }
+        const { count, error: cntErr } = await sb.from('document_chunks')
+          .select('id', { count: 'exact', head: true }).eq('document_id', appendDocId)
+        if (cntErr) throw new Error('chunk count failed: ' + cntErr.message)
+        chunkOffset = count ?? 0
+        documentId = appendDocId
+      } else {
+        const { data, error } = await sb.from('documents').insert({
+          property_id: propertyId ?? null,
+          file_path:   filePathOverride ?? sourceId,   // 'file:\\server\...' for local, else 'storage:'/'drive:'
+          doc_type:    toDocTypeEnum(extraction.doc_type),
+          title:       String(extraction.summary ?? '').slice(0, 200),
+          notes:       JSON.stringify(wasSplit ? { ...extraction, _segments: extractions, _segMeta: segMeta } : extraction),
+          is_indexed:  false,
+        }).select('id').single()
+        if (error) throw new Error('documents insert failed: ' + error.message)
+        documentId = data?.id ?? null
+      }
 
       const embKey = Deno.env.get('VOYAGE_API_KEY') ?? ''
       if (documentId && embKey) {
@@ -741,13 +796,33 @@ serve(async (req) => {
           const vec = await embed(content, embKey)
           // pgvector wants a bracketed string literal via PostgREST
           const { error: cErr } = await sb.from('document_chunks').insert({
-            document_id: documentId, chunk_index: i, content,
+            document_id: documentId, chunk_index: chunkOffset + i, content,
             embedding_voyage: `[${vec.join(',')}]`, page_number: segMeta[i].start,
           })
           if (cErr) throw new Error('document_chunks insert failed: ' + cErr.message)
           embeddedChunks++
         }
-        if (embeddedChunks > 0) await sb.from('documents').update({ is_indexed: true }).eq('id', documentId)
+      }
+
+      if (appendDocId && documentId) {
+        // Re-merge previous + this batch's segments into one document-level abstraction.
+        const prevSegs = Array.isArray(existingNotes._segments)
+          ? (existingNotes._segments as Record<string, unknown>[])
+          : (Object.keys(existingNotes).length ? [existingNotes] : [])
+        const prevMeta = Array.isArray(existingNotes._segMeta)
+          ? (existingNotes._segMeta as { start: number; end: number }[])
+          : prevSegs.map(() => ({ start: 1, end: rangeStart }))
+        const allSegs = [...prevSegs, ...extractions]
+        const allMeta = [...prevMeta, ...segMeta]
+        const remerged = mergeExtractions(allSegs, allMeta)
+        await sb.from('documents').update({
+          doc_type:   toDocTypeEnum(remerged.doc_type),
+          title:      String(remerged.summary ?? '').slice(0, 200),
+          notes:      JSON.stringify({ ...remerged, _segments: allSegs, _segMeta: allMeta }),
+          is_indexed: true,
+        }).eq('id', documentId)
+      } else if (embeddedChunks > 0 && documentId) {
+        await sb.from('documents').update({ is_indexed: true }).eq('id', documentId)
       }
     }
 
