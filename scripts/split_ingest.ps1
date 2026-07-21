@@ -65,7 +65,7 @@ foreach($p in $paths){
     $o1 = Extract "store=1&$common&propertyId=$PID2&filePath=$enc&pageStart=1&pageEnd=$PageBatch"
     if(-not $o1.success -or -not $o1.stored_document_id){
       & curl.exe -s -X DELETE "$BASE/storage/v1/object/$BUCKET/$objkey" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | Out-Null
-      $fail++; $err = if($o1.error){ ($o1.error -replace '\s+',' ') } else { 'no doc id' }; if($err.Length -gt 200){$err=$err.Substring(0,200)}
+      $fail++; $err = if($o1.error){ $o1.error } elseif($o1.message){ "$($o1.code): $($o1.message)" } else { 'no doc id' }; $err = ($err -replace '\s+',' '); if($err.Length -gt 200){$err=$err.Substring(0,200)}
       Log "FAIL batch1 ($mb MB) $name :: $err"; continue
     }
     $docId = $o1.stored_document_id; $pg = [int]$o1.page_count
@@ -75,7 +75,7 @@ foreach($p in $paths){
       $e = [math]::Min($s + $PageBatch - 1, $pg)
       $o2 = Extract "appendDocId=$docId&$common&pageStart=$s&pageEnd=$e"
       if(-not $o2.success){
-        $partial = $true; $err2 = if($o2.error){ ($o2.error -replace '\s+',' ') } else { 'append failed' }; if($err2.Length -gt 200){$err2=$err2.Substring(0,200)}
+        $partial = $true; $err2 = if($o2.error){ $o2.error } elseif($o2.message){ "$($o2.code): $($o2.message)" } else { 'append failed' }; $err2 = ($err2 -replace '\s+',' '); if($err2.Length -gt 200){$err2=$err2.Substring(0,200)}
         Log "FAIL append pp$s-$e ($mb MB) $name :: $err2"; break
       }
     }
