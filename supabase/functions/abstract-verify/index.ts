@@ -20,6 +20,7 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 import { deriveStatus, hasFieldEvidence } from '../_shared/verifyStatus.ts'
+import { verifyCitation } from '../_shared/citation.ts'
 
 // Verification is a reasoning task, not a formatting one — use the strongest
 // model available. Override with QA_MODEL if needed.
@@ -402,6 +403,29 @@ ${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs — each extracted 
         qa = await verifyJson(anthropicKey, openaiKey, MODEL,[{ type: 'text', text: prompt }], 16000)
         attachments = []
       }
+    }
+
+    // ── 4b. Deterministic CITATION VALIDATION (audit trust layer). Confirm each
+    // field_check's verbatim source_quote actually appears in the assembled source
+    // text, tolerant of OCR spacing / hyphenation / punctuation (_shared/citation).
+    // An unlocatable quote is labeled 'not_found' → the UI shows "citation not
+    // confirmed" so it never reads as sourced. ANNOTATE ONLY (no verdict change):
+    // a quote from a PDF that was attached-but-not-text-extracted can legitimately
+    // be absent from this text corpus, so a not_found is a review signal for a
+    // human, not grounds to auto-fail the field.
+    if (qa && typeof qa === 'object' && Array.isArray(qa.field_checks)) {
+      const sourceCorpus = parts.join('\n') + '\n' + briefParts.join('\n')
+      let located = 0, notLocated = 0, tooShort = 0
+      for (const c of qa.field_checks) {
+        const quote = typeof c?.source_quote === 'string' ? c.source_quote : ''
+        if (!quote.trim()) continue
+        const res = verifyCitation({ quote, docText: sourceCorpus })
+        c.citation_check = res.status                 // confirmed | not_found | quote_too_short
+        if (res.status === 'confirmed') located++
+        else if (res.status === 'not_found') notLocated++
+        else tooShort++
+      }
+      qa.citation_summary = { located, not_located: notLocated, too_short: tooShort }
     }
 
     const qaStatus = deriveStatus(qa)

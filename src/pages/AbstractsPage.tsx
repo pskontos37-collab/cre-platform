@@ -2685,6 +2685,14 @@ function QaPanel({ qa, status, at, sourceDocIds, resByKey }: { qa: any; status: 
             <SourceLink quote={c.source_quote} citation={c.citation} sourceDocIds={sourceDocIds} />
           </div>
         )}
+        {/* Deterministic citation validation (abstract-verify): the quoted text
+            could not be located in the extracted source — do not read it as sourced. */}
+        {c.citation_check === 'not_found' && (
+          <div title="The quoted text was not found in the extracted source documents. It may be from a scanned/image page not yet text-extracted, or the citation may be wrong."
+            style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--amber)', marginTop: 3 }}>
+            ⚠ Citation not confirmed — quoted text not found in the extracted source
+          </div>
+        )}
       </div>
     )
   }
@@ -2696,6 +2704,12 @@ function QaPanel({ qa, status, at, sourceDocIds, resByKey }: { qa: any; status: 
         {meta && <span style={{ fontSize: 11, fontWeight: 700, color: meta.color, padding: '1px 8px', borderRadius: 10, background: meta.bg }}>{meta.label}</span>}
         {qa?.confidence && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{qa.confidence} confidence</span>}
         {hasMri && <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 10, color: 'var(--accent)', background: 'var(--accent-dim)' }}>MRI conflict</span>}
+        {/* Deterministic citation validation summary (abstract-verify). */}
+        {qa?.citation_summary && (qa.citation_summary.located + qa.citation_summary.not_located) > 0 && (
+          qa.citation_summary.not_located > 0
+            ? <span title="Cited quotes that could not be located in the extracted source documents." style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10, color: 'var(--amber)', background: 'rgba(245,158,11,0.12)' }}>⚑ {qa.citation_summary.not_located} citation{qa.citation_summary.not_located === 1 ? '' : 's'} not confirmed</span>
+            : <span title="Every cited quote was located in the extracted source." style={{ fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 10, color: 'var(--green)', background: 'rgba(34,197,94,0.12)' }}>✓ {qa.citation_summary.located} citations located</span>
+        )}
         {at && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>· checked {new Date(at).toLocaleString()}</span>}
         {(flaggedDoc.length + arithFails.length + fixes.length + (mriRecon.length || flaggedMri.length)) > 0 && (
           <button onClick={() => setOpen(o => !o)}
