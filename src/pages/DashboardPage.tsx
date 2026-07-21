@@ -21,6 +21,7 @@ import { TopVendorsWidget } from '../components/dashboard/TopVendorsWidget'
 import { DocumentCorpusWidget } from '../components/dashboard/DocumentCorpusWidget'
 import { TenantConcentrationWidget } from '../components/dashboard/TenantConcentrationWidget'
 import { CriticalDatesWidget } from '../components/dashboard/CriticalDatesWidget'
+import { EventReconciliationWidget } from '../components/dashboard/EventReconciliationWidget'
 import { PercentageRentWidget } from '../components/dashboard/PercentageRentWidget'
 import { HealthRatioWidget } from '../components/dashboard/HealthRatioWidget'
 import { ARWidget } from '../components/dashboard/ARWidget'
@@ -59,6 +60,7 @@ const RENDERERS: Record<string, (p: WidgetProps) => ReactNode> = {
   rent_roll:      p => <RentRollWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
   rollover:       p => <RolloverWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
   critical_dates: p => <CriticalDatesWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
+  event_reconciliation: p => <EventReconciliationWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
   svc_renewals:   p => <ServiceAgreementsWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,
   tenants:        p => <TenantConcentrationWidget propertyIds={p.propertyIds} />,
   co_tenancy:     p => <CoTenancyWidget propertyIds={p.propertyIds} propertyNames={p.propertyNames} />,

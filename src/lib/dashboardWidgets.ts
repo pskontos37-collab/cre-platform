@@ -42,6 +42,7 @@ export const WIDGET_DEFS: DashboardWidgetDef[] = [
   { key: 'rent_roll',     label: 'Rent Roll',                     section: 'leasing',     def: true },
   { key: 'rollover',      label: 'Lease Rollover',                section: 'leasing',     def: true },
   { key: 'critical_dates',label: 'Critical Dates',                section: 'leasing',     def: true },
+  { key: 'event_reconciliation', label: 'Option Date Reconciliation', section: 'leasing', def: true },
   { key: 'svc_renewals',  label: 'Service Agreement Renewals',    section: 'leasing',     def: true },
   { key: 'tenants',       label: 'Tenant Concentration',          section: 'leasing',     def: true },
   { key: 'co_tenancy',    label: 'Co-Tenancy Alerts',             section: 'leasing',     def: false },

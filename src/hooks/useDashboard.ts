@@ -436,6 +436,51 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
   }, [propertyIds.join(','), JSON.stringify(propertyNames), days])
 }
 
+// ── Option-date reconciliation (critical-event ledger, P1d) ───────────────────
+// The deterministic generator computes each option-notice deadline as
+// (current-term expiration - notice_days) and cross-checks the stored MRI value.
+// Where they disagree it flags 'deterministic_differs_from_mri' — a worklist of
+// option dates that may be stale (e.g. never updated after a term extension, the
+// Starbucks/Kay-Jewelers failure). Read-only: the ledger surfaces the conflict
+// for a human to adjudicate; it never silently overwrites either value.
+
+export interface EventReconRow {
+  id: string
+  propertyName: string
+  title: string
+  computedDate: string
+  mriValue: string | null
+  dayGap: number | null       // stored − computed, in days (magnitude = how far off)
+  formula: string | null
+}
+
+export function useEventReconciliation(propertyIds: string[], propertyNames: Record<string, string>) {
+  return useQuery<EventReconRow[]>(async () => {
+    if (!propertyIds.length) return []
+    const { data, error } = await supabase
+      .from('critical_events')
+      .select('id, property_id, title, computed_date, mri_value, formula')
+      .in('property_id', propertyIds)
+      .eq('event_type', 'option_notice')
+      .eq('reconciliation_status', 'deterministic_differs_from_mri')
+    if (error) throw new Error(error.message)
+    return ((data ?? []) as any[])
+      .map(r => ({
+        id:           r.id,
+        propertyName: propertyNames[r.property_id] ?? 'Unknown',
+        title:        r.title,
+        computedDate: r.computed_date,
+        mriValue:     r.mri_value,
+        dayGap:       r.mri_value && r.computed_date
+          ? Math.round((new Date(r.mri_value).getTime() - new Date(r.computed_date).getTime()) / 86_400_000)
+          : null,
+        formula:      r.formula,
+      }))
+      // Worst (largest absolute gap) first — the stale-by-years cases lead.
+      .sort((a, b) => Math.abs(b.dayGap ?? 0) - Math.abs(a.dayGap ?? 0))
+  }, [propertyIds.join(','), JSON.stringify(propertyNames)])
+}
+
 // ── Accounts Receivable (GL-derived net A/R) ─────────────────────────────────
 
 export interface ArTrendData {
