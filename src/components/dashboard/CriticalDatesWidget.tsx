@@ -7,16 +7,23 @@ import { useCriticalDates, type CriticalDateRow } from '../../hooks/useDashboard
 import { supabase } from '../../lib/supabase'
 import { downloadIcs, googleCalendarUrl, outlookWebUrl, type CalendarEvent } from '../../lib/calendar'
 
+// Keyed on the critical-event ledger's event_type (P1d-c). Legacy critical_dates
+// date_type keys retained so nothing regresses during the transition.
 const DATE_LABELS: Record<string, string> = {
-  option_notice_deadline: 'Option Notice',
-  lease_expiration:       'Lease Exp.',
-  rent_commencement:      'Rent Comm.',
-  free_rent_end:          'Free Rent End',
-  escalation:             'Escalation',
-  loan_maturity:          'Loan Maturity',
-  tax_appeal_deadline:    'Tax Appeal',
-  inspection_due:         'Inspection',
-  other:                  'Other',
+  // ledger event types
+  lease_expiration:        'Lease Exp.',
+  option_notice:           'Option Notice',
+  loan_maturity:           'Loan Maturity',
+  mgmt_termination_notice: 'PMA Notice',
+  recurring_obligation:    'Recurring',
+  // legacy date_type keys
+  option_notice_deadline:  'Option Notice',
+  rent_commencement:       'Rent Comm.',
+  free_rent_end:           'Free Rent End',
+  escalation:              'Escalation',
+  tax_appeal_deadline:     'Tax Appeal',
+  inspection_due:          'Inspection',
+  other:                   'Other',
 }
 
 // Resolution choices are contextual to the date type. Choosing one closes the
@@ -25,21 +32,39 @@ const DATE_LABELS: Record<string, string> = {
 // for a note (stored in critical_dates.resolution_note) before writing.
 type StatusOpt = { value: string; label: string; needsReason?: boolean; keepsOpen?: boolean }
 
+const OPTION_NOTICE_OPTS: StatusOpt[] = [
+  { value: 'exercised', label: 'Exercised' },
+  { value: 'lapsed',    label: 'Lapsed' },
+  { value: 'waived',    label: 'Waived', needsReason: true },
+  { value: 'ignored',   label: 'Ignored', needsReason: true },
+]
 const STATUS_OPTIONS: Record<string, StatusOpt[]> = {
-  option_notice_deadline: [
-    { value: 'exercised', label: 'Exercised' },
-    { value: 'lapsed',    label: 'Lapsed' },
-    { value: 'waived',    label: 'Waived', needsReason: true },
-    { value: 'ignored',   label: 'Ignored', needsReason: true },
-  ],
+  // ledger event types
   lease_expiration: [
     { value: 'renewed',   label: 'Renewed' },
     { value: 'moved_out', label: 'Moved out' },
   ],
+  option_notice: OPTION_NOTICE_OPTS,
+  loan_maturity: [
+    { value: 'refinanced', label: 'Refinanced' },
+    { value: 'paid_off',   label: 'Paid off' },
+    { value: 'in_progress', label: 'In progress', keepsOpen: true },
+  ],
+  mgmt_termination_notice: [
+    { value: 'renewed',    label: 'Renewed' },
+    { value: 'terminated', label: 'Terminated' },
+    { value: 'waived',     label: 'Waived', needsReason: true },
+  ],
+  recurring_obligation: [
+    { value: 'completed',   label: 'Completed' },
+    { value: 'in_progress', label: 'In progress', keepsOpen: true },
+    { value: 'waived',      label: 'Waived', needsReason: true },
+  ],
+  // legacy date_type keys (transition)
+  option_notice_deadline: OPTION_NOTICE_OPTS,
   rent_commencement: [{ value: 'completed', label: 'Completed' }],
   free_rent_end:     [{ value: 'completed', label: 'Completed' }],
   escalation:        [{ value: 'completed', label: 'Completed' }],
-  loan_maturity:     [{ value: 'ok', label: 'OK' }],
   tax_appeal_deadline: [
     { value: 'completed',   label: 'Completed' },
     { value: 'in_progress', label: 'In progress', keepsOpen: true },
@@ -50,13 +75,25 @@ const STATUS_OPTIONS: Record<string, StatusOpt[]> = {
   ],
   other: [
     { value: 'completed', label: 'Completed' },
-    { value: 'approved',  label: 'Approved' },
     { value: 'ignored',   label: 'Ignored', needsReason: true },
     { value: 'waived',    label: 'Waived', needsReason: true },
   ],
 }
-const DEFAULT_STATUS_OPTIONS: StatusOpt[] = [{ value: 'completed', label: 'Completed' }]
+const DEFAULT_STATUS_OPTIONS: StatusOpt[] = [
+  { value: 'completed', label: 'Completed' },
+  { value: 'waived',    label: 'Waived', needsReason: true },
+]
 const optionsFor = (dateType: string): StatusOpt[] => STATUS_OPTIONS[dateType] ?? DEFAULT_STATUS_OPTIONS
+
+// Map a resolution CHOICE to the critical_events lifecycle status. The specific
+// choice (Exercised/Renewed/…) is preserved in resolution_note.
+const CHOICE_TO_STATUS: Record<string, 'completed' | 'waived' | 'in_progress' | 'not_applicable'> = {
+  exercised: 'completed', renewed: 'completed', completed: 'completed', ok: 'completed',
+  approved: 'completed', moved_out: 'completed', lapsed: 'completed', terminated: 'completed',
+  refinanced: 'completed', paid_off: 'completed',
+  waived: 'waived', ignored: 'waived',
+  in_progress: 'in_progress', not_applicable: 'not_applicable',
+}
 
 function toCalendarEvent(row: CriticalDateRow): CalendarEvent {
   const label = DATE_LABELS[row.dateType] ?? row.dateType
@@ -97,14 +134,18 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
 
   async function applyStatus(row: CriticalDateRow, opt: StatusOpt, note: string | null) {
     setBusy(row.id); setActionError(null)
-    const patch: Record<string, unknown> = { status: opt.value, resolution_note: note }
-    // keepsOpen (e.g. tax appeal "In progress") records the status but leaves the
-    // item on the list; every other choice closes it.
-    if (!opt.keepsOpen) {
-      patch.is_completed = true
-      patch.completed_date = new Date().toISOString().slice(0, 10)
+    // P1d-c: resolve against the critical_events ledger. Map the choice to the
+    // ledger's lifecycle status; keep the specific choice + any reason in
+    // resolution_note. A non-keepsOpen status leaves the active view (the widget
+    // reads active_critical_events, which excludes completed/waived/N-A).
+    const status = CHOICE_TO_STATUS[opt.value] ?? (opt.keepsOpen ? 'in_progress' : 'completed')
+    const patch: Record<string, unknown> = {
+      status,
+      resolution_note: note ?? opt.label,
+      updated_at: new Date().toISOString(),
     }
-    const { error: err } = await supabase.from('critical_dates').update(patch).eq('id', row.id)
+    if (status !== 'in_progress') patch.completed_date = new Date().toISOString().slice(0, 10)
+    const { error: err } = await supabase.from('critical_events').update(patch).eq('id', row.id)
     setBusy(null); setPending(null); setReason('')
     if (err) setActionError(`Couldn't update: ${err.message}`)
     else refetch()
@@ -179,7 +220,7 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
                 {/* Landlord reminder-notice provision: this lease obliges the
                     landlord to remind the tenant before the option window — flag
                     it so the manager prepares a notice to tenant. */}
-                {row.requiresLandlordReminder && row.dateType === 'option_notice_deadline' && (
+                {row.requiresLandlordReminder && (row.dateType === 'option_notice' || row.dateType === 'option_notice_deadline') && (
                   <div style={{ marginTop: 5 }}>
                     <Badge variant="blue">⚑ Prepare tenant notice</Badge>
                   </div>

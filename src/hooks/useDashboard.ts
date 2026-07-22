@@ -407,14 +407,19 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
     const horizon = new Date()
     horizon.setDate(horizon.getDate() + days)
 
+    // P1d-c: read the single critical-event LEDGER (active_critical_events =
+    // open/in-progress, historical & superseded excluded), replacing the legacy
+    // critical_dates store. Dated events only, within the horizon. dateType now
+    // carries the ledger event_type (lease_expiration/option_notice/loan_maturity/
+    // mgmt_termination_notice/recurring_obligation); consumers render it as a label.
     const { data, error } = await supabase
-      .from('critical_dates')
-      .select('id, property_id, lease_id, loan_id, date_type, due_date, description, status, requires_landlord_reminder')
+      .from('active_critical_events')
+      .select('id, property_id, lease_id, loan_id, event_type, computed_date, title, description, status, requires_landlord_reminder')
       .in('property_id', propertyIds)
-      .eq('is_completed', false)
-      .gte('due_date', today.toISOString().split('T')[0])
-      .lte('due_date', horizon.toISOString().split('T')[0])
-      .order('due_date')
+      .not('computed_date', 'is', null)
+      .gte('computed_date', today.toISOString().split('T')[0])
+      .lte('computed_date', horizon.toISOString().split('T')[0])
+      .order('computed_date')
       .limit(50)
 
     if (error) throw new Error(error.message)
@@ -424,10 +429,10 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
       propertyId:   row.property_id,
       propertyName: propertyNames[row.property_id] ?? 'Unknown',
       tenantName:   null,
-      dateType:     row.date_type,
-      dueDate:      row.due_date,
-      description:  row.description,
-      daysUntil:    Math.ceil((new Date(row.due_date).getTime() - today.getTime()) / 86_400_000),
+      dateType:     row.event_type,
+      dueDate:      row.computed_date,
+      description:  row.title ?? row.description,
+      daysUntil:    Math.ceil((new Date(row.computed_date).getTime() - today.getTime()) / 86_400_000),
       loanId:       row.loan_id,
       leaseId:      row.lease_id,
       status:       row.status ?? 'open',
