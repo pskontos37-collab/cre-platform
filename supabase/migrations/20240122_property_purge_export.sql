@@ -24,8 +24,12 @@
 --    A closure table with NO policy row makes the plan UNCLASSIFIED and
 --    property_purge_execute_table() REFUSES to run anything until a human adds
 --    a policy row. This is the drift guard for future schema growth.
--- 3. Deletes run child-first (closure depth DESC, orchestrated by the script,
---    with FK-violation retries as a safety net). The properties row itself is
+-- 3. Deletes run in FK-TOPOLOGICAL order (property_purge_order(): iterative
+--    peel -- a table is deletable once no remaining delete-class table
+--    references it), with the script's FK-violation retries as a safety net
+--    for true cycles. Closure depth alone is NOT a safe order: leases and
+--    documents are both depth 1 but leases.document_id references documents
+--    (caught in the 2026-07-21 branch rehearsal). The properties row itself is
 --    never deleted. Storage objects (bucket prefix p/<property_id>/) are
 --    removed by the script via the Storage API -- deleting storage.objects rows
 --    in SQL would orphan the underlying S3 objects.
@@ -180,6 +184,48 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- Deletion order: iterative peel over the FK graph restricted to delete-class
+-- tables. A table is safe to delete once no REMAINING delete-class table has
+-- an FK column referencing it (self-FKs are ignored: a single DELETE removes
+-- referencing and referenced rows together). If a pick round comes up empty
+-- (a genuine FK cycle), the remainder is emitted as-is and the orchestrating
+-- script's retry passes resolve it.
+-- ---------------------------------------------------------------------------
+
+create or replace function property_purge_order()
+returns table(seq int, table_name text)
+language plpgsql stable security definer set search_path = public, pg_temp as $$
+declare
+  remaining text[];
+  ordered text[] := '{}';
+  pick text[];
+begin
+  perform _purge_guard();
+  select coalesce(array_agg(distinct pp.table_name), '{}') into remaining
+  from purge_policy pp
+  where pp.action = 'delete'
+    and pp.table_name in (select c.tbl from _purge_closure() c);
+
+  while coalesce(array_length(remaining, 1), 0) > 0 loop
+    select coalesce(array_agg(t), '{}') into pick
+    from unnest(remaining) t
+    where not exists (
+      select 1 from _purge_edges() e
+      where e.parent = t
+        and e.child = any (remaining)
+        and e.child <> t
+    );
+    if coalesce(array_length(pick, 1), 0) = 0 then
+      pick := remaining;  -- FK cycle among remaining tables: script retry passes cover it
+    end if;
+    ordered := ordered || pick;
+    select coalesce(array_agg(x), '{}') into remaining from unnest(remaining) x where x <> all (pick);
+  end loop;
+
+  return query select (row_number() over ())::int, t from unnest(ordered) t;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- Plan / count / execute / orphans / matviews
 -- ---------------------------------------------------------------------------
 
@@ -198,7 +244,17 @@ begin
            when pp.action = 'nullify' then format('update %I set %I = null where <col in purge set>', cl.tbl, pp.detail)
            else _purge_predicate(cl.tbl, p_property_id)
          end,
-         case when pp.action is null then 'BLOCKING - add a purge_policy row for this table' else 'ok' end
+         case
+           when pp.action is null then 'BLOCKING - add a purge_policy row for this table'
+           when pp.action = 'keep' and exists (
+             select 1 from _purge_edges() e
+             join purge_policy dp on dp.table_name = e.parent and dp.action = 'delete'
+             where e.child = cl.tbl
+               and not exists (select 1 from purge_policy np
+                               where np.table_name = cl.tbl and np.action = 'nullify' and np.detail = e.col)
+           ) then 'BLOCKING - keep-table FK into delete-class table without a nullify policy'
+           else 'ok'
+         end
   from cl
   left join purge_policy pp on pp.table_name = cl.tbl
   order by cl.depth desc, cl.tbl, coalesce(pp.action, '');
@@ -344,12 +400,14 @@ revoke all on function _purge_guard()                                        fro
 revoke all on function _purge_edges()                                        from public, anon;
 revoke all on function _purge_closure()                                      from public, anon;
 revoke all on function _purge_predicate(text, uuid, text[])                  from public, anon;
+revoke all on function property_purge_order()                                from public, anon;
 revoke all on function property_purge_plan(uuid)                             from public, anon;
 revoke all on function property_purge_count(uuid, text)                      from public, anon;
 revoke all on function property_purge_execute_table(uuid, text, text)       from public, anon;
 revoke all on function property_purge_orphan_tenants(uuid, text)             from public, anon;
 revoke all on function property_purge_refresh_matviews()                     from public, anon;
 
+grant execute on function property_purge_order()                             to authenticated, service_role;
 grant execute on function property_purge_plan(uuid)                          to authenticated, service_role;
 grant execute on function property_purge_count(uuid, text)                   to authenticated, service_role;
 grant execute on function property_purge_execute_table(uuid, text, text)    to authenticated, service_role;

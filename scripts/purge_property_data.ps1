@@ -202,9 +202,14 @@ foreach ($row in @($plan | Where-Object { $_.action -eq 'nullify' })) {
   Write-Host ("nullify {0}.{1}: {2} rows" -f $row.table_name, $row.detail, $res.nulled)
 }
 
-# 2) deletes, child-first, with retry passes for FK ordering surprises
-$deleteTables = @($countMap.Keys | Where-Object { $countMap[$_].action -eq 'delete' } |
-  Sort-Object -Property @{e={$countMap[$_].depth}; Descending=$true})
+# 2) deletes in FK-topological order (property_purge_order: children before the
+#    tables they reference; closure depth alone is NOT safe -- e.g. leases
+#    references documents at the same depth), retry passes for true FK cycles
+$orderRows = @(Invoke-Rpc 'property_purge_order' @{})
+$deleteTables = @($orderRows | Sort-Object { [int]$_.seq } | ForEach-Object { $_.table_name } |
+  Where-Object { $countMap.Contains($_) -and $countMap[$_].action -eq 'delete' })
+$missing = @($countMap.Keys | Where-Object { $countMap[$_].action -eq 'delete' -and ($deleteTables -notcontains $_) })
+if ($missing.Count -gt 0) { $deleteTables = @($deleteTables + $missing) }
 $pending = $deleteTables
 $results = [ordered]@{}
 for ($pass = 1; $pass -le $MaxPasses -and $pending.Count -gt 0; $pass++) {
