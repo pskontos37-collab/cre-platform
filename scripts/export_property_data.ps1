@@ -61,17 +61,23 @@ if (-not $projectRef -or -not $accessToken) { throw 'SUPABASE_PROJECT_REF / SUPA
 # ---------------------------------------------------------------------------
 function Invoke-MgmtSql([string]$sql) {
   # Management API runs read-only SELECTs here; returns parsed JSON rows.
+  # PS 5.1 gotcha: IRM emits a JSON array as ONE pipeline object; assigning to a
+  # variable and returning THAT enumerates it, so callers can safely @( ) us.
   $body = @{ query = $sql } | ConvertTo-Json -Compress -Depth 4
   $uri = "https://api.supabase.com/v1/projects/$projectRef/database/query"
-  return Invoke-RestMethod -Method Post -Uri $uri -Body $body -ContentType 'application/json' `
+  $resp = Invoke-RestMethod -Method Post -Uri $uri -Body $body -ContentType 'application/json' `
     -Headers @{ Authorization = "Bearer $accessToken" } -UserAgent 'cre-export/1.0'
+  if ($null -eq $resp) { return @() }
+  return $resp
 }
 
 function Invoke-Rpc([string]$fn, [hashtable]$rpcBody) {
   $uri = "$supaUrl/rest/v1/rpc/$fn"
   $json = $rpcBody | ConvertTo-Json -Compress -Depth 4
-  return Invoke-RestMethod -Method Post -Uri $uri -Body $json -ContentType 'application/json' `
+  $resp = Invoke-RestMethod -Method Post -Uri $uri -Body $json -ContentType 'application/json' `
     -Headers @{ apikey = $secretKey; Authorization = "Bearer $secretKey" } -UserAgent 'cre-export/1.0'
+  if ($null -eq $resp) { return @() }
+  return $resp
 }
 
 function Sql-Quote([string]$s) { return "'" + ($s -replace "'", "''") + "'" }
@@ -276,7 +282,9 @@ if ($IncludePdfs) {
       $offset = 0
       while ($true) {
         $listBody = @{ prefix = $prefix; limit = 1000; offset = $offset } | ConvertTo-Json -Compress
-        $items = @(Invoke-RestMethod -Method Post -Uri "$supaUrl/storage/v1/object/list/$bname" -Body $listBody -ContentType 'application/json' -Headers $storageHeaders -UserAgent 'cre-export/1.0')
+        $itemsResp = Invoke-RestMethod -Method Post -Uri "$supaUrl/storage/v1/object/list/$bname" -Body $listBody -ContentType 'application/json' -Headers $storageHeaders -UserAgent 'cre-export/1.0'
+        $items = @()
+        if ($null -ne $itemsResp) { $items = @($itemsResp) }
         if ($items.Count -eq 0) { break }
         foreach ($it in $items) {
           $full = "$prefix/" + $it.name

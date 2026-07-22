@@ -60,9 +60,13 @@ if (-not $secretKey -or -not $supaUrl) { throw 'SUPABASE_SECRET_KEY / VITE_SUPAB
 $restHeaders = @{ apikey = $secretKey; Authorization = "Bearer $secretKey" }
 
 function Invoke-Rpc([string]$fn, [hashtable]$rpcBody) {
+  # PS 5.1 gotcha: IRM emits a JSON array as ONE pipeline object; assigning to a
+  # variable and returning THAT enumerates it, so callers can safely @( ) us.
   $json = $rpcBody | ConvertTo-Json -Compress -Depth 6
-  return Invoke-RestMethod -Method Post -Uri "$supaUrl/rest/v1/rpc/$fn" -Body $json `
+  $resp = Invoke-RestMethod -Method Post -Uri "$supaUrl/rest/v1/rpc/$fn" -Body $json `
     -ContentType 'application/json' -Headers $restHeaders -UserAgent 'cre-purge/1.0'
+  if ($null -eq $resp) { return @() }
+  return $resp
 }
 
 function Get-ErrBody($err) {
@@ -73,9 +77,11 @@ function Get-ErrBody($err) {
 # ---------------------------------------------------------------------------
 # Preflight: property + plan (inert without migration 20240122)
 # ---------------------------------------------------------------------------
-$propRows = @(Invoke-RestMethod -Method Get `
+$propResp = Invoke-RestMethod -Method Get `
   -Uri ("$supaUrl/rest/v1/properties?select=id,name&name=eq." + [uri]::EscapeDataString($PropertyName)) `
-  -Headers $restHeaders -UserAgent 'cre-purge/1.0')
+  -Headers $restHeaders -UserAgent 'cre-purge/1.0'
+$propRows = @()
+if ($null -ne $propResp) { $propRows = @($propResp) }
 if ($propRows.Count -eq 0) { throw "No property named '$PropertyName' (must match public.properties.name exactly)" }
 $propId = $propRows[0].id
 $propNameExact = $propRows[0].name
@@ -125,7 +131,9 @@ $storageInv = @()
 $storageHeaders = $null
 if ($serviceJwt) {
   $storageHeaders = @{ apikey = $serviceJwt; Authorization = "Bearer $serviceJwt" }
-  $bucketList = @(Invoke-RestMethod -Method Get -Uri "$supaUrl/storage/v1/bucket" -Headers $storageHeaders -UserAgent 'cre-purge/1.0')
+  $bucketResp = Invoke-RestMethod -Method Get -Uri "$supaUrl/storage/v1/bucket" -Headers $storageHeaders -UserAgent 'cre-purge/1.0'
+  $bucketList = @()
+  if ($null -ne $bucketResp) { $bucketList = @($bucketResp) }
   foreach ($bucket in $bucketList) {
     $bname = $bucket.name
     $paths = New-Object System.Collections.Generic.List[string]
@@ -136,7 +144,9 @@ if ($serviceJwt) {
       $offset = 0
       while ($true) {
         $listBody = @{ prefix = $prefix; limit = 1000; offset = $offset } | ConvertTo-Json -Compress
-        $items = @(Invoke-RestMethod -Method Post -Uri "$supaUrl/storage/v1/object/list/$bname" -Body $listBody -ContentType 'application/json' -Headers $storageHeaders -UserAgent 'cre-purge/1.0')
+        $itemsResp = Invoke-RestMethod -Method Post -Uri "$supaUrl/storage/v1/object/list/$bname" -Body $listBody -ContentType 'application/json' -Headers $storageHeaders -UserAgent 'cre-purge/1.0'
+        $items = @()
+        if ($null -ne $itemsResp) { $items = @($itemsResp) }
         if ($items.Count -eq 0) { break }
         foreach ($it in $items) {
           $full = "$prefix/" + $it.name
