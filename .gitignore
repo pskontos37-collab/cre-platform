@@ -10,3 +10,4 @@ scripts/logs/
 scripts/*.log
 scripts/_*
 scripts/.monthly_reports_out/
+scripts/exports/
