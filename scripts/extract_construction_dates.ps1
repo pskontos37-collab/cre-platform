@@ -155,7 +155,9 @@ if ($Confirm) {
     $targets = @()
     for ($i = 0; $i -lt @($r.obligations).Count; $i++) {
       $ob = $r.obligations[$i]
-      if ((Get-DerivedStatus $ob) -eq 'open' -or $ob.grants_termination) { $targets += $i }
+      # only rows that can ALERT need the cross-model gate; historical rows never
+      # alert regardless of grants_termination (class 'historical' wins)
+      if ((Get-DerivedStatus $ob) -eq 'open') { $targets += $i }
     }
     if (-not $targets.Count) { continue }
     if ($r.PSObject.Properties['confirm'] -and $r.confirm) { continue }   # already confirmed
@@ -197,8 +199,14 @@ if ($Load) {
     $loadedAny = $false
     for ($i = 0; $i -lt @($r.obligations).Count; $i++) {
       $ob = $r.obligations[$i]
+      if ($null -eq $ob) { continue }
       $st = Get-DerivedStatus $ob
-      if ($ob.confidence -eq 'low') { $skipLow++; continue }
+      # well-formed or skip: type/obligor must satisfy the table checks, quote must
+      # exist (evidence mandate), confidence must be an explicit high/medium
+      $typesOk = @('plan_submittal','plan_approval','permit_contingency','delivery_deadline','construction_completion','opening_deadline','ti_allowance_request','rcd_outside_date') -contains $ob.obligation_type
+      $obligorOk = @('tenant','landlord','either') -contains $ob.obligor
+      if (-not $typesOk -or -not $obligorOk -or -not (Nz($ob.quote))) { $skipLow++; continue }
+      if (@('high','medium') -notcontains $ob.confidence) { $skipLow++; continue }
       # an Opus REFUTE kills the row outright, historical or live - refuted rows
       # carry a defect (wrong type, unsupported flag, bad quote) we must not store
       if ($r.PSObject.Properties['confirm'] -and $r.confirm) {
