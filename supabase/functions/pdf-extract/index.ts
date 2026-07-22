@@ -568,17 +568,45 @@ serve(async (req) => {
       let pageCount = 0
       try { const d = mu.Document.openDocument(bytes, 'application/pdf'); pageCount = d.countPages(); (d as { destroy?: () => void }).destroy?.() }
       catch (e) { throw new Error('PDF parse failed (corrupt or not a PDF): ' + (e instanceof Error ? e.message : String(e))) }
-      if (pageCount > OCR_MAX_PAGES) {
+      // Ranged OCR (?pageStart/?pageEnd): transcribe ONLY those pages and SPLICE them
+      // into the text layer — delete scoped to the range, page numbers remapped to the
+      // original document. This is how covenant pages get OCR'd on docs over
+      // OCR_MAX_PAGES, and how a truncation gap is repaired WITHOUT nuking a good
+      // pdfjs layer (full-doc ocrText replaces the whole layer; 2026-07-22 incident).
+      const ocrRanged = pageStart > 0 || pageEnd > 0
+      const rngStart  = ocrRanged ? Math.max(1, Math.min(pageStart > 0 ? pageStart : 1, pageCount)) : 1
+      const rngEnd    = ocrRanged ? Math.max(rngStart, Math.min(pageEnd > 0 ? pageEnd : pageCount, pageCount)) : pageCount
+      if (ocrRanged && rngEnd - rngStart + 1 > OCR_MAX_PAGES) {
+        throw new Error(`ranged OCR span ${rngStart}-${rngEnd} exceeds OCR_MAX_PAGES=${OCR_MAX_PAGES}`)
+      }
+      if (!ocrRanged && pageCount > OCR_MAX_PAGES) {
         return new Response(JSON.stringify({
           success: true, ocr: true, document_id: reindexDocId, page_count: pageCount, too_large: true, text_chunks: 0,
+          hint: 'use ?pageStart=&pageEnd= to OCR a page range',
         }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+      }
+
+      // Build the byte payload: the whole PDF, or a MuPDF-grafted segment for a range
+      // (scanned PDFs are image-heavy; pdf-lib load can OOM the edge worker).
+      let ocrBytes = bytes
+      if (ocrRanged) {
+        const src = mu.Document.openDocument(bytes, 'application/pdf')
+        const srcPdf = src.asPDF()
+        const dst = new mu.PDFDocument()
+        for (let i = rngStart - 1; i < rngEnd; i++) dst.graftPage(-1, srcPdf, i)
+        const buf = dst.saveToBuffer('garbage')
+        ocrBytes = new Uint8Array(buf.asUint8Array())
+        ;(buf as { destroy?: () => void }).destroy?.()
+        ;(dst as { destroy?: () => void }).destroy?.()
+        ;(src as { destroy?: () => void }).destroy?.()
       }
 
       const ocrPrompt = `Transcribe ALL text in this document VERBATIM, in natural reading order. This is an OCR task for a legal-document search index. Rules:
 - Output ONLY the transcribed text — no commentary, summary, or headings you add yourself.
 - Begin each page with a line "=== PAGE n ===" (n = the page number) so the text can be located.
 - Preserve dollar amounts, dates, section numbers, defined terms, and party names exactly as written.
-- If a page is blank or unreadable, still emit its "=== PAGE n ===" line followed by "[no legible text]".`
+- If a page is blank or unreadable, still emit its "=== PAGE n ===" line followed by "[no legible text]".${
+        ocrRanged ? `\n- This file is an EXCERPT: its first page is page ${rngStart} of the original document. Number pages ${rngStart} through ${rngEnd} accordingly.` : ''}`
       // Provider: ?ocrProvider=openai routes to GPT-4o vision (works during an
       // Anthropic overload); default is Claude native-PDF vision (existing path).
       const ocrProvider = (url.searchParams.get('ocrProvider') ?? OCR_PROVIDER_DEFAULT).toLowerCase()
@@ -589,7 +617,7 @@ serve(async (req) => {
         const oaiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
         if (!oaiKey) throw new Error('OPENAI_API_KEY secret not set')
         usedModel = OCR_OPENAI_MODEL
-        const res = await ocrViaOpenAI(bytes, oaiKey, ocrPrompt)
+        const res = await ocrViaOpenAI(ocrBytes, oaiKey, ocrPrompt)
         full = res.full; truncated = res.truncated
       } else {
         const aRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -598,7 +626,7 @@ serve(async (req) => {
           body: JSON.stringify({
             model: OCR_MODEL, max_tokens: OCR_MAX_TOKENS,
             messages: [{ role: 'user', content: [
-              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: toBase64(bytes) } },
+              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: toBase64(ocrBytes) } },
               { type: 'text', text: ocrPrompt },
             ] }],
           }),
@@ -615,12 +643,22 @@ serve(async (req) => {
       const marks: { page: number; at: number; end: number }[] = []
       let m: RegExpExecArray | null
       while ((m = re.exec(full))) marks.push({ page: Number(m[1]), at: m.index, end: re.lastIndex })
+      // Ranged mode: the model sees the SEGMENT. It is told to number from rngStart,
+      // but tolerate both conventions — original-document numbers (in range) pass
+      // through; segment-relative 1..k numbers are offset; anything else falls back
+      // to position. Full-doc mode (rngStart=1) reduces to the original behavior.
+      const segLen = rngEnd - rngStart + 1
+      const mapPage = (raw: number, i: number): number => {
+        if (raw >= rngStart && raw <= rngEnd) return raw
+        if (raw >= 1 && raw <= segLen) return raw + (rngStart - 1)
+        return Math.min(rngStart + i, rngEnd)
+      }
       if (!marks.length) {
-        pages.push({ page: 1, text: full })
+        pages.push({ page: rngStart, text: full })
       } else {
         for (let i = 0; i < marks.length; i++) {
           const body = full.slice(marks[i].end, i + 1 < marks.length ? marks[i + 1].at : full.length)
-          pages.push({ page: marks[i].page || i + 1, text: body })
+          pages.push({ page: mapPage(marks[i].page || 0, i), text: body })
         }
       }
       const totalChars = pages.reduce((s, p) => s + p.text.length, 0)
@@ -632,10 +670,21 @@ serve(async (req) => {
 
       const chunks = chunkPages(pages)
       const vecs = skipEmbed ? [] : await embedBatch(chunks.map(c => c.content), embKey)
-      const { error: delErr } = await sb.from('document_chunks').delete().eq('document_id', reindexDocId).eq('kind', 'text')
+      // Ranged: splice — clear ONLY this range's prior text chunks and slot the new ones
+      // after the current max index (keeps the rest of the layer intact). Full: replace all.
+      let del = sb.from('document_chunks').delete().eq('document_id', reindexDocId).eq('kind', 'text')
+      if (ocrRanged) del = del.gte('page_number', rngStart).lte('page_number', rngEnd)
+      const { error: delErr } = await del
       if (delErr) throw new Error('clear old text chunks failed: ' + delErr.message)
+      let idxBase = 1000
+      if (ocrRanged) {
+        const { data: mx } = await sb.from('document_chunks').select('chunk_index')
+          .eq('document_id', reindexDocId).eq('kind', 'text')
+          .order('chunk_index', { ascending: false }).limit(1).maybeSingle()
+        idxBase = Math.max(1000, ((mx?.chunk_index as number | undefined) ?? 999) + 1)
+      }
       const rows = chunks.map((c, i) => ({
-        document_id: reindexDocId, property_id: ownerPropertyId ?? null, chunk_index: 1000 + i,
+        document_id: reindexDocId, property_id: ownerPropertyId ?? null, chunk_index: idxBase + i,
         content: c.content, embedding_voyage: skipEmbed ? null : `[${vecs[i].join(',')}]`, page_number: c.page, kind: 'text',
       }))
       const { error: rpcErr } = await sb.rpc('insert_text_chunks', { p_rows: rows })
@@ -650,6 +699,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         success: true, ocr: true, document_id: reindexDocId, page_count: pageCount,
         text_chunks: rows.length, model: usedModel, provider: ocrProvider, truncated,
+        ...(ocrRanged ? { page_start: rngStart, page_end: rngEnd } : {}),
       }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
