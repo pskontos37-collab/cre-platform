@@ -16,6 +16,16 @@ const DATE_LABELS: Record<string, string> = {
   loan_maturity:           'Loan Maturity',
   mgmt_termination_notice: 'PMA Notice',
   recurring_obligation:    'Recurring',
+  // construction & contingency dates (mig 20240123, doc-sourced)
+  plan_submittal:          'Plan Submittal',
+  plan_approval:           'Plan Approval',
+  permit_contingency:      'Permit Contingency',
+  delivery_deadline:       'Delivery Deadline',
+  construction_completion: 'Constr. Completion',
+  opening_deadline:        'Opening Deadline',
+  ti_allowance_request:    'TI Requisition',
+  rcd_outside_date:        'RCD Outside Date',
+  termination_window:      'Termination Window',
   // legacy date_type keys
   option_notice_deadline:  'Option Notice',
   rent_commencement:       'Rent Comm.',
@@ -60,6 +70,46 @@ const STATUS_OPTIONS: Record<string, StatusOpt[]> = {
     { value: 'in_progress', label: 'In progress', keepsOpen: true },
     { value: 'waived',      label: 'Waived', needsReason: true },
   ],
+  // construction & contingency dates (mig 20240123)
+  plan_submittal: [
+    { value: 'received', label: 'Received' },
+    { value: 'waived',   label: 'Waived', needsReason: true },
+  ],
+  plan_approval: [
+    { value: 'approved', label: 'Approved' },
+    { value: 'waived',   label: 'Waived', needsReason: true },
+  ],
+  permit_contingency: [
+    { value: 'satisfied',  label: 'Satisfied' },
+    { value: 'terminated', label: 'Terminated' },
+    { value: 'waived',     label: 'Waived', needsReason: true },
+  ],
+  delivery_deadline: [
+    { value: 'delivered', label: 'Delivered' },
+    { value: 'waived',    label: 'Waived', needsReason: true },
+  ],
+  construction_completion: [
+    { value: 'completed', label: 'Completed' },
+    { value: 'waived',    label: 'Waived', needsReason: true },
+  ],
+  opening_deadline: [
+    { value: 'opened', label: 'Opened' },
+    { value: 'waived', label: 'Waived', needsReason: true },
+  ],
+  ti_allowance_request: [
+    { value: 'requisitioned', label: 'Requisitioned' },
+    { value: 'forfeited',     label: 'Forfeited' },
+    { value: 'waived',        label: 'Waived', needsReason: true },
+  ],
+  rcd_outside_date: [
+    { value: 'commenced', label: 'Commenced' },
+    { value: 'waived',    label: 'Waived', needsReason: true },
+  ],
+  termination_window: [
+    { value: 'lapsed',    label: 'Lapsed' },
+    { value: 'exercised', label: 'Exercised' },
+    { value: 'ignored',   label: 'Ignored', needsReason: true },
+  ],
   // legacy date_type keys (transition)
   option_notice_deadline: OPTION_NOTICE_OPTS,
   rent_commencement: [{ value: 'completed', label: 'Completed' }],
@@ -91,6 +141,8 @@ const CHOICE_TO_STATUS: Record<string, 'completed' | 'waived' | 'in_progress' | 
   exercised: 'completed', renewed: 'completed', completed: 'completed', ok: 'completed',
   approved: 'completed', moved_out: 'completed', lapsed: 'completed', terminated: 'completed',
   refinanced: 'completed', paid_off: 'completed',
+  received: 'completed', delivered: 'completed', opened: 'completed', satisfied: 'completed',
+  requisitioned: 'completed', forfeited: 'completed', commenced: 'completed',
   waived: 'waived', ignored: 'waived',
   in_progress: 'in_progress', not_applicable: 'not_applicable',
 }
@@ -228,6 +280,14 @@ export function CriticalDatesWidget({ propertyIds, propertyNames }: CriticalDate
                 {row.status === 'in_progress' && (
                   <div style={{ marginTop: 5 }}>
                     <Badge variant="amber">In progress</Badge>
+                  </div>
+                )}
+                {/* Doc-sourced dates (mig 20240123): honest provenance — the row
+                    came from AI extraction and no human has verified the source
+                    row yet. Verifying it (or MRI/human sources) clears the pill. */}
+                {row.generatedBy === 'import' && (
+                  <div style={{ marginTop: 5 }}>
+                    <Badge variant="gray">AI-extracted</Badge>
                   </div>
                 )}
               </div>

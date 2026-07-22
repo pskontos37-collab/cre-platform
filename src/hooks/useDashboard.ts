@@ -397,6 +397,7 @@ export interface CriticalDateRow {
   leaseId: string | null
   status: string
   requiresLandlordReminder: boolean
+  generatedBy: string
 }
 
 export function useCriticalDates(propertyIds: string[], propertyNames: Record<string, string>, days = 90) {
@@ -414,7 +415,7 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
     // mgmt_termination_notice/recurring_obligation); consumers render it as a label.
     const { data, error } = await supabase
       .from('active_critical_events')
-      .select('id, property_id, lease_id, loan_id, event_type, computed_date, title, description, status, requires_landlord_reminder')
+      .select('id, property_id, lease_id, loan_id, event_type, computed_date, title, description, status, requires_landlord_reminder, generated_by')
       .in('property_id', propertyIds)
       .not('computed_date', 'is', null)
       .gte('computed_date', today.toISOString().split('T')[0])
@@ -437,6 +438,7 @@ export function useCriticalDates(propertyIds: string[], propertyNames: Record<st
       leaseId:      row.lease_id,
       status:       row.status ?? 'open',
       requiresLandlordReminder: row.requires_landlord_reminder ?? false,
+      generatedBy:  row.generated_by ?? 'deterministic',
     }))
   }, [propertyIds.join(','), JSON.stringify(propertyNames), days])
 }
