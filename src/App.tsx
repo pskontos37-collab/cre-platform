@@ -22,6 +22,7 @@ import { PropertyDetailPage } from './pages/PropertyDetailPage'
 import { SitePlansPage } from './pages/SitePlansPage'
 import { AskPage } from './pages/AskPage'
 import { AbstractsPage } from './pages/AbstractsPage'
+import { ReviewCenterPage } from './pages/ReviewCenterPage'
 import { ClausesPage } from './pages/ClausesPage'
 import { DiligencePage } from './pages/DiligencePage'
 import { MriReconPage } from './pages/MriReconPage'
@@ -429,6 +430,18 @@ function AppRoutes() {
             <RequirePage pageKey="abstracts">
               <AppLayout>
                 <AbstractsPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/review"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="review">
+              <AppLayout>
+                <ReviewCenterPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
