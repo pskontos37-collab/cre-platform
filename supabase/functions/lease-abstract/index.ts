@@ -138,8 +138,20 @@ serve(async (req) => {
     // names: store numbers ("Old Navy #4885"), legal suffixes ("HomeGoods,
     // Inc."), &/and swaps ("AT AND T" vs "AT&T"), stray apostrophes ("Cafe'").
     const addVariants = (cands: Set<string>, seed: string) => {
-      // accent folding: MRI says "Café", the file system almost always "Cafe"
-      for (const s of new Set([seed, seed.normalize('NFD').replace(/[̀-ͯ]/g, '')])) {
+      // The file system's tenant folders diverge from MRI names in recurring,
+      // mechanical ways (2026-07-22 portfolio sweep): accents, apostrophes,
+      // &/and, corp suffixes, a leading "The", hyphens, and singular/plural
+      // ("Wild Wings Cafe" vs folder "Wild Wing Cafe"). Fan each seed out to
+      // those permutations so the ILIKE needles cover the whole class.
+      const seeds = new Set([seed, seed.normalize('NFD').replace(/[̀-ͯ]/g, '')])
+      for (const s0 of [...seeds]) {
+        // corp-suffix strip here (not just on the tenant name) so ALIASES get it too
+        const noSuffix = s0.replace(/[,.]?\s+(inc|llc|l\.l\.c|ltd|lp|llp|corp|corporation|co|company)\.?$/i, '')
+        if (noSuffix !== s0) seeds.add(noSuffix)
+        const noThe = s0.replace(/^the\s+/i, '')
+        if (noThe !== s0) seeds.add(noThe)
+      }
+      for (const s of seeds) {
         const c = ilikeSafe(s).trim()
         if (c.length < 3) continue
         cands.add(c)
@@ -148,6 +160,18 @@ serve(async (req) => {
         // concatenated form bridges "Salt Grass" ↔ "Saltgrass"
         const concat = noApos.replace(/\s+/g, '')
         if (/\s/.test(noApos) && concat.length >= 6) cands.add(concat)
+        // hyphen folding bridges "K-Pot" ↔ "KPot" / "K Pot"
+        if (/-/.test(noApos)) {
+          cands.add(noApos.replace(/-/g, '').trim())
+          cands.add(noApos.replace(/-/g, ' ').replace(/\s+/g, ' ').trim())
+        }
+        // singular-stem: drop a single trailing "s" (never "ss" — keep Ross/Less)
+        // from each eligible token; catches folder "Wild Wing Cafe" for tenant
+        // "Wild Wings Cafe" and "Michael's Store" for "Michaels".
+        const stem = noApos.split(/\s+/)
+          .map(t => (/[a-z]{3,}[^s]s$/i.test(t) ? t.slice(0, -1) : t))
+          .join(' ')
+        if (stem !== noApos && stem.length >= 3) cands.add(stem)
         for (const v of [c, noApos]) {
           if (/&/.test(v)) cands.add(v.replace(/\s*&\s*/g, ' and '))
           if (/\band\b/i.test(v)) {
