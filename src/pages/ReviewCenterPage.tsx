@@ -38,6 +38,7 @@ interface AbstractRowLite {
   qa: any
   abstract: any
   overrides: Record<string, unknown> | null
+  field_approvals: Record<string, { by?: string | null; at?: string; note?: string | null }> | null
   source_doc_ids: string[] | null
   human_verified: boolean
   locked: boolean
@@ -59,6 +60,18 @@ const SEV_ICON: Record<string, string> = {
 }
 const SOURCE_LABEL: Record<Source, string> = { worklist: 'Verifier', clause: 'Clause specialist', crosscheck: 'Cross-check' }
 const RED = new Set(['discrepancy', 'confirm', 'revise'])
+
+// Dotted-path getter (array indices work: "options.0.notice_by"); mirrors the
+// override layer's path semantics so the approve button shows the effective value.
+function getAbstractPath(obj: any, path: string | null): unknown {
+  if (!obj || !path) return null
+  let cur: any = obj
+  for (const seg of path.split('.')) {
+    if (cur == null) return null
+    cur = cur[seg]
+  }
+  return typeof cur === 'object' && cur !== null ? null : cur
+}
 
 function checkFor(qa: any, field: string | null) {
   if (!qa?.field_checks || !field) return null
@@ -219,7 +232,7 @@ export function ReviewCenterPage() {
     ;(async () => {
       if (row?.id !== selected.abstract_id) {
         const { data } = await supabase.from('lease_abstracts')
-          .select('id, tenant_name, property_id, qa, abstract, overrides, source_doc_ids, human_verified, locked')
+          .select('id, tenant_name, property_id, qa, abstract, overrides, field_approvals, source_doc_ids, human_verified, locked')
           .eq('id', selected.abstract_id).maybeSingle()
         if (!live) return
         setRow((data ?? null) as AbstractRowLite | null)
@@ -304,6 +317,28 @@ export function ReviewCenterPage() {
         if (oErr) throw new Error(oErr.message)
       }
       await upsertResolutions([selected], status, note.trim())
+      advanceFrom(new Set([`${selected.abstract_id}|${selected.item_key}`]))
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Field-level approval: affirm the field's CURRENT value (override-aware).
+  // Writes the authoritative field_approvals record + a companion 'accepted'
+  // resolution so every settled-field consumer (ensemble, worklists, badges)
+  // honors it without further plumbing.
+  async function approveField() {
+    if (!selected?.field || !row) return
+    setSaving(true); setSaveErr(null)
+    try {
+      const approvals = { ...(row.field_approvals ?? {}) }
+      approvals[selected.field] = { by: reviewerId, at: new Date().toISOString(), note: note.trim() || null }
+      const { error: aErr } = await supabase.from('lease_abstracts')
+        .update({ field_approvals: approvals, updated_at: new Date().toISOString() }).eq('id', row.id)
+      if (aErr) throw new Error(aErr.message)
+      await upsertResolutions([selected], 'accepted', `[field value approved] ${note.trim()}`.trim())
       advanceFrom(new Set([`${selected.abstract_id}|${selected.item_key}`]))
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : String(e))
@@ -449,6 +484,12 @@ export function ReviewCenterPage() {
                 {row?.locked && <span style={{ fontSize: 10, color: 'var(--amber, #f59e0b)', fontWeight: 700 }}>🔒 locked — unlock in Abstracts to change</span>}
               </div>
               {selected.field && <div style={{ fontSize: 12, color: 'var(--accent)', marginTop: 2 }}>{selected.field}</div>}
+              {selected.field && row?.field_approvals?.[selected.field] && (
+                <div style={{ fontSize: 11, color: 'var(--green, #22c55e)', marginTop: 2 }}>
+                  ✓ Field value human-approved {row.field_approvals[selected.field].at ? `on ${new Date(row.field_approvals[selected.field].at!).toLocaleDateString()}` : ''}
+                  {row.field_approvals[selected.field].note ? ` — ${row.field_approvals[selected.field].note}` : ''}
+                </div>
+              )}
             </div>
 
             <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '10px 12px', fontSize: 13, lineHeight: 1.5, borderLeft: `3px solid ${SEV_COLOR[selected.severity] ?? 'var(--border-2)'}` }}>
@@ -499,6 +540,13 @@ export function ReviewCenterPage() {
               {saveErr && <div style={{ fontSize: 12, color: 'var(--red)' }}>{saveErr}</div>}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button disabled={saving || row?.locked} onClick={() => void decide('accepted')} style={btn('var(--green, #22c55e)')}>{saving ? '…' : 'Accept'}</button>
+                {selected.field && (
+                  <button disabled={saving || row?.locked} onClick={() => void approveField()}
+                    title="Affirm this field's current value as human-approved (recorded with your user + timestamp; settles the field across all detection layers)"
+                    style={{ ...btn('transparent', 'var(--green, #22c55e)'), border: '1px solid var(--green, #22c55e)' }}>
+                    ✓ Approve field value{(() => { const v = selected.field ? (row?.overrides?.[selected.field] ?? getAbstractPath(row?.abstract, selected.field)) : null; return v != null && String(v).length <= 40 ? `: ${String(v)}` : '' })()}
+                  </button>
+                )}
                 <button disabled={saving || row?.locked} onClick={() => void decide('waived')} style={btn('var(--surface-2)', 'var(--text)')}>Waive</button>
                 <button disabled={saving || row?.locked} onClick={() => void decide('needs_doc')} style={btn('var(--surface-2)', 'var(--text)')}>Needs document</button>
               </div>
