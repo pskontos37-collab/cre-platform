@@ -150,6 +150,11 @@ async function postComment(sb: SupabaseClient, dealId: string, body: string): Pr
   await sb.from('pipeline_deal_comments').insert({ deal_id: dealId, body, author_id: null })
 }
 
+/** Outcome of one re-extraction. `changed: false` = a legitimate no-op (nothing
+ *  stated, values identical, prerequisite missing) — reported honestly rather
+ *  than dressed up as a success. */
+interface Outcome { changed: boolean; message: string }
+
 // ── kind: metrics (ports extract_underwriting.ps1) ────────────────────────────
 
 const METRIC_FIELDS = ['proj_irr', 'equity_multiple', 'avg_coc', 'hold_years', 'exit_cap', 'stabilized_yield', 'equity_required', 'total_capitalization'] as const
@@ -169,31 +174,35 @@ Extract the deal-level PROJECTED (underwritten) LEVERED return metrics. Rules:
  "total_capitalization": num|null, "note": str|null}`
 }
 
-async function runMetrics(sb: SupabaseClient, key: string, deal: DealRow, doc: DocInfo, force: boolean, today: string): Promise<string> {
+async function runMetrics(sb: SupabaseClient, key: string, deal: DealRow, doc: DocInfo, force: boolean, today: string, by: string): Promise<Outcome> {
   const brokerDoc = doc.role === 'om' || doc.role === 'teaser'
   const kindLabel = brokerDoc ? 'broker offering memorandum' : 'M&J Wilkow internal financial analysis'
   const { data: signed, error: sErr } = await sb.storage.from('documents').createSignedUrl(doc.storage_path!, 3600)
   if (sErr || !signed?.signedUrl) throw new Error(`could not sign '${doc.title}'`)
   const r = await anthropicForcedTool(key, signed.signedUrl, 'report_underwriting', metricsPrompt(deal.name, doc.title ?? doc.file_name ?? 'document', kindLabel), 800)
-  if (!r?.found) return `No stated return metrics found in '${doc.title}'. Nothing changed.`
+  if (!r?.found) return { changed: false, message: `'${doc.title}' states no projected return metrics. Nothing changed.` }
 
   const isBroker = r.source_kind === 'broker_om' || brokerDoc
   const summaryBits: string[] = []
   const patch: Record<string, unknown> = {}
+  const prior: string[] = []
   for (const f of METRIC_FIELDS) {
     const v = r[f]
     if (v == null || typeof v !== 'number') continue
     summaryBits.push(`${f}=${v}`)
-    if (!isBroker && (force || (deal as any)[f] == null)) patch[f] = v
+    if (!isBroker && (force || (deal as any)[f] == null)) {
+      patch[f] = v
+      prior.push(`${f}=${(deal as any)[f] ?? 'blank'}`)
+    }
   }
-  if (!summaryBits.length) return `'${doc.title}' states no usable return figures. Nothing changed.`
+  if (!summaryBits.length) return { changed: false, message: `'${doc.title}' states no usable return figures. Nothing changed.` }
   const srcLine = `${r.source_file ?? doc.title}${r.source_page ? `, p.${r.source_page}` : ''}`
 
   if (isBroker) {
-    await postComment(sb, deal.id, `[AI] Return metrics found in BROKER PRO-FORMA only (${srcLine}, confidence: ${r.confidence}): ${summaryBits.join(', ')}. NOT written to the deal — broker numbers are quarantined; enter on the Underwriting tab if appropriate. (in-app re-extract)`)
-    return `'${doc.title}' is a broker document — its pro-forma numbers were quarantined to a Discussion comment, not written to the deal.`
+    await postComment(sb, deal.id, `[AI] Return metrics found in BROKER PRO-FORMA only (${srcLine}, confidence: ${r.confidence}): ${summaryBits.join(', ')}. NOT written to the deal — broker numbers are quarantined; enter them on the Underwriting tab if appropriate. (re-extract requested ${by} on ${today})`)
+    return { changed: false, message: `'${doc.title}' is a broker document — its pro-forma numbers were quarantined to a Discussion comment, not written to the deal.` }
   }
-  if (!Object.keys(patch).length) return `Values in '${doc.title}' match what is already on the deal. Nothing changed.`
+  if (!Object.keys(patch).length) return { changed: false, message: `Values in '${doc.title}' match what is already on the deal. Nothing changed.` }
 
   // stamp provenance on the model jsonb (stub {sources} if no model exists yet)
   const uwm = deal.underwriting_model ?? {}
@@ -202,9 +211,10 @@ async function runMetrics(sb: SupabaseClient, key: string, deal: DealRow, doc: D
   const { error: uErr } = await sb.from('pipeline_deals').update(patch).eq('id', deal.id)
   if (uErr) throw new Error('DB update failed — ' + uErr.message)
 
-  await postComment(sb, deal.id, `[AI] Underwriting re-extracted from internal model: ${srcLine} (confidence: ${r.confidence}). Values: ${summaryBits.join(', ')}. ${r.note ? r.note + ' ' : ''}Requested in-app on ${today} — review on the Underwriting tab before relying.`)
+  // the prior values go in the comment so a bad extraction can be undone by hand
+  await postComment(sb, deal.id, `[AI] Underwriting re-extracted from internal model: ${srcLine} (confidence: ${r.confidence}). Now: ${summaryBits.join(', ')}. Previously: ${prior.join(', ')}. ${r.note ? r.note + ' ' : ''}Requested ${by} on ${today} — review on the Underwriting tab before relying.`)
   const wrote = Object.keys(patch).filter(k => k !== 'updated_at' && k !== 'underwriting_model')
-  return `Returns updated from '${doc.title}' (${r.confidence} confidence): ${wrote.join(', ')}.`
+  return { changed: true, message: `Returns updated from '${doc.title}' (${r.confidence} confidence): ${wrote.join(', ')}. Prior values are recorded in Discussion.` }
 }
 
 // ── kind: rentroll (ports extract_rent_roll.ps1) ──────────────────────────────
@@ -235,7 +245,7 @@ function normRecovery(r: unknown): 'nnn' | 'gross' | 'base_year' {
 const D_ROLL = { renewalProbPct: 0.7, marketRentPsf: 0, marketRentGrowthPct: 0.03, downtimeMonths: 6, tiNewPsf: 30, tiRenewPsf: 10, lcNewPsf: 15, lcRenewPsf: 5, freeRentMonthsNew: 3, releaseTermYears: 7 }
 const D_OPEX = { recoverableOpexPsf: 0, nonRecoverableOpexPsf: 0, opexGrowthPct: 0.03, generalVacancyPct: 0, creditLossPct: 0.005, capitalReservePsf: 0.25, otherIncomePsf: 0 }
 
-async function runRentRoll(sb: SupabaseClient, key: string, deal: DealRow, doc: DocInfo, today: string): Promise<string> {
+async function runRentRoll(sb: SupabaseClient, key: string, deal: DealRow, doc: DocInfo, today: string, by: string): Promise<Outcome> {
   const { data: signed, error: sErr } = await sb.storage.from('documents').createSignedUrl(doc.storage_path!, 3600)
   if (sErr || !signed?.signedUrl) throw new Error(`could not sign '${doc.title}'`)
   const r = await anthropicForcedTool(key, signed.signedUrl, 'report_rent_roll', rentRollPrompt(deal.name, today), 4000)
@@ -253,7 +263,7 @@ async function runRentRoll(sb: SupabaseClient, key: string, deal: DealRow, doc: 
     if (!isFinite(bump) || bump < 0 || bump > 0.15) bump = 0.03
     leases.push({ name: String(t.name), sf, baseRentPsf: Math.round(rent * 100) / 100, annualBumpPct: bump, termRemainingYears: term, recovery: normRecovery(t.recovery) })
   }
-  if (!leases.length) return `No lease lines could be extracted from '${doc.title}'. Nothing changed.`
+  if (!leases.length) return { changed: false, message: `No lease lines could be extracted from '${doc.title}' — is it really a rent roll? Nothing changed.` }
 
   const uwm = deal.underwriting_model ?? null
   const sumSfAll = leases.reduce((s, l) => s + l.sf, 0)
@@ -276,6 +286,9 @@ async function runRentRoll(sb: SupabaseClient, key: string, deal: DealRow, doc: 
     // opex / promote / periodicity (no silent NOI-basis shift) — snapshot first.
     next = {
       ...uwm, mode: 'tenant', glaSf: gla, leases,
+      // a model converting from Quick mode has no tenant NOI to shift, so month
+      // precision is safe there; an existing tenant model keeps its own setting
+      periodicity: uwm.periodicity ?? (uwm.mode === 'tenant' ? 'annual' : 'monthly'),
       rollover: { ...D_ROLL, ...(uwm.rollover ?? {}), marketRentPsf: mkt },
       opex: { ...D_OPEX, ...(uwm.opex ?? {}) },
       scenarios: withPreSnapshot(uwm, today),
@@ -300,8 +313,9 @@ async function runRentRoll(sb: SupabaseClient, key: string, deal: DealRow, doc: 
     .update({ underwriting_model: next, updated_at: new Date().toISOString() }).eq('id', deal.id)
   if (uErr) throw new Error('DB update failed — ' + uErr.message)
 
-  await postComment(sb, deal.id, `[AI] Rent roll re-extracted from '${doc.title}': ${leases.length} tenant lease lines (GLA ${Math.round(gla).toLocaleString()} SF, SF-weighted in-place $${mkt}/SF as market rent). The prior model was snapshotted as a scenario. Requested in-app on ${today} — review the Underwriting tab before relying.`)
-  return `Rent roll replaced from '${doc.title}': ${leases.length} tenants (GLA ${Math.round(gla).toLocaleString()} SF). Prior model saved as a scenario.`
+  const priorCount = Array.isArray(uwm?.leases) ? uwm.leases.length : 0
+  await postComment(sb, deal.id, `[AI] Rent roll re-extracted from '${doc.title}': ${leases.length} tenant lease lines (GLA ${Math.round(gla).toLocaleString()} SF, SF-weighted in-place $${mkt}/SF as market rent), replacing ${priorCount} prior line(s). The prior model was snapshotted as a scenario. Requested ${by} on ${today} — review the Underwriting tab before relying.`)
+  return { changed: true, message: `Rent roll replaced from '${doc.title}': ${leases.length} tenants (GLA ${Math.round(gla).toLocaleString()} SF)${priorCount ? `, was ${priorCount}` : ''}. Prior model saved as a scenario.` }
 }
 
 // ── kind: opex (ports extract_t12.ps1 / uw-extract) ───────────────────────────
@@ -325,9 +339,9 @@ Rules:
 {"gla_sf":num|null,"recoverable_opex_psf":num|null,"non_recoverable_opex_psf":num|null,"tax_insurance_psf":num|null,"recoverable_opex_total":num|null,"non_recoverable_opex_total":num|null,"tax_insurance_total":num|null,"total_opex":num|null,"effective_gross_income":num|null,"period":str|null,"confidence":"high"|"medium"|"low"|null,"note":str|null}`
 }
 
-async function runOpex(sb: SupabaseClient, key: string, deal: DealRow, doc: DocInfo, today: string): Promise<string> {
+async function runOpex(sb: SupabaseClient, key: string, deal: DealRow, doc: DocInfo, today: string, by: string): Promise<Outcome> {
   const uwm = deal.underwriting_model
-  if (!uwm || uwm.mode !== 'tenant') return `${deal.name} has no tenant-level model yet — extract the rent roll first (the OpEx split belongs to the tenant model).`
+  if (!uwm || uwm.mode !== 'tenant') return { changed: false, message: `This deal has no tenant-level model yet — re-extract the rent roll first (the recoverable-OpEx split belongs to the tenant model).` }
   const { data: signed, error: sErr } = await sb.storage.from('documents').createSignedUrl(doc.storage_path!, 3600)
   if (sErr || !signed?.signedUrl) throw new Error(`could not sign '${doc.title}'`)
   const r = await anthropicForcedTool(key, signed.signedUrl, 'report_t12', t12Prompt(deal.name, today), 1500)
@@ -335,7 +349,7 @@ async function runOpex(sb: SupabaseClient, key: string, deal: DealRow, doc: DocI
   const gla = (typeof r.gla_sf === 'number' && r.gla_sf > 0) ? r.gla_sf
     : (typeof uwm.glaSf === 'number' && uwm.glaSf > 0) ? uwm.glaSf
     : (typeof deal.gla_sf === 'number' && deal.gla_sf > 0) ? deal.gla_sf : 0
-  if (gla <= 0) return `No GLA known for ${deal.name}; cannot derive $/SF figures.`
+  if (gla <= 0) return { changed: false, message: `No GLA known for this deal; cannot derive $/SF figures. Set GLA on the deal or in the model first.` }
 
   let recPsf = resolvePsf(r.recoverable_opex_psf, r.recoverable_opex_total, gla, REC_CEIL)
   let nonPsf = resolvePsf(r.non_recoverable_opex_psf, r.non_recoverable_opex_total, gla, NON_CEIL)
@@ -343,7 +357,7 @@ async function runOpex(sb: SupabaseClient, key: string, deal: DealRow, doc: DocI
     const tot = r.total_opex / gla
     if (tot <= REC_CEIL) { recPsf = Math.round(tot * 0.85 * 100) / 100; if (nonPsf <= 0) nonPsf = Math.round(tot * 0.15 * 100) / 100 }
   }
-  if (recPsf <= 0) return `Could not derive a recoverable OpEx figure from '${doc.title}' (confidence ${r.confidence}). Nothing changed.`
+  if (recPsf <= 0) return { changed: false, message: `Could not derive a recoverable OpEx figure from '${doc.title}' (confidence ${r.confidence}). Nothing changed.` }
 
   let taxPsf = resolvePsf(r.tax_insurance_psf, r.tax_insurance_total, gla, REC_CEIL)
   if (taxPsf > recPsf) taxPsf = recPsf
@@ -364,8 +378,9 @@ async function runOpex(sb: SupabaseClient, key: string, deal: DealRow, doc: DocI
   if (uErr) throw new Error('DB update failed — ' + uErr.message)
 
   const period = r.period ? ` (${r.period})` : ''
-  await postComment(sb, deal.id, `[AI] Recoverable OpEx re-extracted from T-12 '${doc.title}'${period}: controllable CAM $${ctrlPsf}/sf + tax/insurance $${taxPsf}/sf (recoverable $${recPsf}/sf total), non-recoverable $${nonPsf}/sf (GLA ${Math.round(gla)} SF; confidence ${r.confidence}).${r.note ? ' ' + r.note : ''} The prior model was snapshotted as a scenario. Requested in-app on ${today} — review before relying.`)
-  return `OpEx split updated from '${doc.title}'${period}: controllable $${ctrlPsf}/sf + tax/ins $${taxPsf}/sf, non-recoverable $${nonPsf}/sf (${r.confidence} confidence). Prior model saved as a scenario.`
+  const wasRec = Number(uwm.opex?.recoverableOpexPsf ?? 0), wasTax = Number(uwm.opex?.taxInsurancePsf ?? 0)
+  await postComment(sb, deal.id, `[AI] Recoverable OpEx re-extracted from T-12 '${doc.title}'${period}: controllable CAM $${ctrlPsf}/sf + tax/insurance $${taxPsf}/sf (recoverable $${recPsf}/sf total), non-recoverable $${nonPsf}/sf (GLA ${Math.round(gla)} SF; confidence ${r.confidence}). Previously controllable $${wasRec}/sf + tax/ins $${wasTax}/sf.${r.note ? ' ' + r.note : ''} The prior model was snapshotted as a scenario. Requested ${by} on ${today} — review before relying.`)
+  return { changed: true, message: `OpEx split updated from '${doc.title}'${period}: controllable $${ctrlPsf}/sf + tax/ins $${taxPsf}/sf, non-recoverable $${nonPsf}/sf (${r.confidence} confidence). Prior model saved as a scenario.` }
 }
 
 // ── entrypoint ────────────────────────────────────────────────────────────────
@@ -416,19 +431,23 @@ serve(async (req) => {
       doc = pickDoc(kind, docs)
       if (!doc) {
         const need = kind === 'rentroll' ? 'a rent-roll PDF' : kind === 'opex' ? 'a T-12 / operating-statement PDF' : 'an internal financials/model PDF'
-        return new Response(JSON.stringify({ success: false, message: `No candidate document on this deal — upload ${need} first.` }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+        return new Response(JSON.stringify({ success: true, changed: false, message: `No candidate document on this deal — upload ${need} first.` }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
       }
     }
     if ((doc.file_size_bytes ?? 0) > MAX_PDF_BYTES) {
       throw new Error(`'${doc.title}' is ${(Math.round((doc.file_size_bytes ?? 0) / 1048576))}MB — over the ~32MB extraction cap. Upload a smaller PDF (e.g. just the summary pages).`)
     }
 
-    let message: string
-    if (kind === 'metrics') message = await runMetrics(sb, anthropicKey, deal, doc, force, today)
-    else if (kind === 'rentroll') message = await runRentRoll(sb, anthropicKey, deal, doc, today)
-    else message = await runOpex(sb, anthropicKey, deal, doc, today)
+    // audit trail must say who actually asked: a staff click in the app vs a
+    // service-credential call (script / verification run).
+    const by = caller.id === 'service' ? 'via the API (service credential)' : `in-app by ${caller.email ?? caller.id}`
 
-    return new Response(JSON.stringify({ success: true, message, kind, documentId: doc.id }), {
+    let out: Outcome
+    if (kind === 'metrics') out = await runMetrics(sb, anthropicKey, deal, doc, force, today, by)
+    else if (kind === 'rentroll') out = await runRentRoll(sb, anthropicKey, deal, doc, today, by)
+    else out = await runOpex(sb, anthropicKey, deal, doc, today, by)
+
+    return new Response(JSON.stringify({ success: true, changed: out.changed, message: out.message, kind, documentId: doc.id }), {
       headers: { ...CORS, 'Content-Type': 'application/json' },
     })
   } catch (err: unknown) {

@@ -689,15 +689,26 @@ export function useDealDocuments(dealId: string | null) {
  *  columns), 'rentroll' (tenant lease lines), 'opex' (T-12 recoverable split).
  *  Overwrites the current values (the fn snapshots the model as a scenario
  *  first) and stamps underwriting_model.sources. Returns the result message. */
-export async function reextractUw(dealId: string, kind: 'metrics' | 'rentroll' | 'opex', documentId?: string): Promise<string> {
+export async function reextractUw(dealId: string, kind: 'metrics' | 'rentroll' | 'opex', documentId?: string): Promise<{ changed: boolean; message: string }> {
   const { data, error } = await supabase.functions.invoke('uw-reextract', {
     body: { dealId, kind, documentId, force: true },
   })
-  if (error) throw new Error(error.message)
-  const d = data as { error?: string; success?: boolean; message?: string } | null
+  if (error) {
+    // functions.invoke collapses any non-2xx into "returned a non-2xx status
+    // code"; the function's real message is in the attached Response body.
+    let detail: string | null = null
+    const ctx = (error as unknown as { context?: { clone?: () => Response } }).context
+    try {
+      if (typeof ctx?.clone === 'function') {
+        const body = await ctx.clone().json() as { error?: string } | null
+        detail = body?.error ?? null
+      }
+    } catch { /* body absent, already consumed, or not JSON */ }
+    throw new Error(detail ?? error.message)
+  }
+  const d = data as { error?: string; changed?: boolean; message?: string } | null
   if (d?.error) throw new Error(d.error)
-  if (d?.success === false) throw new Error(d?.message ?? 'Re-extraction failed')
-  return d?.message ?? 'Done'
+  return { changed: d?.changed === true, message: d?.message ?? 'Done' }
 }
 
 /** Upload a document to a deal: stores under pipeline/<dealId>/<role>/, files a

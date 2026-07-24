@@ -1689,7 +1689,7 @@ function UwSourcesPanel({ deal, docs, refetchDocs, onChanged, createdBy }: {
   const m = deal.underwritingModel
   const src = m?.sources
   const [busyKind, setBusyKind] = useState<string | null>(null)
-  const [msg, setMsg] = useState<string | null>(null)
+  const [msg, setMsg] = useState<{ text: string; changed: boolean } | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [sel, setSel] = useState<Record<string, string>>({})
 
@@ -1722,7 +1722,11 @@ function UwSourcesPanel({ deal, docs, refetchDocs, onChanged, createdBy }: {
   const run = async (row: UwSourceRowDef, documentId: string | undefined, docName: string) => {
     if (!window.confirm(row.confirm(docName))) return
     setBusyKind(row.kind); setErr(null); setMsg(null)
-    try { setMsg(await reextractUw(deal.id, row.kind, documentId)); onChanged() }
+    try {
+      const r = await reextractUw(deal.id, row.kind, documentId)
+      setMsg({ text: r.message, changed: r.changed })
+      if (r.changed) onChanged()
+    }
     catch (e) { setErr(e instanceof Error ? e.message : 'Re-extraction failed') }
     finally { setBusyKind(null) }
   }
@@ -1784,7 +1788,7 @@ function UwSourcesPanel({ deal, docs, refetchDocs, onChanged, createdBy }: {
           </div>
         )
       })}
-      {msg && <div style={{ fontSize: 11, color: '#2e8b57' }}>{msg}</div>}
+      {msg && <div style={{ fontSize: 11, color: msg.changed ? '#2e8b57' : 'var(--text-muted)' }}>{msg.changed ? '✓ ' : 'ⓘ '}{msg.text}</div>}
       {err && <div style={{ fontSize: 11, color: 'var(--red)' }}>{err}</div>}
       <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
         Re-extracting overwrites that slice with what the chosen file states (the prior model is saved as a scenario) and posts an [AI] audit comment. Excel/ARGUS models can't be read here — upload a PDF print, or run enrich_deal.ps1 locally.
