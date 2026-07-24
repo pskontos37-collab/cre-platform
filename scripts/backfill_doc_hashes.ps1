@@ -23,6 +23,8 @@ $SCRIPTS = "C:\Users\pskontos\Desktop\Software\cre-platform\scripts"
 $DONE = "$env:LOCALAPPDATA\cre_doc_hash_done$Tag.jsonl"
 $TMP  = "$env:LOCALAPPDATA\cre_doc_hash_post$Tag.json"
 
+Write-Output ("start[$Tag] pid=" + ([System.Diagnostics.Process]::GetCurrentProcess().Id) + " done=$DONE gte='$IdGte' lt='$IdLt'")
+
 # resume: ids already hashed (or known-missing) in a previous run
 $done = @{}
 if (Test-Path $DONE) {
@@ -30,15 +32,23 @@ if (Test-Path $DONE) {
     if ($ln -match '"id"\s*:\s*"([0-9a-f-]{36})"') { $done[$matches[1]] = $true }
   }
 }
-Write-Output ("resume: " + $done.Count + " docs already in done-set")
+Write-Output ("resume[$Tag]: " + $done.Count + " docs already in done-set")
 
 function PostChunk($rows) {
   if ($rows.Count -eq 0) { return }
   $json = $rows | ConvertTo-Json -Depth 3
   if ($rows.Count -eq 1) { $json = "[$json]" }
   [System.IO.File]::WriteAllText($TMP, $json, (New-Object System.Text.UTF8Encoding($false)))
-  $resp = & curl.exe -s -X POST "$BASE/rest/v1/documents?on_conflict=id" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -H "Prefer: resolution=merge-duplicates,return=minimal" --data-binary "@$TMP"
-  if ($resp -match '"message"\s*:' -and $resp -match '"code"') { throw "upsert failed: $resp" }
+  # transient REST failures must not kill a multi-hour worker: retry, then give up
+  # on the CHUNK (docs stay sha-null and are re-fetched by the next run)
+  for ($try = 1; $try -le 4; $try++) {
+    $resp = & curl.exe -s -X POST "$BASE/rest/v1/documents?on_conflict=id" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -H "Prefer: resolution=merge-duplicates,return=minimal" --data-binary "@$TMP"
+    if (-not ($resp -match '"message"\s*:' -and $resp -match '"code"')) { return }
+    $errHead = [string]$resp; if ($errHead.Length -gt 200) { $errHead = $errHead.Substring(0, 200) }
+    Write-Output ("upsert retry $try" + ": " + $errHead)
+    Start-Sleep -Seconds (10 * $try)
+  }
+  Write-Output ("WARN: upsert chunk dropped after retries (" + $rows.Count + " rows will re-fetch next run)")
 }
 
 $lastId = if ($IdGte) { $IdGte } else { "00000000-0000-0000-0000-000000000000" }
@@ -49,11 +59,23 @@ $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
 while ($true) {
   $url = "$BASE/rest/v1/documents?select=id,doc_type,title,file_path&content_sha256=is.null&file_path=not.is.null&order=id.asc&id=gt.$lastId$ltFilter&limit=500"
-  $raw = (& curl.exe -s "$url" -H "apikey: $KEY" -H "Authorization: Bearer $KEY") -join "`n"
-  if ($raw -match '"message"\s*:' -and $raw -match '"code"') { throw "GET documents failed: $raw" }
-  # PS 5.1: ConvertFrom-Json returns a JSON array as ONE boxed Object[] (even via
-  # -InputObject, @() keeps it nested) -> pipe through ForEach-Object to enumerate
-  $page = @((ConvertFrom-Json -InputObject $raw) | ForEach-Object { $_ })
+  # GET with retries: an empty/garbled response (network blip, nightly-task load)
+  # must not kill or silently end the worker
+  $page = $null
+  for ($try = 1; $try -le 4; $try++) {
+    $raw = (& curl.exe -s "$url" -H "apikey: $KEY" -H "Authorization: Bearer $KEY") -join "`n"
+    if ($raw -and -not ($raw -match '"message"\s*:' -and $raw -match '"code"')) {
+      try {
+        # PS 5.1: ConvertFrom-Json returns a JSON array as ONE boxed Object[] (even via
+        # -InputObject, @() keeps it nested) -> pipe through ForEach-Object to enumerate
+        $page = @((ConvertFrom-Json -InputObject $raw) | ForEach-Object { $_ })
+        break
+      } catch { $page = $null }
+    }
+    Write-Output ("GET retry $try after bad page response")
+    Start-Sleep -Seconds (10 * $try)
+  }
+  if ($null -eq $page) { throw "GET documents failed after retries at id=gt.$lastId" }
   if ($page.Count -eq 0) { break }
   foreach ($doc in $page) {
     $lastId = $doc.id
@@ -77,7 +99,7 @@ while ($true) {
         $line = '{"id":"' + $doc.id + '","error":true}'
       }
     }
-    [System.IO.File]::AppendAllText($DONE, $line + "`r`n", $enc)
+    try { [System.IO.File]::AppendAllText($DONE, $line + "`r`n", $enc) } catch {}
     if ($pending.Count -ge 200) {
       PostChunk $pending
       $pending = New-Object System.Collections.Generic.List[object]
