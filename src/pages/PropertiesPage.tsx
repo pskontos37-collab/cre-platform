@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { usePropertyListKpis } from '../hooks/usePropertyHub'
+import { useCan } from '../lib/useActions'
 
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const sf  = (n: number) => `${Math.round(n).toLocaleString('en-US')} SF`
@@ -9,6 +10,7 @@ const ASSET_ICON: Record<string, string> = { retail: '🛍️', office: '🏢', 
 
 export function PropertiesPage() {
   const { data: properties, loading } = useProperties()
+  const canOnboard = useCan('properties.onboard')   // action gate (Phase 3b)
   const ids = (properties ?? []).map(p => p.id)
   const totalSfById = Object.fromEntries((properties ?? []).map(p => [p.id, p.total_sf]))
   const { data: kpis } = usePropertyListKpis(ids, totalSfById)
@@ -27,9 +29,17 @@ export function PropertiesPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
         <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Properties</h1>
-        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-          {properties?.length ?? 0} owned assets
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+            {properties?.length ?? 0} owned assets
+          </span>
+          {canOnboard && (
+            <Link to="/onboarding" style={{
+              fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6,
+              background: 'var(--accent)', color: '#fff', textDecoration: 'none',
+            }}>+ Add property</Link>
+          )}
+        </div>
       </div>
 
       {loading && <div style={{ color: 'var(--text-faint)', fontSize: 13 }}>Loading…</div>}

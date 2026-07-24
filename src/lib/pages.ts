@@ -28,6 +28,7 @@ export const PAGES: PageDef[] = [
   { key: 'diligence',   path: '/diligence',   label: 'Diligence',   icon: '🔎', restricted: true, group: 'acquisitions' },
   { key: 'ppm',         path: '/ppm',         label: 'PPM',         icon: '📃', restricted: true, group: 'acquisitions' },
   { key: 'properties',  path: '/properties',  label: 'Properties',  icon: '🏢', group: 'portfolio' },
+  { key: 'onboarding',  path: '/onboarding',  label: 'Onboard Property', icon: '🏗', restricted: true, group: 'portfolio' },
   { key: 'siteplans',   path: '/siteplans',   label: 'Site Plans',  icon: '🗺', group: 'portfolio' },
   { key: 'financials',  path: '/financials',  label: 'Financials',  icon: '📊', restricted: true, group: 'portfolio' },
   { key: 'reports',     path: '/monthly-reports', label: 'Monthly Reports', icon: '📑', restricted: true, group: 'portfolio' },
