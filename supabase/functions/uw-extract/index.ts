@@ -106,7 +106,7 @@ function docYear(doc: { title?: string | null; file_name?: string | null }): num
   return yrs.length ? Math.max(...yrs) : 0
 }
 
-interface DocRow { role: string; documents: { title: string | null; file_name: string | null; storage_path: string | null; file_size_bytes: number | null } }
+interface DocRow { role: string; documents: { id: string; title: string | null; file_name: string | null; storage_path: string | null; file_size_bytes: number | null } }
 
 /** Pick the operating-statement PDF the way extract_t12.ps1 does. */
 function pickStatement(rows: DocRow[]): DocRow['documents'] | null {
@@ -137,7 +137,7 @@ async function processDeal(sb: SupabaseClient, anthropicKey: string, deal: DealR
   if (!force && curRec > 0) return `${deal.name}: recoverable OpEx already set ($${curRec}/sf)`
 
   const { data: rows } = await sb.from('pipeline_deal_documents')
-    .select('role, documents(title,file_name,storage_path,file_size_bytes)')
+    .select('role, documents(id,title,file_name,storage_path,file_size_bytes)')
     .eq('deal_id', deal.id).in('role', ['operating_statement', 'financials', 'other'])
   const doc = pickStatement((rows ?? []) as unknown as DocRow[])
   if (!doc || !doc.storage_path) return `${deal.name}: no operating statement in storage`
@@ -171,7 +171,11 @@ async function processDeal(sb: SupabaseClient, anthropicKey: string, deal: DealR
   opex.recoverableOpexPsf = ctrlPsf
   opex.taxInsurancePsf = taxPsf
   if (nonPsf > 0) opex.nonRecoverableOpexPsf = nonPsf
-  const nextModel = { ...uwm, opex }
+  // provenance: stamp which statement drove the split (app's Data sources panel)
+  const nextModel = {
+    ...uwm, opex,
+    sources: { ...(uwm.sources ?? {}), opex: { title: doc.title ?? doc.file_name ?? 'document', documentId: (doc as { id?: string }).id ?? null, extractedAt: new Date().toISOString(), confidence: typeof r.confidence === 'string' ? r.confidence : null } },
+  }
 
   const { error: uErr } = await sb.from('pipeline_deals')
     .update({ underwriting_model: nextModel, updated_at: new Date().toISOString() }).eq('id', deal.id)

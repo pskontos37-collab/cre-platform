@@ -65,7 +65,7 @@ Write-Output ("Active deals: {0}   mode: {1}" -f $deals.Count, $(if($Apply){'APP
 $done=0; $skip=0; $noRr=0; $fail=0
 foreach($d in $deals){
   if(-not $Force -and $d.underwriting_model -and $d.underwriting_model.mode -eq 'tenant'){ Write-Output ("  {0}: already has a tenant model" -f $d.name); $skip++; continue }
-  $links = & curl.exe -s "$BASE/rest/v1/pipeline_deal_documents?deal_id=eq.$($d.id)&role=eq.rent_roll&select=documents(title,file_name,storage_path,file_size_bytes)" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
+  $links = & curl.exe -s "$BASE/rest/v1/pipeline_deal_documents?deal_id=eq.$($d.id)&role=eq.rent_roll&select=documents(id,title,file_name,storage_path,file_size_bytes)" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
   $rr = @($links | Where-Object { $_.documents.file_name -match '\.pdf$' -and $_.documents.storage_path } | Sort-Object { [long]$_.documents.file_size_bytes } -Descending | Select-Object -First 1)
   if($rr.Count -eq 0){ Write-Output ("  {0}: no rent-roll PDF in storage" -f $d.name); $noRr++; continue }
   $doc = $rr[0].documents
@@ -108,7 +108,17 @@ foreach($d in $deals){
     rollover=@{ renewalProbPct=0.7; marketRentPsf=$mkt; marketRentGrowthPct=0.03; downtimeMonths=6; tiNewPsf=30; tiRenewPsf=10; lcNewPsf=15; lcRenewPsf=5; freeRentMonthsNew=3; releaseTermYears=7 };
     opex=@{ recoverableOpexPsf=$recOpex; nonRecoverableOpexPsf=$nonRec; opexGrowthPct=0.03; generalVacancyPct=0; creditLossPct=0.005; capitalReservePsf=0.25; otherIncomePsf=0 }
   }
-  $patch = @{ underwriting_model=$uwm; updated_at=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 12
+  # carry saved cases/promote/provenance through a -Force rebuild, and stamp which
+  # rent roll drove the lease lines (shown in the app's Data sources panel)
+  $prev = $d.underwriting_model
+  if($prev){
+    if($prev.promote){ $uwm['promote'] = $prev.promote }
+    if($prev.scenarios){ $uwm['scenarios'] = $prev.scenarios }
+  }
+  $srcs = $(if($prev -and $prev.sources){ $prev.sources }else{ [pscustomobject]@{} })
+  $srcs | Add-Member -NotePropertyName rentRoll -NotePropertyValue ([pscustomobject]@{ title=[string]$doc.title; documentId=[string]$doc.id; extractedAt=(Get-Date).ToUniversalTime().ToString('o'); confidence=$null }) -Force
+  $uwm['sources'] = $srcs
+  $patch = @{ underwriting_model=$uwm; updated_at=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 20
   [System.IO.File]::WriteAllText($TMP,$patch,$enc)
   $pc = & curl.exe -s -o NUL -w "%{http_code}" -X PATCH "$BASE/rest/v1/pipeline_deals?id=eq.$($d.id)" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP"
   if([int]$pc -ge 200 -and [int]$pc -lt 300){ Write-Output ("    -> POPULATED {0} tenants (GLA {1:N0}, mkt ${2}/sf)" -f $leases.Count, $gla, $mkt); $done++ }

@@ -112,7 +112,7 @@ function Upload-Doc([string]$dealId, [string]$localPdf, [string]$title, [string]
   $lnk = @{ deal_id=$dealId; document_id=$docResp[0].id; role=$role } | ConvertTo-Json
   [System.IO.File]::WriteAllText($TMP,$lnk,$enc)
   & curl.exe -s -o NUL -X POST "$BASE/rest/v1/pipeline_deal_documents" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP" | Out-Null
-  return @{ storage_path=$spath; title=$title; file_size_bytes=[long](Get-Item $localPdf).Length }
+  return @{ id=$docResp[0].id; storage_path=$spath; title=$title; file_size_bytes=[long](Get-Item $localPdf).Length }
 }
 
 # Newest CF model ON DISK (the live K: folder), per user 2026-07-11: "use the
@@ -130,7 +130,7 @@ function Get-DiskModel([string]$folderPath){
 }
 
 $fieldSel = ($FIELDS -join ',')
-$deals = & curl.exe -s "$BASE/rest/v1/pipeline_deals?select=id,name,folder_path,$fieldSel&limit=100" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
+$deals = & curl.exe -s "$BASE/rest/v1/pipeline_deals?select=id,name,folder_path,underwriting_model,$fieldSel&limit=100" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
 if($DealFilter){ $deals = @($deals | Where-Object { $_.name -like "*$DealFilter*" }) }
 Write-Output ("Deals: {0}   mode: {1}" -f $deals.Count, $(if($Apply){'APPLY'}else{'DRY RUN'}))
 
@@ -139,7 +139,7 @@ foreach($d in $deals){
   # fully-filled deals need nothing (also prevents duplicate audit comments on re-runs)
   $blank = @($FIELDS | Where-Object { $null -eq $d.$_ })
   if($blank.Count -eq 0){ continue }
-  $links = & curl.exe -s "$BASE/rest/v1/pipeline_deal_documents?deal_id=eq.$($d.id)&select=role,documents(title,file_name,file_path,storage_path,file_size_bytes)" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
+  $links = & curl.exe -s "$BASE/rest/v1/pipeline_deal_documents?deal_id=eq.$($d.id)&select=role,documents(id,title,file_name,file_path,storage_path,file_size_bytes)" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
   $pdf = @($links | Where-Object { $_.documents.file_name -match '\.pdf$' -and $_.documents.title -notmatch '^\xAB' })
 
   # Ordered extraction attempts (user 2026-07-11: "use the latest updated one"):
@@ -203,8 +203,21 @@ foreach($d in $deals){
   if($summaryBits.Count -eq 0){ Write-Output "    -> found nothing statable"; continue }
 
   if($patch.Count -gt 0){
+    # provenance for the app's Data sources panel: which file drove the metrics.
+    # documentId resolves when the winning attempt had a single doc (or a title match).
+    $srcDocId = $null
+    if(@($att.cand).Count -eq 1){ $srcDocId = $att.cand[0].documents.id }
+    else {
+      $hit = @($att.cand | Where-Object { $_.documents.title -eq $r.source_file -or $_.documents.file_name -eq $r.source_file })
+      if($hit.Count -ge 1){ $srcDocId = $hit[0].documents.id }
+    }
+    $uwm = $d.underwriting_model
+    if($null -eq $uwm){ $uwm = [pscustomobject]@{} }
+    if($null -eq $uwm.sources){ $uwm | Add-Member -NotePropertyName sources -NotePropertyValue ([pscustomobject]@{}) -Force }
+    $uwm.sources | Add-Member -NotePropertyName metrics -NotePropertyValue ([pscustomobject]@{ title=[string]$(if($r.source_file){$r.source_file}else{'internal model'}); documentId=$srcDocId; extractedAt=(Get-Date).ToUniversalTime().ToString('o'); confidence=[string]$r.confidence }) -Force
+    $patch['underwriting_model'] = $uwm
     $patch['updated_at'] = (Get-Date).ToUniversalTime().ToString('o')
-    $pj = $patch | ConvertTo-Json
+    $pj = $patch | ConvertTo-Json -Depth 20   # the model jsonb is deeply nested; default depth 2 would truncate it
     [System.IO.File]::WriteAllText($TMP,$pj,$enc)
     $pc = & curl.exe -s -o NUL -w "%{http_code}" -X PATCH "$BASE/rest/v1/pipeline_deals?id=eq.$($d.id)" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP"
     if([int]$pc -lt 200 -or [int]$pc -ge 300){ Write-Output "    !! PATCH failed HTTP $pc"; continue }

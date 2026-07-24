@@ -127,8 +127,13 @@ export interface UnderwritingModel {
   promote?: UwPromote
   // named saved cases (bear/base/bull) for side-by-side compare — snapshots of the model (their own .scenarios stripped)
   scenarios?: UwScenario[]
+  // provenance — which document drove each extracted slice of the analysis
+  // (written by the extraction scripts / uw-reextract; shown in the Data sources panel)
+  sources?: UwSources
 }
 export interface UwScenario { name: string; model: UnderwritingModel; savedAt?: string }
+export interface UwSource { title: string; documentId?: string | null; extractedAt: string; confidence?: string | null; broker?: boolean }
+export interface UwSources { metrics?: UwSource; rentRoll?: UwSource; opex?: UwSource }
 export interface UwPromoteTier { hurdleIrr: number | null; gpPct: number }
 export interface UwPromote { lpEquityPct: number; prefRate: number; tiers: UwPromoteTier[] }
 export interface UwRefi { yearsFromClose: number; ltvPct: number; ratePct: number; amortYears: number; ioYears: number; costPct: number; capPct: number }
@@ -679,9 +684,25 @@ export function useDealDocuments(dealId: string | null) {
   }, [dealId])
 }
 
+/** Re-extract one slice of a deal's underwriting from a chosen storage PDF via
+ *  the uw-reextract edge function. kind: 'metrics' (stated returns -> board
+ *  columns), 'rentroll' (tenant lease lines), 'opex' (T-12 recoverable split).
+ *  Overwrites the current values (the fn snapshots the model as a scenario
+ *  first) and stamps underwriting_model.sources. Returns the result message. */
+export async function reextractUw(dealId: string, kind: 'metrics' | 'rentroll' | 'opex', documentId?: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('uw-reextract', {
+    body: { dealId, kind, documentId, force: true },
+  })
+  if (error) throw new Error(error.message)
+  const d = data as { error?: string; success?: boolean; message?: string } | null
+  if (d?.error) throw new Error(d.error)
+  if (d?.success === false) throw new Error(d?.message ?? 'Re-extraction failed')
+  return d?.message ?? 'Done'
+}
+
 /** Upload a document to a deal: stores under pipeline/<dealId>/<role>/, files a
- *  documents row, and links it to the deal. */
-export async function uploadDealDocument(dealId: string, file: File, role: string, createdBy: string | null): Promise<void> {
+ *  documents row, and links it to the deal. Returns the new document id. */
+export async function uploadDealDocument(dealId: string, file: File, role: string, createdBy: string | null): Promise<string> {
   const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80)
   const uid = (globalThis.crypto?.randomUUID?.() ?? String(Date.now()))
   const path = `pipeline/${dealId}/${role}/${uid}-${safe}`
@@ -697,6 +718,7 @@ export async function uploadDealDocument(dealId: string, file: File, role: strin
   const { error: lErr } = await supabase.from('pipeline_deal_documents')
     .insert({ deal_id: dealId, document_id: (doc as any).id, role, created_by: createdBy })
   if (lErr) throw new Error('Linking the document failed: ' + lErr.message)
+  return (doc as any).id as string
 }
 
 /** Unlink + delete a deal document (removes the storage object best-effort). */

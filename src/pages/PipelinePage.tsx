@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import {
@@ -12,7 +12,7 @@ import {
   useDealTeamMembers, type TeamMember,
   createPartner, updatePartner, deletePartner, type PartnerInput,
   openDiligence, unlinkDiligence, sendDocToDiligence,
-  pipelineMetrics, fetchDeckExtras, saveUnderwriting, type UnderwritingModel,
+  pipelineMetrics, fetchDeckExtras, saveUnderwriting, reextractUw, type UnderwritingModel, type UwSource,
   BOARD_STAGES, ALL_STAGES, STAGE_LABEL, STAGE_HUE, boardColumn, isTerminal, STAGE_PROB,
   RISK_ORDER, RISK_LABEL, RISK_COLOR, ASSET_ORDER, ASSET_LABEL, ASSET_MONO, ASSET_COLOR,
   LP_STATUS_ORDER, LP_STATUS_LABEL, PARTNER_TIER_LABEL,
@@ -1392,7 +1392,7 @@ function DealDrawer({ deal, partners, team, buyBoxes, onClose, onChanged }: { de
         </div>
 
         {tab === 'overview' && <><StrategyFitPanel deal={deal} buyBoxes={buyBoxes} /><OverviewTab deal={deal} team={team} onSave={p => run(() => updateDeal(deal.id, p))} busy={busy} onDelete={() => run(async () => { await deleteDeal(deal.id); onClose() })} /></>}
-        {tab === 'underwriting' && <UnderwritingTab deal={deal} busy={busy} onSaveModel={(mdl, c) => run(() => saveUnderwriting(deal.id, mdl, c))} />}
+        {tab === 'underwriting' && <UnderwritingTab deal={deal} busy={busy} onSaveModel={(mdl, c) => run(() => saveUnderwriting(deal.id, mdl, c))} docs={docsQ.data ?? []} refetchDocs={docsQ.refetch} onChanged={onChanged} createdBy={appUser?.id ?? null} />}
         {tab === 'capital' && <CapitalTab deal={deal} partners={partners} onChanged={onChanged} onDiscuss={lpId => { setDiscussLp(lpId); setTab('discussion') }} />}
         {tab === 'documents' && <DocumentsTab dealId={deal.id} dealName={deal.name} createdBy={appUser?.id ?? null} folderPath={deal.folderPath} folderFiles={deal.folderFiles} docs={docsQ.data ?? []} loading={docsQ.loading} refetch={docsQ.refetch} ddPropertyId={deal.ddPropertyId} />}
         {tab === 'discussion' && <DiscussionTab deal={deal} createdBy={appUser?.id ?? null} initialLp={discussLp} />}
@@ -1642,10 +1642,19 @@ type UwComputed = {
 // Underwriting tab — toggle between the Quick (direct-cap) model and the
 // bottoms-up Tenant-level model; both compute in-browser and, on Save, write the
 // returns to the deal (board / meeting deck / IC memo read them).
-function UnderwritingTab({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean; onSaveModel: (m: UnderwritingModel, c: UwComputed) => void }) {
+function UnderwritingTab({ deal, busy, onSaveModel, docs, refetchDocs, onChanged, createdBy }: {
+  deal: Deal; busy: boolean; onSaveModel: (m: UnderwritingModel, c: UwComputed) => void
+  docs: DealDoc[]; refetchDocs: () => void; onChanged: () => void; createdBy: string | null
+}) {
   const [mode, setMode] = useState<'simple' | 'tenant'>(deal.underwritingModel?.mode === 'tenant' ? 'tenant' : 'simple')
+  // Remount the editors (re-seed from the saved model) when a re-extract lands —
+  // keyed on the source stamps so a plain Save never resets in-progress state.
+  const src = deal.underwritingModel?.sources
+  const uwKey = [src?.metrics?.extractedAt, src?.rentRoll?.extractedAt, src?.opex?.extractedAt].map(x => x ?? '').join('|')
+  useEffect(() => { setMode(deal.underwritingModel?.mode === 'tenant' ? 'tenant' : 'simple') }, [uwKey])
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <UwSourcesPanel deal={deal} docs={docs} refetchDocs={refetchDocs} onChanged={onChanged} createdBy={createdBy} />
       <div style={{ display: 'flex', border: '1px solid var(--border-2)', borderRadius: 6, overflow: 'hidden', alignSelf: 'flex-start' }}>
         {(['simple', 'tenant'] as const).map(md => (
           <button key={md} onClick={() => setMode(md)} style={{ ...segBtn, background: mode === md ? 'var(--accent, #466371)' : 'var(--surface)', color: mode === md ? '#fff' : 'var(--text-muted)' }}>
@@ -1654,8 +1663,132 @@ function UnderwritingTab({ deal, busy, onSaveModel }: { deal: Deal; busy: boolea
         ))}
       </div>
       {mode === 'simple'
-        ? <SimpleUwEditor deal={deal} busy={busy} onSaveModel={onSaveModel} />
-        : <TenantUwEditor deal={deal} busy={busy} onSaveModel={onSaveModel} />}
+        ? <SimpleUwEditor key={uwKey} deal={deal} busy={busy} onSaveModel={onSaveModel} />
+        : <TenantUwEditor key={uwKey} deal={deal} busy={busy} onSaveModel={onSaveModel} />}
+    </div>
+  )
+}
+
+// ── Data sources — which file drives each slice of the analysis, with
+// replace (upload) + re-extract. Re-extraction calls the uw-reextract edge fn:
+// it snapshots the model as a scenario, overwrites the slice, stamps
+// underwriting_model.sources, and posts an [AI] audit comment.
+interface UwSourceRowDef {
+  kind: 'metrics' | 'rentroll' | 'opex'
+  label: string
+  drives: string
+  uploadRole: string
+  cands: DealDoc[]
+  cur: UwSource | undefined
+  hasValues: boolean
+  confirm: (docName: string) => string
+}
+function UwSourcesPanel({ deal, docs, refetchDocs, onChanged, createdBy }: {
+  deal: Deal; docs: DealDoc[]; refetchDocs: () => void; onChanged: () => void; createdBy: string | null
+}) {
+  const m = deal.underwritingModel
+  const src = m?.sources
+  const [busyKind, setBusyKind] = useState<string | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [sel, setSel] = useState<Record<string, string>>({})
+
+  const pdfs = docs.filter(d => d.storagePath && /\.pdf$/i.test(d.fileName ?? ''))
+  const stmtRe = /t-?12|trailing|operating|income\s*statement|p&l|profit/i
+  const rows: UwSourceRowDef[] = [
+    {
+      kind: 'metrics', label: 'Returns — CF model', drives: 'IRR · EM · CoC · exit cap · equity (board metrics)',
+      uploadRole: 'financials',
+      cands: pdfs.filter(d => d.role === 'financials' || d.role === 'om'),
+      cur: src?.metrics, hasValues: deal.projIrr != null || deal.equityMultiple != null,
+      confirm: n => `Re-extract stated returns from "${n}"?\n\nThis overwrites the deal's IRR / EM / CoC / exit cap / hold / equity columns with the values stated in that file. Broker documents (OM/teaser) are quarantined to a comment instead of written.`,
+    },
+    {
+      kind: 'rentroll', label: 'Rent roll', drives: 'tenant-level lease lines in the model',
+      uploadRole: 'rent_roll',
+      cands: pdfs.filter(d => d.role === 'rent_roll'),
+      cur: src?.rentRoll, hasValues: (m?.leases?.length ?? 0) > 0,
+      confirm: n => `Re-extract the rent roll from "${n}"?\n\nThis REPLACES the tenant lease lines in the underwriting model (financing and property assumptions are kept). The current model is snapshotted as a scenario first.`,
+    },
+    {
+      kind: 'opex', label: 'T-12 / operating statement', drives: 'recoverable OpEx split (NNN recoveries)',
+      uploadRole: 'operating_statement',
+      cands: pdfs.filter(d => d.role === 'operating_statement' || ((d.role === 'financials' || d.role === 'other') && stmtRe.test(`${d.title ?? ''} ${d.fileName ?? ''}`))),
+      cur: src?.opex, hasValues: (m?.opex?.recoverableOpexPsf ?? 0) > 0 || (m?.opex?.taxInsurancePsf ?? 0) > 0,
+      confirm: n => `Re-extract the OpEx split from "${n}"?\n\nThis overwrites controllable CAM / tax+insurance / non-recoverable $/SF in the model. The current model is snapshotted as a scenario first.`,
+    },
+  ]
+
+  const run = async (row: UwSourceRowDef, documentId: string | undefined, docName: string) => {
+    if (!window.confirm(row.confirm(docName))) return
+    setBusyKind(row.kind); setErr(null); setMsg(null)
+    try { setMsg(await reextractUw(deal.id, row.kind, documentId)); onChanged() }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Re-extraction failed') }
+    finally { setBusyKind(null) }
+  }
+  const onUpload = async (row: UwSourceRowDef, file: File) => {
+    if (!/\.pdf$/i.test(file.name)) { setErr('Upload a PDF — Excel/ARGUS models need a PDF print (or the local enrich_deal.ps1 command).'); return }
+    setBusyKind(row.kind); setErr(null); setMsg(null)
+    let docId: string | null = null
+    try { docId = await uploadDealDocument(deal.id, file, row.uploadRole, createdBy); refetchDocs() }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Upload failed'); setBusyKind(null); return }
+    setSel(p => ({ ...p, [row.kind]: docId! }))
+    setBusyKind(null)
+    await run(row, docId!, file.name)
+  }
+
+  const fmtDate = (iso: string | undefined) => iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
+  const srcCell: CSSProperties = { fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <SectionLabel2>Data sources — what drives this analysis</SectionLabel2>
+      {rows.map(row => {
+        const selId = sel[row.kind] ?? row.cur?.documentId ?? row.cands[0]?.documentId
+        const selDoc = row.cands.find(c => c.documentId === selId)
+        const rowBusy = busyKind === row.kind
+        return (
+          <div key={row.kind} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+            <div style={{ minWidth: 190, flex: '1 1 190px' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text)' }}>{row.label}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>{row.drives}</div>
+              <div style={srcCell}>
+                {row.cur
+                  ? <>From <b>{row.cur.title}</b> · {fmtDate(row.cur.extractedAt)}{row.cur.confidence ? ` · ${row.cur.confidence} confidence` : ''}</>
+                  : row.hasValues
+                    ? <>Values present — source predates tracking (see the [AI] comments in Discussion)</>
+                    : <>Nothing extracted yet</>}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {row.cands.length > 0 ? (
+                <select value={selId ?? ''} disabled={rowBusy} onChange={e => setSel(p => ({ ...p, [row.kind]: e.target.value }))}
+                  style={{ ...gridInput, width: 190 }} title="Pick the file to extract from">
+                  {row.cands.map(c => <option key={c.documentId} value={c.documentId}>{c.title ?? c.fileName ?? 'document'}</option>)}
+                </select>
+              ) : (
+                <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>no candidate PDF on the deal</span>
+              )}
+              {selDoc?.signedUrl && <a href={selDoc.signedUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>View</a>}
+              <button style={{ ...ghostBtn, opacity: rowBusy || !selDoc ? 0.5 : 1 }} disabled={rowBusy || !selDoc}
+                onClick={() => run(row, selDoc?.documentId, selDoc?.title ?? selDoc?.fileName ?? 'the selected document')}
+                title="Re-read the selected PDF and overwrite this slice of the analysis">
+                {rowBusy ? 'Extracting…' : '↻ Re-extract'}
+              </button>
+              <label style={{ ...ghostBtn, cursor: rowBusy ? 'default' : 'pointer', opacity: rowBusy ? 0.5 : 1 }} title="Upload a replacement PDF and re-extract from it">
+                ⬆ Replace…
+                <input type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} disabled={rowBusy}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(row, f) }} />
+              </label>
+            </div>
+          </div>
+        )
+      })}
+      {msg && <div style={{ fontSize: 11, color: '#2e8b57' }}>{msg}</div>}
+      {err && <div style={{ fontSize: 11, color: 'var(--red)' }}>{err}</div>}
+      <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+        Re-extracting overwrites that slice with what the chosen file states (the prior model is saved as a scenario) and posts an [AI] audit comment. Excel/ARGUS models can't be read here — upload a PDF print, or run enrich_deal.ps1 locally.
+      </div>
     </div>
   )
 }
@@ -1911,6 +2044,8 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     ltvPct: um?.ltvPct ?? 0.6, loanRatePct: um?.loanRatePct ?? 0.065, amortYears: um?.amortYears ?? 30,
     ioYears: um?.ioYears ?? 0, loanFeePct: um?.loanFeePct ?? 0, refi: um?.refi ?? null,
     promote: um?.promote ?? DEFAULT_PROMOTE,
+    // carry saved cases + provenance through the working state, else Save wipes them
+    scenarios: um?.scenarios, sources: um?.sources,
   }
   const [m, setM] = useState<UnderwritingModel>(seed)
   const [saved, setSaved] = useState(false)
@@ -1927,11 +2062,11 @@ function SimpleUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     equityRequired: Math.round(r.equity), totalCapitalization: Math.round(r.totalBasis),
   }
   const saveScenario = (name: string) => {
-    const snap: UwScenario = { name, model: { ...m, mode: 'simple', scenarios: undefined }, savedAt: new Date().toISOString() }
+    const snap: UwScenario = { name, model: { ...m, mode: 'simple', scenarios: undefined, sources: undefined }, savedAt: new Date().toISOString() }
     const next: UnderwritingModel = { ...m, mode: 'simple', scenarios: [...(m.scenarios ?? []).filter(s => s.name !== name), snap] }
     setM(next); onSaveModel(next, computed); setSaved(true)
   }
-  const loadScenario = (model: UnderwritingModel) => { setM({ ...model, scenarios: m.scenarios }); setSaved(false) }
+  const loadScenario = (model: UnderwritingModel) => { setM({ ...model, scenarios: m.scenarios, sources: m.sources }); setSaved(false) }
   const deleteScenario = (name: string) => {
     const next: UnderwritingModel = { ...m, scenarios: (m.scenarios ?? []).filter(s => s.name !== name) }
     setM(next); onSaveModel(next, computed)
@@ -1989,6 +2124,8 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     periodicity: um?.periodicity ?? (um?.mode === 'tenant' ? 'annual' : 'monthly'),
     leases: um?.leases ?? [], rollover: { ...D_ROLL, ...(um?.rollover ?? {}) }, opex: { ...D_OPEX, ...(um?.opex ?? {}) },
     promote: um?.promote ?? DEFAULT_PROMOTE,
+    // carry saved cases + provenance through the working state, else Save wipes them
+    scenarios: um?.scenarios, sources: um?.sources,
   }
   const [m, setM] = useState<UnderwritingModel>(seed)
   const [saved, setSaved] = useState(false)
@@ -2024,11 +2161,11 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     equityRequired: Math.round(r.equity), totalCapitalization: Math.round(r.totalBasis),
   }
   const saveScenario = (name: string) => {
-    const snap: UwScenario = { name, model: { ...m, mode: 'tenant', scenarios: undefined }, savedAt: new Date().toISOString() }
+    const snap: UwScenario = { name, model: { ...m, mode: 'tenant', scenarios: undefined, sources: undefined }, savedAt: new Date().toISOString() }
     const next: UnderwritingModel = { ...m, mode: 'tenant', scenarios: [...(m.scenarios ?? []).filter(s => s.name !== name), snap] }
     setM(next); onSaveModel(next, computed); setSaved(true)
   }
-  const loadScenario = (model: UnderwritingModel) => { setM({ ...model, scenarios: m.scenarios }); setSaved(false) }
+  const loadScenario = (model: UnderwritingModel) => { setM({ ...model, scenarios: m.scenarios, sources: m.sources }); setSaved(false) }
   const deleteScenario = (name: string) => {
     const next: UnderwritingModel = { ...m, scenarios: (m.scenarios ?? []).filter(s => s.name !== name) }
     setM(next); onSaveModel(next, computed)
