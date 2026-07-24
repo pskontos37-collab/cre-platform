@@ -33,6 +33,7 @@ const STATUS_COLOR: Record<string, string> = {
 }
 const fmt$ = (n: unknown) => (n == null || n === '' ? '—' : Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }))
 const fmtN = (n: unknown) => (n == null || n === '' ? '—' : Number(n).toLocaleString('en-US'))
+const KIND_LABEL: Record<string, string> = { rentroll: 'rent roll', gl: 'general ledger' }
 
 export function ImportsPage() {
   const [batches, setBatches] = useState<Batch[]>([])
@@ -115,8 +116,9 @@ export function ImportsPage() {
         {error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{error}</div>}
         {!loading && !batches.length && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            No staged imports. Run the rent-roll loader with <code>RR_STAGE=1</code> to stage a
-            monthly MRI drop for review here (instead of writing it straight to the database).
+            No staged imports. Run the rent-roll loader with <code>RR_STAGE=1</code> or the GL
+            loader with <code>GL_STAGE=1</code> to stage a monthly MRI drop for review here
+            (instead of writing it straight to the database).
           </div>
         )}
         {batches.map(b => (
@@ -127,7 +129,7 @@ export function ImportsPage() {
               <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: STATUS_COLOR[b.status] ?? 'var(--text-muted)', textTransform: 'uppercase' }}>{b.status}</span>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-              {b.kind} · {b.period_year}-{String(b.period_month).padStart(2, '0')} · staged {new Date(b.created_at).toLocaleDateString()}
+              {KIND_LABEL[b.kind] ?? b.kind} · {b.period_year}-{String(b.period_month).padStart(2, '0')} · staged {new Date(b.created_at).toLocaleDateString()}
               {b.source_file ? ` · ${b.source_file}` : ''}
             </div>
           </div>
@@ -142,12 +144,17 @@ export function ImportsPage() {
             <div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{sel.label ?? propNames[sel.property_id]}</h2>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{sel.period_year}-{String(sel.period_month).padStart(2, '0')} rent roll</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{sel.period_year}-{String(sel.period_month).padStart(2, '0')} {KIND_LABEL[sel.kind] ?? sel.kind}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: STATUS_COLOR[sel.status], textTransform: 'uppercase' }}>{sel.status}</span>
               </div>
-              {sel.summary && (
+              {sel.summary && sel.kind === 'rentroll' && (
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
                   {fmtN(sel.summary.row_count)} occupied rows · leased {fmtN(sel.summary.leased_sf)} sf · annual base {fmt$(sel.summary.total_base_rent)} · avg {fmt$(sel.summary.avg_base_rent_psf)}/sf
+                </div>
+              )}
+              {sel.summary && sel.kind === 'gl' && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                  {fmtN(sel.summary.row_count)} entries · {fmtN(sel.summary.periods)} periods thru {sel.summary.max_period ?? '—'} · debits {fmt$(sel.summary.total_debit)} · credits {fmt$(sel.summary.total_credit)} · net {fmt$(sel.summary.net)}
                 </div>
               )}
               {sel.decision_note && <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>note: {sel.decision_note}</div>}
@@ -155,11 +162,83 @@ export function ImportsPage() {
 
             {diff?.replaces_existing_period && (
               <div style={{ border: '1px solid var(--red, #ef4444)', background: 'rgba(239,68,68,0.06)', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: 'var(--red, #ef4444)', fontWeight: 600 }}>
-                ⚠ A snapshot for this period already exists — approving REPLACES it.
+                {sel.kind === 'gl'
+                  ? `⚠ ${fmtN(diff.periods_to_replace)} ledger period(s) differ from what is live — approving REPLACES those periods.`
+                  : '⚠ A snapshot for this period already exists — approving REPLACES it.'}
               </div>
             )}
 
-            {diff && (
+            {diff && sel.kind === 'gl' && (
+              <>
+                <div style={{ display: 'flex', gap: 14, fontSize: 12, flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--green, #22c55e)' }}>＋ {(diff.new_periods ?? []).length} new periods</span>
+                  <span style={{ color: 'var(--amber, #f59e0b)' }}>Δ {(diff.changed_periods ?? []).length} changed</span>
+                  <span style={{ color: 'var(--red, #ef4444)' }}>－ {(diff.removed_periods ?? []).length} removed</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{diff.unchanged_period_count ?? 0} unchanged</span>
+                  <span style={{ color: 'var(--text-faint)', marginLeft: 'auto' }}>{fmtN(diff.staged_rows)} staged vs {fmtN(diff.live_rows)} live entries</span>
+                </div>
+
+                {(diff.changed_periods ?? []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--amber, #f59e0b)', marginBottom: 4 }}>Changed periods (live content differs from the file)</div>
+                    {(diff.changed_periods ?? []).map((cp: any) => (
+                      <div key={cp.period} style={{ border: '1px solid var(--border-2)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                          <b>{cp.period}</b>
+                          <span>net {fmt$(cp.old_net)} → <b>{fmt$(cp.new_net)}</b></span>
+                          <span style={{ color: Number(cp.delta) === 0 ? 'var(--text-muted)' : 'var(--amber, #f59e0b)', fontWeight: 600 }}>Δ {fmt$(cp.delta)}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>{fmtN(cp.old_rows)} → {fmtN(cp.new_rows)} rows</span>
+                        </div>
+                        {(cp.accounts ?? []).length > 0 ? (
+                          <div style={{ overflowX: 'auto', marginTop: 6 }}>
+                            <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
+                              <thead><tr style={{ color: 'var(--text-faint)', textAlign: 'left' }}><th style={{ padding: '2px 8px' }}>Account</th><th style={{ padding: '2px 8px' }}>Name</th><th style={{ padding: '2px 8px' }}>Current net</th><th style={{ padding: '2px 8px' }}>Incoming net</th><th style={{ padding: '2px 8px' }}>Δ</th></tr></thead>
+                              <tbody>
+                                {(cp.accounts ?? []).map((a: any) => (
+                                  <tr key={a.account} style={{ borderTop: '1px solid var(--border-1, rgba(128,128,128,0.15))' }}>
+                                    <td style={{ padding: '2px 8px', fontWeight: 600 }}>{a.account}</td>
+                                    <td style={{ padding: '2px 8px' }}>{a.name || '—'}</td>
+                                    <td style={{ padding: '2px 8px' }}>{fmt$(a.old_net)}</td>
+                                    <td style={{ padding: '2px 8px', fontWeight: 600 }}>{fmt$(a.new_net)}</td>
+                                    <td style={{ padding: '2px 8px', color: 'var(--amber, #f59e0b)' }}>{fmt$(a.delta)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Row-level changes only — per-account nets are unchanged.</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {(diff.new_periods ?? []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--green, #22c55e)', marginBottom: 4 }}>New periods (not in the live ledger)</div>
+                    {(diff.new_periods ?? []).map((p: any) => (
+                      <div key={p.period} style={{ fontSize: 12, padding: '2px 0' }}>
+                        <b>{p.period}</b> · {fmtN(p.rows)} entries · net {fmt$(p.net)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {(diff.removed_periods ?? []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--red, #ef4444)', marginBottom: 4 }}>Removed periods (live has them, this file does not — unusual for a cumulative export)</div>
+                    {(diff.removed_periods ?? []).map((p: any) => (
+                      <div key={p.period} style={{ fontSize: 12, padding: '2px 0', color: 'var(--text-muted)' }}>
+                        <b style={{ color: 'var(--text)' }}>{p.period}</b> · {fmtN(p.rows)} entries · net {fmt$(p.net)} — approving DELETES these
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {diff && sel.kind !== 'gl' && (
               <>
                 <div style={{ display: 'flex', gap: 14, fontSize: 12 }}>
                   <span style={{ color: 'var(--green, #22c55e)' }}>＋ {(diff.new_tenants ?? []).length} new</span>
@@ -232,13 +311,16 @@ export function ImportsPage() {
                   </button>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
-                  Approving replaces the period's snapshot atomically. After applying a rent roll, run reconcile_option_notices.ps1 (option-date sync).
+                  {sel.kind === 'gl'
+                    ? 'Approving replaces only the differing ledger periods atomically and refreshes the P&L matviews in the same transaction.'
+                    : "Approving replaces the period's snapshot atomically. After applying a rent roll, run reconcile_option_notices.ps1 (option-date sync)."}
                 </div>
               </div>
             )}
             {sel.status === 'applied' && (
               <div style={{ fontSize: 12, color: 'var(--green, #22c55e)' }}>
-                ✓ Applied {sel.applied_at ? new Date(sel.applied_at).toLocaleString() : ''}. Reminder: run reconcile_option_notices.ps1 after rent-roll loads.
+                ✓ Applied {sel.applied_at ? new Date(sel.applied_at).toLocaleString() : ''}.{' '}
+                {sel.kind === 'gl' ? 'P&L matviews were refreshed with the apply.' : 'Reminder: run reconcile_option_notices.ps1 after rent-roll loads.'}
               </div>
             )}
           </div>

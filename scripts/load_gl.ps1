@@ -5,7 +5,8 @@ $enc = New-Object System.Text.UTF8Encoding($false)
 $TMP = "C:\Users\pskontos\AppData\Local\Temp\claude\C--Users-pskontos-Desktop-Software\c9d09617-ceab-4ad8-9e65-cb51a8403010\scratchpad\_gl_post.json"
 
 function Post($table, $rows, $prefer) {
-  if ($rows.Count -eq 0) { return }
+  $out = @()
+  if ($rows.Count -eq 0) { return $out }
   for ($i=0; $i -lt $rows.Count; $i += 1000) {
     $chunk = @($rows[$i..([Math]::Min($i+999,$rows.Count-1))])
     $json = $chunk | ConvertTo-Json -Depth 4
@@ -13,7 +14,14 @@ function Post($table, $rows, $prefer) {
     [System.IO.File]::WriteAllText($TMP, $json, $enc)
     $resp = & curl.exe -s -X POST "$BASE/rest/v1/$table" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -H "Prefer: $prefer" --data-binary "@$TMP"
     if ($resp -match '"message"\s*:' -and $resp -match '"code"') { throw "POST $table failed: $resp" }
+    if ($prefer -match 'representation' -and $resp) { $p = $resp | ConvertFrom-Json; if ($p) { $out += $p } }
   }
+  return $out
+}
+function CountRows($table, $filter) {
+  $resp = & curl.exe -s -I "$BASE/rest/v1/$table?$filter&select=id" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Prefer: count=exact" -H "Range: 0-0"
+  if ($resp -match 'content-range:\s*\S+/(\d+)') { return [int]$matches[1] }
+  return -1
 }
 
 $PROP = @{ '0532' = '00000000-0000-0000-0000-000000000010'; '0531' = '00000000-0000-0000-0000-000000000011' }
@@ -83,10 +91,49 @@ try {
     }
     $wb.Close($false)
     Write-Output ("  parsed transactions=$tx balance_forward=$bf total_rows=$($glRows.Count)")
-    # idempotent: clear this property's GL then insert
-    & curl.exe -s -X DELETE "$BASE/rest/v1/gl_entries?property_id=eq.$($PROP[$f.entity])" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | Out-Null
-    Post 'gl_entries' $glRows 'return=minimal'
-    Write-Output ("  inserted $($glRows.Count) gl_entries for $($f.entity)")
+
+    if ($env:GL_STAGE -eq '1') {
+      # STAGED IMPORT (mig 20240128): write a kind='gl' batch for diff-and-approve
+      # on /imports instead of replacing the ledger directly. Apply (human click)
+      # replaces only the periods whose row content differs, then refreshes the
+      # P&L matviews in the same transaction.
+      $propId = $PROP[$f.entity]
+      $mine = @($glRows | Where-Object { $_.property_id -eq $propId })
+      if ($mine.Count -ne $glRows.Count) { Write-Output ("  WARN: " + ($glRows.Count - $mine.Count) + " rows belong to other entities and were NOT staged") }
+      if ($mine.Count -eq 0) { throw "$($f.entity): no rows for property $propId -> not staging" }
+      $dated = @($mine | Where-Object { $_.period_year } | Sort-Object period_year, period_month)
+      if ($dated.Count -eq 0) { throw "$($f.entity): no dated periods parsed -> not staging" }
+      $maxY = $dated[-1].period_year; $maxM = $dated[-1].period_month
+      $maxLbl = "$maxY-" + ([string]$maxM).PadLeft(2,'0')
+      $sumD = ($mine | ForEach-Object { $_.debit }  | Measure-Object -Sum).Sum
+      $sumC = ($mine | ForEach-Object { $_.credit } | Measure-Object -Sum).Sum
+      $nPer = @($dated | ForEach-Object { "$($_.period_year)-$($_.period_month)" } | Sort-Object -Unique).Count
+      $batch = @{ kind='gl'; property_id=$propId; period_year=$maxY; period_month=$maxM;
+                  label=("GL " + $f.entity + " thru " + $maxLbl);
+                  source_file=(Split-Path $f.path -Leaf);
+                  summary=@{ row_count=$mine.Count; periods=$nPer; max_period=$maxLbl;
+                             total_debit=[Math]::Round($sumD,2); total_credit=[Math]::Round($sumC,2);
+                             net=[Math]::Round($sumD-$sumC,2) } }
+      $bres = Post 'mri_import_batches' @($batch) 'return=representation'
+      $bid = $bres[0].id
+      if (-not $bid) { throw "$($f.entity): no batch id returned" }
+      $iRows = New-Object System.Collections.Generic.List[object]
+      $ix = 0
+      foreach ($rw in $mine) { $ix++; $iRows.Add(@{ batch_id=$bid; row_index=$ix; payload=$rw }) }
+      $null = Post 'mri_import_rows' $iRows 'return=minimal'
+      $persisted = CountRows 'mri_import_rows' "batch_id=eq.$bid"
+      if ($persisted -ne $mine.Count) { throw "$($f.entity): staged row count mismatch (posted $($mine.Count), persisted $persisted)" }
+      # compute + store the diff so /imports renders instantly
+      [System.IO.File]::WriteAllText($TMP, (@{ p_batch = $bid } | ConvertTo-Json), $enc)
+      $dres = & curl.exe -s -X POST "$BASE/rest/v1/rpc/mri_import_diff" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" --data-binary "@$TMP"
+      $d = $dres | ConvertFrom-Json
+      Write-Output ("  STAGED batch=$bid rows=" + $mine.Count + "  periods to replace=" + $d.periods_to_replace + " (new=" + @($d.new_periods).Count + " changed=" + @($d.changed_periods).Count + " removed=" + @($d.removed_periods).Count + " unchanged=" + $d.unchanged_period_count + ") -> review on /imports")
+    } else {
+      # idempotent: clear this property's GL then insert
+      & curl.exe -s -X DELETE "$BASE/rest/v1/gl_entries?property_id=eq.$($PROP[$f.entity])" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | Out-Null
+      Post 'gl_entries' $glRows 'return=minimal'
+      Write-Output ("  inserted $($glRows.Count) gl_entries for $($f.entity) (remember: refresh_gl_matviews)")
+    }
   }
 } finally {
   $xl.Quit()
