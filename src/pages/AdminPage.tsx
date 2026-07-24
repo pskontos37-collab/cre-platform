@@ -272,6 +272,8 @@ function UserRow({ user, templates, properties, portfolios, isSelf, expanded, on
               </div>
             </div>
 
+            <ActionGrantsEditor userId={user.id} role={role} />
+
             <div style={{ display: 'flex', gap: 8, marginTop: 18, alignItems: 'center' }}>
               <button style={btn('primary')} disabled={busy} onClick={() => guard(
                 () => updateUser(user.id, { role, is_active: active, allowed_pages: role === 'admin' ? null : pages }),
@@ -845,6 +847,102 @@ function FirmTab() {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════ ACTION GRANTS (Phase 3b) ═══════════════
+// Per-user action capabilities: role defaults from action_defaults, explicit
+// allow/deny overrides in user_action_grants (migration 20240131). Server
+// enforces via can_do_action(); this editor is the admin surface.
+
+function ActionGrantsEditor({ userId, role }: { userId: string; role: UserRole }) {
+  const [rows, setRows] = useState<Array<{ action: string; label: string; description: string | null; allowed: boolean; source: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function load() {
+    try {
+      const { data, error } = await supabase.rpc('effective_actions', { p_user: userId })
+      if (error) throw new Error(error.message)
+      setRows((data ?? []) as any[])
+      setErr(null)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { setLoading(true); void load() }, [userId])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function setOverride(action: string, mode: 'default' | 'allow' | 'deny') {
+    setSaving(action)
+    try {
+      if (mode === 'default') {
+        const { error } = await supabase.from('user_action_grants').delete()
+          .eq('user_id', userId).eq('action', action)
+        if (error) throw new Error(error.message)
+      } else {
+        const { data: auth } = await supabase.auth.getUser()
+        const { error } = await supabase.from('user_action_grants').upsert({
+          user_id: userId, action, allowed: mode === 'allow',
+          granted_by: auth?.user?.id ?? null, granted_at: new Date().toISOString(),
+        })
+        if (error) throw new Error(error.message)
+      }
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const overrideOf = (source: string) => source === 'granted' ? 'allow' : source === 'denied' ? 'deny' : 'default'
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <label style={label}>Action grants {role === 'admin' && <span style={{ fontWeight: 400, color: 'var(--text-faint)' }}>(admins hold every action)</span>}</label>
+      {err && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 6 }}>{err}</div>}
+      {loading ? (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>
+      ) : (
+        <div style={{ opacity: role === 'admin' ? 0.5 : 1, pointerEvents: role === 'admin' ? 'none' : 'auto' }}>
+          <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%', maxWidth: 720 }}>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.action} style={{ borderTop: '1px solid var(--border-1, rgba(128,128,128,0.15))' }}>
+                  <td style={{ padding: '5px 8px' }}>
+                    <div style={{ fontWeight: 600 }}>{r.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{r.description}</div>
+                  </td>
+                  <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontWeight: 700, color: r.allowed ? 'var(--green, #22c55e)' : 'var(--red, #ef4444)' }}>
+                      {r.allowed ? 'allowed' : 'blocked'}
+                    </span>
+                    <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>({r.source})</span>
+                  </td>
+                  <td style={{ padding: '5px 8px', textAlign: 'right' }}>
+                    <select
+                      value={overrideOf(r.source)}
+                      disabled={saving === r.action}
+                      onChange={e => void setOverride(r.action, e.target.value as 'default' | 'allow' | 'deny')}
+                      style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }}>
+                      <option value="default">role default</option>
+                      <option value="allow">always allow</option>
+                      <option value="deny">always deny</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6 }}>
+            Overrides apply immediately and are enforced server-side; property-scope checks still apply on top.
+          </div>
+        </div>
+      )}
     </div>
   )
 }

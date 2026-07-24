@@ -29,7 +29,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, corsHeaders, requireAction, requireUser } from '../_shared/auth.ts'
 
 const FROM =
   Deno.env.get('SERVICE_AGREEMENT_FROM') ??
@@ -66,9 +66,12 @@ serve(async (req) => {
   try {
     // Any ACTIVE authenticated staff member may send a vendor agreement for
     // signature (review #10 — property managers issue vendor contracts, per the
-    // feature's design). requireUser already rejects the anon key and inactive
-    // accounts; the recipient `to` is validated below as a real address.
-    await requireUser(req, sb)
+    // feature's design; the comms.send_service_agreement default preserves
+    // that, while making the verb revocable per user). requireUser already
+    // rejects the anon key and inactive accounts; the recipient `to` is
+    // validated below as a real address.
+    const caller = await requireUser(req, sb)
+    await requireAction(sb, caller, 'comms.send_service_agreement')
 
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {}
     const to = String(body.to ?? '').trim()

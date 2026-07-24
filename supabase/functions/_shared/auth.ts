@@ -29,6 +29,19 @@ export class AuthError extends Error {
   }
 }
 
+// Action-level capability gate (audit Phase 3b, migration 20240131): named
+// verbs ('imports.approve', 'comms.send_tenant', ...) resolved server-side by
+// can_user_do() from role defaults + per-user grants/denies. This LAYERS ON
+// TOP of scope checks (canWriteProperty etc.) — call it in addition, never
+// instead. Service callers (loaders/pipelines) are exempt; a failed lookup
+// fails CLOSED.
+export async function requireAction(sb: SupabaseClient, caller: { id: string }, action: string): Promise<void> {
+  if (caller.id === 'service') return
+  const { data, error } = await sb.rpc('can_user_do', { p_user: caller.id, p_action: action })
+  if (error) throw new AuthError(`action check failed (${action}): ${error.message}`, 500)
+  if (data !== true) throw new AuthError(`Not permitted (requires ${action})`, 403)
+}
+
 export interface Caller {
   id: string
   email: string | null

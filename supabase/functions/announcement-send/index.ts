@@ -31,7 +31,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
+import { AuthError, canWriteProperty, corsHeaders, requireAction, requireUser } from '../_shared/auth.ts'
 
 const FROM =
   Deno.env.get('ANNOUNCEMENT_FROM') ??
@@ -87,6 +87,7 @@ serve(async (req) => {
 
     if (!propertyId) throw new AuthError('propertyId is required', 400)
     if (!canWriteProperty(caller, propertyId)) throw new AuthError('No write access to this property', 403)   // WRITE gate (audit S2): this endpoint mutates state / spends AI credits
+    await requireAction(sb, caller, 'comms.send_tenant')   // action gate (Phase 3b): revocable per user, layered on the scope check
     if (!subject) throw new AuthError('Subject is required', 400)
     if (!message) throw new AuthError('Message is required', 400)
 

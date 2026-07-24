@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useCan } from '../lib/useActions'
 
 // ── MRI Imports (audit Phase 2: staged import) ───────────────────────────────
 // Monthly MRI drops staged by the loader (RR_STAGE=1) land here as batches with
@@ -44,6 +45,7 @@ export function ImportsPage() {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [actErr, setActErr] = useState<string | null>(null)
+  const canApprove = useCan('imports.approve')   // action gate (Phase 3b); server enforces regardless
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -300,13 +302,18 @@ export function ImportsPage() {
                 <input value={note} onChange={e => setNote(e.target.value)} placeholder="decision note (kept on the batch)"
                   style={{ fontSize: 12, padding: '6px 8px', borderRadius: 6, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' }} />
                 {actErr && <div style={{ fontSize: 12, color: 'var(--red)' }}>{actErr}</div>}
+                {canApprove === false && (
+                  <div style={{ fontSize: 12, color: 'var(--amber, #f59e0b)' }}>
+                    Your account does not hold the "Approve MRI imports" action — an admin can grant it on the Admin page.
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button disabled={busy} onClick={() => void approve()}
-                    style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--green, #22c55e)', color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+                  <button disabled={busy || canApprove === false} onClick={() => void approve()}
+                    style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--green, #22c55e)', color: '#fff', cursor: 'pointer', opacity: busy || canApprove === false ? 0.6 : 1 }}>
                     {busy ? '…' : 'Approve & apply'}
                   </button>
-                  <button disabled={busy} onClick={() => void reject()}
-                    style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+                  <button disabled={busy || canApprove === false} onClick={() => void reject()}
+                    style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', opacity: busy || canApprove === false ? 0.6 : 1 }}>
                     Reject
                   </button>
                 </div>
