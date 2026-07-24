@@ -39,6 +39,7 @@ export const PAGES: PageDef[] = [
   { key: 'rea',         path: '/rea',         label: 'REAs',        icon: '📜', group: 'portfolio' },
   { key: 'abstracts',   path: '/abstracts',   label: 'Abstracts',   icon: '🗂', restricted: true, group: 'leasing' },
   { key: 'review',      path: '/review',      label: 'Review Center', icon: '🗹', restricted: true, group: 'leasing' },
+  { key: 'imports',     path: '/imports',     label: 'MRI Imports',   icon: '⇪', restricted: true, group: 'portfolio' },
   { key: 'clauses',     path: '/clauses',     label: 'Clauses',     icon: '§',  restricted: true, group: 'leasing' },
   { key: 'brokerage',   path: '/brokerage',   label: 'Brokerage',   icon: '🤝', group: 'leasing' },
   { key: 'documents',   path: '/documents',   label: 'Documents',   icon: '📁', group: 'leasing' },

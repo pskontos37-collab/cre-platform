@@ -103,17 +103,39 @@ try{
   Write-Output ("  occ units = {0}  (target {1})   annual base = {2:N2}  avg psf = {3:N2}" -f $occUnits,$f.expUnits,$annualSum,$avgPsfDisp)
   if([Math]::Abs($monthlySum-$f.expMonthly) -gt 1){ throw "$($f.label): monthly base mismatch -> ABORT (no DB write)" }
 
-  # snapshot upsert (delete then insert)
-  & curl.exe -s -X DELETE "$BASE/rest/v1/rent_roll_snapshots?property_id=eq.$($f.pid)&period_year=eq.$YEAR&period_month=eq.$MONTH" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | Out-Null
   $occPct = if($totalSf -gt 0){ [Math]::Round($leasedSf/$totalSf,4) } else { $null }
   $avgPsf = if($leasedSf -gt 0){ [Math]::Round($annualSum/$leasedSf,2) } else { $null }
-  $snap=@{ property_id=$f.pid; period_year=$YEAR; period_month=$MONTH; total_sf=$totalSf; leased_sf=$leasedSf;
-           vacant_sf=$vacantSf; occupancy_pct=$occPct; avg_base_rent_psf=$avgPsf; total_base_rent=$annualSum; row_count=$occRows.Count }
-  $sres=Post 'rent_roll_snapshots' @($snap) 'return=representation'
-  $sid=$sres[0].id
-  if(-not $sid){ throw "$($f.label): no snapshot id returned" }
-  foreach($rw in $rows){ $rw['snapshot_id']=$sid }
-  $null=Post 'rent_roll_rows' @($rows) 'return=minimal'
-  Write-Output ("  DONE snapshot=$sid  rows inserted="+$rows.Count)
+
+  if($env:RR_STAGE -eq '1'){
+    # STAGED IMPORT (mig 20240127): write the batch for diff-and-approve on /imports
+    # instead of replacing the period directly. Apply happens via apply_mri_import
+    # after a human reviews the computed diff.
+    $batch=@{ kind='rentroll'; property_id=$f.pid; period_year=$YEAR; period_month=$MONTH; label=$f.label;
+              source_file=(Split-Path $f.path -Leaf);
+              summary=@{ total_sf=$totalSf; leased_sf=$leasedSf; vacant_sf=$vacantSf; occupancy_pct=$occPct;
+                         avg_base_rent_psf=$avgPsf; total_base_rent=$annualSum; row_count=$occRows.Count } }
+    $bres=Post 'mri_import_batches' @($batch) 'return=representation'
+    $bid=$bres[0].id
+    if(-not $bid){ throw "$($f.label): no batch id returned" }
+    $iRows=@(); $ix=0
+    foreach($rw in $rows){ $ix++; $iRows += @{ batch_id=$bid; row_index=$ix; payload=$rw } }
+    $null=Post 'mri_import_rows' @($iRows) 'return=minimal'
+    # compute + store the diff so /imports renders instantly
+    [System.IO.File]::WriteAllText($TMP,(@{ p_batch=$bid }|ConvertTo-Json),$enc)
+    $dres = & curl.exe -s -X POST "$BASE/rest/v1/rpc/mri_import_diff" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" --data-binary "@$TMP"
+    $d = $dres | ConvertFrom-Json
+    Write-Output ("  STAGED batch=$bid rows="+$rows.Count+"  diff: new="+@($d.new_tenants).Count+" changed="+@($d.changed).Count+" departed="+@($d.departed).Count+" unchanged="+$d.unchanged_count+"  -> review on /imports")
+  } else {
+    # snapshot upsert (delete then insert)
+    & curl.exe -s -X DELETE "$BASE/rest/v1/rent_roll_snapshots?property_id=eq.$($f.pid)&period_year=eq.$YEAR&period_month=eq.$MONTH" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | Out-Null
+    $snap=@{ property_id=$f.pid; period_year=$YEAR; period_month=$MONTH; total_sf=$totalSf; leased_sf=$leasedSf;
+             vacant_sf=$vacantSf; occupancy_pct=$occPct; avg_base_rent_psf=$avgPsf; total_base_rent=$annualSum; row_count=$occRows.Count }
+    $sres=Post 'rent_roll_snapshots' @($snap) 'return=representation'
+    $sid=$sres[0].id
+    if(-not $sid){ throw "$($f.label): no snapshot id returned" }
+    foreach($rw in $rows){ $rw['snapshot_id']=$sid }
+    $null=Post 'rent_roll_rows' @($rows) 'return=minimal'
+    Write-Output ("  DONE snapshot=$sid  rows inserted="+$rows.Count)
+  }
  }
 } finally { $xl.Quit(); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($xl)|Out-Null }
