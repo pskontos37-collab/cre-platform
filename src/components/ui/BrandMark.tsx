@@ -1,8 +1,12 @@
-/** The M&J Wilkow quadrant-and-ampersand mark, recreated as an inline SVG so it
- *  scales crisply and needs no image asset. Colors are fixed brand values. */
+import { useFirmIdentity } from '../../lib/firmConfig'
+
+/** The quadrant-and-ampersand mark, recreated as an inline SVG so it scales
+ *  crisply and needs no image asset. Colors are fixed brand values; the firm
+ *  name/wordmark text comes from app_config 'firm.identity' (Phase 3a). */
 export function BrandMark({ size = 34 }: { size?: number }) {
+  const firm = useFirmIdentity()
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" aria-label="M&J Wilkow">
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-label={firm.name}>
       <rect x="0"  y="0"  width="50" height="50" fill="#16394b" />
       <rect x="50" y="0"  width="50" height="50" fill="#8fb3cf" />
       <rect x="0"  y="50" width="50" height="50" fill="#4e7e9e" />
@@ -22,8 +26,10 @@ export function BrandMark({ size = 34 }: { size?: number }) {
   )
 }
 
-/** Serif brand wordmark, matching the corporate identity. */
+/** Serif brand wordmark, matching the corporate identity. Text is config-driven
+ *  (app_config 'firm.identity'.wordmark) with the M&J default until loaded. */
 export function BrandWordmark({ size = 15 }: { size?: number }) {
+  const firm = useFirmIdentity()
   return (
     <span
       style={{
@@ -35,7 +41,7 @@ export function BrandWordmark({ size = 15 }: { size?: number }) {
         whiteSpace:    'nowrap',
       }}
     >
-      M&amp;J&nbsp;WILKOW
+      {firm.wordmark}
     </span>
   )
 }

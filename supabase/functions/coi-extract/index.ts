@@ -41,10 +41,15 @@ const COVERAGE_TYPES = [
   'builders_risk', 'garagekeepers', 'crime', 'cyber', 'other',
 ]
 
-// Property routing map for the JV assets in scope. Each keyword, if found in the
-// certificate-holder / insured text, votes for one property id. Distinct-id count
-// decides: exactly one → route; zero → property_unresolved; >1 → ambiguous.
-const ROUTE_MAP: { kw: string; id: string }[] = [
+// Property routing map. Each keyword, if found in the certificate-holder /
+// insured text, votes for one property id. Distinct-id count decides: exactly
+// one → route; zero → property_unresolved; >1 → ambiguous.
+// SOURCE OF TRUTH: app_config key 'properties.route_map' (audit Phase 3a —
+// adding a property is a data edit, not a redeploy). Entries scoped 'coi'|'all'
+// apply here. The literal below is only the fail-open fallback if config is
+// unreadable.
+type RouteEntry = { kw: string; id: string }
+const FALLBACK_ROUTE_MAP: RouteEntry[] = [
   { kw: 'midway plantation',            id: '00000000-0000-0000-0000-000000000010' }, // KM East
   { kw: 'knightdale marketplace east',  id: '00000000-0000-0000-0000-000000000010' },
   { kw: 'midtown commons',              id: '00000000-0000-0000-0000-000000000011' }, // KM West
@@ -53,6 +58,19 @@ const ROUTE_MAP: { kw: string; id: string }[] = [
   { kw: 'port chester',                 id: 'd5a4ed03-0b60-4168-9208-83822dd24884' },
   { kw: 'magnolia',                     id: 'd4f08824-2d88-472d-b7aa-a703310c2aaf' }, // Magnolia Park
 ]
+
+async function loadRouteMap(sb: any): Promise<RouteEntry[]> {
+  try {
+    const { data } = await sb.from('app_config').select('value').eq('key', 'properties.route_map').maybeSingle()
+    const entries = (data?.value?.entries ?? []) as Array<{ kw?: string; property_id?: string; scope?: string }>
+    const out = entries
+      .filter(e => e.kw && e.property_id && (!e.scope || e.scope === 'all' || e.scope === 'coi'))
+      .map(e => ({ kw: String(e.kw).toLowerCase(), id: String(e.property_id) }))
+    return out.length ? out : FALLBACK_ROUTE_MAP
+  } catch {
+    return FALLBACK_ROUTE_MAP
+  }
+}
 
 const SCHEMA = `{
  "acord_form": "25"|"28"|"other",
@@ -105,12 +123,12 @@ const minDate = (ds: (string | null)[]): string | null => {
 }
 const norm = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
-// Infer the property from the cert-holder + insured text via ROUTE_MAP votes.
-function routeProperty(parsed: any): { propertyId: string | null; reason: string } {
+// Infer the property from the cert-holder + insured text via route-map votes.
+function routeProperty(parsed: any, routeMap: RouteEntry[]): { propertyId: string | null; reason: string } {
   const text = [parsed.certificate_holder?.name, parsed.certificate_holder?.address, parsed.insured?.address]
     .filter(Boolean).join(' ').toLowerCase()
   const ids = new Set<string>()
-  for (const r of ROUTE_MAP) if (text.includes(r.kw)) ids.add(r.id)
+  for (const r of routeMap) if (text.includes(r.kw)) ids.add(r.id)
   if (ids.size === 1) return { propertyId: [...ids][0], reason: 'routed' }
   if (ids.size > 1) return { propertyId: null, reason: 'ambiguous_property' }
   return { propertyId: null, reason: 'property_unresolved' }
@@ -243,7 +261,7 @@ ${SCHEMA}`
 
     // ── 3b. Route to a property when not supplied ──
     if (!propertyId) {
-      const r = routeProperty(parsed)
+      const r = routeProperty(parsed, await loadRouteMap(sb))
       if (!r.propertyId) {
         // Park for human triage instead of guessing.
         const { data: q, error: qErr } = await sb.from('coi_review_queue').insert({

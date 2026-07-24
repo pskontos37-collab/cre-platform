@@ -1,5 +1,7 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
+import { FIRM_DEFAULTS, type FirmIdentity } from '../lib/firmConfig'
 import { useProperties, usePortfolios } from '../hooks/useProperties'
 import {
   useUsers, useAccessTemplates, createUser, setPassword, deleteUser,
@@ -63,7 +65,7 @@ function Toast({ msg }: { msg: { type: 'success' | 'error'; text: string } | nul
 // ═══════════════════════════════════════════════════════════════════════════
 export function AdminPage() {
   const { appUser } = useAuth()
-  const [tab, setTab] = useState<'users' | 'templates'>('users')
+  const [tab, setTab] = useState<'users' | 'templates' | 'firm'>('users')
 
   if (appUser?.role !== 'admin') {
     return (
@@ -81,17 +83,17 @@ export function AdminPage() {
       </p>
 
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
-        {(['users', 'templates'] as const).map(t => (
+        {(['users', 'templates', 'firm'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '9px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
             background: 'none', border: 'none', textTransform: 'capitalize',
             color: tab === t ? WILKOW : 'var(--text-muted)',
             borderBottom: tab === t ? `2px solid ${WILKOW}` : '2px solid transparent',
-          }}>{t === 'templates' ? 'Access templates' : 'Users'}</button>
+          }}>{t === 'templates' ? 'Access templates' : t === 'firm' ? 'Firm settings' : 'Users'}</button>
         ))}
       </div>
 
-      {tab === 'users' ? <UsersTab /> : <TemplatesTab />}
+      {tab === 'users' ? <UsersTab /> : tab === 'templates' ? <TemplatesTab /> : <FirmTab />}
     </div>
   )
 }
@@ -743,6 +745,105 @@ function TemplateForm({ draft, onCancel, onSaved }: {
       <div style={{ marginTop: 20, display: 'flex', gap: 8 }}>
         <button style={btn('primary')} disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save template'}</button>
         <button style={btn()} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════ FIRM SETTINGS (Phase 3a) ═══════════
+// Firm identity + operational route map live in app_config (migration 20240130)
+// instead of code. Identity fields are editable here (admin-only via RLS); the
+// property route map is shown read-only with a pointer to the config row.
+
+function FirmTab() {
+  const [firm, setFirm] = useState<FirmIdentity>(FIRM_DEFAULTS)
+  const [routeEntries, setRouteEntries] = useState<Array<{ kw: string; property_id: string; scope?: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const { data } = await supabase.from('app_config').select('key, value')
+          .in('key', ['firm.identity', 'properties.route_map'])
+        if (!alive) return
+        const byKey = Object.fromEntries(((data ?? []) as any[]).map(r => [r.key, r.value]))
+        setFirm({ ...FIRM_DEFAULTS, ...(byKey['firm.identity'] ?? {}) })
+        setRouteEntries((byKey['properties.route_map']?.entries ?? []) as any[])
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  async function save() {
+    setBusy(true); setMsg(null)
+    try {
+      const { data: auth } = await supabase.auth.getUser()
+      const { error } = await supabase.from('app_config').upsert({
+        key: 'firm.identity', value: firm as any,
+        updated_by: auth?.user?.id ?? null, updated_at: new Date().toISOString(),
+      })
+      if (error) throw new Error(error.message)
+      setMsg('Saved. Open sessions pick the new identity up on their next load.')
+    } catch (e) {
+      setMsg('Save failed: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const FIELDS: Array<{ k: keyof FirmIdentity; label: string; hint: string }> = [
+    { k: 'name',          label: 'Legal name',    hint: 'Report headers and formal references' },
+    { k: 'short',         label: 'Short name',    hint: 'Prose references in the UI' },
+    { k: 'wordmark',      label: 'Wordmark',      hint: 'Sidebar brand text' },
+    { k: 'report_footer', label: 'Report footer', hint: 'Confidentiality line on branded PDFs' },
+  ]
+
+  if (loading) return <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 640 }}>
+      <div>
+        <h2 style={{ fontFamily: SERIF, fontSize: 17, color: WILKOW, marginBottom: 4 }}>Firm identity</h2>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+          Stored as data (app_config), not code — edits here change UI chrome and report branding without a deploy.
+        </p>
+        {FIELDS.map(f => (
+          <div key={f.k} style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-faint)' }}>{f.label}</div>
+            <input value={firm[f.k]} onChange={e => setFirm({ ...firm, [f.k]: e.target.value })}
+              style={{ width: '100%', fontSize: 13, padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)' }} />
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>{f.hint}</div>
+          </div>
+        ))}
+        <button disabled={busy} onClick={() => void save()} style={btn('primary')}>{busy ? 'Saving…' : 'Save firm identity'}</button>
+        {msg && <div style={{ fontSize: 12, color: msg.startsWith('Save failed') ? 'var(--red)' : 'var(--text-muted)', marginTop: 8 }}>{msg}</div>}
+      </div>
+
+      <div>
+        <h2 style={{ fontFamily: SERIF, fontSize: 17, color: WILKOW, marginBottom: 4 }}>Property routing map</h2>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+          Keyword-to-property routing used by COI intake (certificate text) and the Drive importer
+          (folder tokens). Read-only here — edit the app_config row 'properties.route_map' to change it.
+        </p>
+        <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
+          <thead><tr style={{ color: 'var(--text-faint)', textAlign: 'left' }}>
+            <th style={{ padding: '3px 8px' }}>Keyword</th><th style={{ padding: '3px 8px' }}>Property</th><th style={{ padding: '3px 8px' }}>Scope</th>
+          </tr></thead>
+          <tbody>
+            {routeEntries.map((e, i) => (
+              <tr key={i} style={{ borderTop: '1px solid var(--border-1, rgba(128,128,128,0.15))' }}>
+                <td style={{ padding: '3px 8px', fontWeight: 600 }}>{e.kw}</td>
+                <td style={{ padding: '3px 8px', fontFamily: 'monospace', fontSize: 11 }}>{e.property_id}</td>
+                <td style={{ padding: '3px 8px', color: 'var(--text-muted)' }}>{e.scope ?? 'all'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )

@@ -8,12 +8,33 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// KM East = Midtown #0531, KM West = Midway #0532
-const PROPERTY_MAP: Record<string, string> = {
-  midtown:       '00000000-0000-0000-0000-000000000010',
-  midway:        '00000000-0000-0000-0000-000000000011',
-  consolidated:  '00000000-0000-0000-0000-000000000010', // default to East for consolidated
-  knightdale:    '00000000-0000-0000-0000-000000000010',
+// Folder-token -> property map. SOURCE OF TRUTH: app_config 'properties.route_map'
+// (entries scoped 'drive'|'all'); the literal below is only the fail-open fallback.
+// Authoritative KM identity (user-confirmed 2026-06-28): East = Midway Plantation
+// (#0532) = ...010; West = Midtown Commons (#0531) = ...011; Consolidated (#0530)
+// = ...012. The pre-Phase-3a hardcoded map had East/West INVERTED and pointed
+// consolidated/knightdale at East — this fallback carries the CORRECT mapping.
+const FALLBACK_PROPERTY_MAP: Record<string, string> = {
+  midway:        '00000000-0000-0000-0000-000000000010', // KM East (fka Midway Plantation)
+  midtown:       '00000000-0000-0000-0000-000000000011', // KM West (fka Midtown Commons)
+  consolidated:  '00000000-0000-0000-0000-000000000012', // Knightdale Marketplace (Consolidated)
+  knightdale:    '00000000-0000-0000-0000-000000000012',
+}
+
+async function loadPropertyMap(sb: any): Promise<Record<string, string>> {
+  try {
+    const { data } = await sb.from('app_config').select('value').eq('key', 'properties.route_map').maybeSingle()
+    const entries = (data?.value?.entries ?? []) as Array<{ kw?: string; property_id?: string; scope?: string }>
+    const out: Record<string, string> = {}
+    for (const e of entries) {
+      if (e.kw && e.property_id && (!e.scope || e.scope === 'all' || e.scope === 'drive')) {
+        out[String(e.kw).toLowerCase()] = String(e.property_id)
+      }
+    }
+    return Object.keys(out).length ? out : FALLBACK_PROPERTY_MAP
+  } catch {
+    return FALLBACK_PROPERTY_MAP
+  }
 }
 
 // ── Drive auth ────────────────────────────────────────────────
@@ -48,18 +69,24 @@ async function getAccessToken(sa: Record<string, string>): Promise<string> {
 }
 
 // ── Classify a filename ───────────────────────────────────────
-function classifyFile(name: string): {
+// Property tokens come from the loaded map (config-driven), longest-first so
+// multi-word phrases win over their prefixes in the alternation.
+function classifyFile(name: string, tokens: string[]): {
   category: string | null; propertyKey: string | null; year: number | null; month: number | null
 } {
   const lower = name.toLowerCase()
+  const tok = tokens
+    .slice().sort((a, b) => b.length - a.length)
+    .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')
   // "07.2025 Rent Roll - Midtown.xlsx"
-  let m = lower.match(/^(\d{2})\.(\d{4})\s+rent roll\s*[-–]\s*(midtown|midway|consolidated|knightdale)/)
+  let m = lower.match(new RegExp(`^(\\d{2})\\.(\\d{4})\\s+rent roll\\s*[-–]\\s*(${tok})`))
   if (m) return { category: 'rent_roll', propertyKey: m[3], month: +m[1], year: +m[2] }
   // "07.2025 Trial Balance - Midtown.xlsx"
-  m = lower.match(/^(\d{2})\.(\d{4})\s+trial balance\s*[-–]\s*(midtown|midway|consolidated|knightdale)/)
+  m = lower.match(new RegExp(`^(\\d{2})\\.(\\d{4})\\s+trial balance\\s*[-–]\\s*(${tok})`))
   if (m) return { category: 'trial_balance', propertyKey: m[3], month: +m[1], year: +m[2] }
   // "07.2025 (Trial Balance|Rent Roll) - Midtown.xlsx" alternate dash
-  m = lower.match(/^(\d{2})[.\-](\d{4})\s+(rent roll|trial balance)\s*[-–]\s*(midtown|midway|consolidated|knightdale)/)
+  m = lower.match(new RegExp(`^(\\d{2})[.\\-](\\d{4})\\s+(rent roll|trial balance)\\s*[-–]\\s*(${tok})`))
   if (m) return { category: m[3].replace(' ', '_'), propertyKey: m[4], month: +m[1], year: +m[2] }
 
   return { category: null, propertyKey: null, year: null, month: null }
@@ -237,9 +264,11 @@ serve(async (req) => {
 
     // ── catalog: scan Drive, classify, upsert into drive_file_catalog ──
     if (mode === 'catalog') {
+      const propMap = await loadPropertyMap(sb)
+      const tokens = Object.keys(propMap)
       const driveFiles = await listExcelFiles(folderId, token)
       const rows = driveFiles.map(f => {
-        const { category, propertyKey, year, month } = classifyFile(String(f.name))
+        const { category, propertyKey, year, month } = classifyFile(String(f.name), tokens)
         return {
           drive_id:         f.id,
           name:             f.name,
@@ -247,7 +276,7 @@ serve(async (req) => {
           file_size_bytes:  f.size ? parseInt(String(f.size)) : null,
           modified_at:      f.modifiedTime,
           file_category:    category,
-          property_id:      propertyKey ? (PROPERTY_MAP[propertyKey] ?? null) : null,
+          property_id:      propertyKey ? (propMap[propertyKey] ?? null) : null,
           period_year:      year,
           period_month:     month,
           import_status:    'pending',
