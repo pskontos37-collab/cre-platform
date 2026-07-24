@@ -43,6 +43,7 @@ export const PAGES: PageDef[] = [
   { key: 'clauses',     path: '/clauses',     label: 'Clauses',     icon: '§',  restricted: true, group: 'leasing' },
   { key: 'brokerage',   path: '/brokerage',   label: 'Brokerage',   icon: '🤝', group: 'leasing' },
   { key: 'documents',   path: '/documents',   label: 'Documents',   icon: '📁', group: 'leasing' },
+  { key: 'doccontrol',  path: '/doc-control', label: 'Document Control', icon: '🗄', restricted: true, group: 'leasing' },
   { key: 'mri',         path: '/mri-recon',   label: 'MRI Recon',   icon: '🔀', restricted: true, group: 'leasing' },
   { key: 'services',    path: '/services',    label: 'Service Agreements', icon: '🔧', group: 'operations' },
   { key: 'announcements', path: '/announcements', label: 'Announcements', icon: '📣', group: 'operations' },

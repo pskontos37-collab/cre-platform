@@ -24,6 +24,7 @@ import { AskPage } from './pages/AskPage'
 import { AbstractsPage } from './pages/AbstractsPage'
 import { ReviewCenterPage } from './pages/ReviewCenterPage'
 import { ImportsPage } from './pages/ImportsPage'
+import { DocControlPage } from './pages/DocControlPage'
 import { ClausesPage } from './pages/ClausesPage'
 import { DiligencePage } from './pages/DiligencePage'
 import { MriReconPage } from './pages/MriReconPage'
@@ -455,6 +456,18 @@ function AppRoutes() {
             <RequirePage pageKey="imports">
               <AppLayout>
                 <ImportsPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/doc-control"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="doccontrol">
+              <AppLayout>
+                <DocControlPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
