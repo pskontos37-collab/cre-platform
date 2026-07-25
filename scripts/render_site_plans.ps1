@@ -15,8 +15,33 @@ $repo = 'C:\Users\pskontos\Desktop\Software\cre-platform'
 $cfg = @{}; foreach ($ln in (Get-Content "$repo\.env" | Where-Object { $_ -match '=' })) { $a,$b = $ln -split '=',2; $cfg[$a.Trim()]=$b.Trim() }
 $BASE = $cfg['VITE_SUPABASE_URL']; $AK = $cfg['SUPABASE_SECRET_KEY']
 $enc = New-Object System.Text.UTF8Encoding($false); $TMP = "$env:TEMP\_sp_post.json"
-$qpdf = (Get-ChildItem -Path "$env:TEMP\claude" -Recurse -Filter qpdf.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-if (-not $qpdf) { throw 'qpdf.exe not found under the claude scratchpad tree' }
+# qpdf lookup: prefer the canonical siteplan_work tree that extract_site_plans.ps1
+# provisions (it downloads a portable qpdf there), then any Claude scratchpad copy,
+# then download it here. The old code searched ONLY $env:TEMP\claude, so this step
+# threw whenever no Claude session had seeded that tree - i.e. ALWAYS in the
+# unattended weekly task, and whenever step 4 found nothing to clip and so never
+# provisioned qpdf.
+$SP = "$env:TEMP\siteplan_work"; New-Item -ItemType Directory -Force $SP | Out-Null
+function Resolve-Qpdf {
+  foreach ($root in @($SP, "$env:TEMP\claude")) {
+    if (Test-Path -LiteralPath $root) {
+      $hit = Get-ChildItem -Path $root -Recurse -Filter qpdf.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($hit) { return $hit.FullName }
+    }
+  }
+  Write-Host '  downloading portable qpdf...'
+  $rel = Invoke-RestMethod 'https://api.github.com/repos/qpdf/qpdf/releases/latest' -UseBasicParsing
+  $asset = $rel.assets | Where-Object { $_.name -match 'msvc64\.zip$' } | Select-Object -First 1
+  if (-not $asset) { throw 'no qpdf windows zip found in latest release' }
+  $zip = "$SP\qpdf.zip"
+  Invoke-WebRequest $asset.browser_download_url -OutFile $zip -UseBasicParsing
+  Expand-Archive $zip -DestinationPath $SP -Force
+  $hit = Get-ChildItem -Path $SP -Recurse -Filter qpdf.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $hit) { throw 'qpdf.exe not found after extract' }
+  return $hit.FullName
+}
+$qpdf = Resolve-Qpdf
+Write-Output ("qpdf: {0}" -f $qpdf)
 
 Add-Type -AssemblyName System.Runtime.WindowsRuntime; Add-Type -AssemblyName System.Drawing
 $rt = [System.WindowsRuntimeSystemExtensions]
