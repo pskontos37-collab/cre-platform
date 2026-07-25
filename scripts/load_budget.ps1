@@ -1,12 +1,14 @@
 # load_budget.ps1 - loads the 2026 approved operating budgets into budget_lines.
 # Sources (account x month grids):
 #   Gateway + Magnolia: MRI BF_PROFORMD proforma (rows "NNNNNN  Account Name",
-#     months in cols 2-13; "- tenant (RBO) ..." detail rows are skipped).
+#     months in cols 2-13; "- tenant (RBO) ..." detail rows are skipped, and so
+#     are the "<entity> - Label" child detail rows described below).
 #   Knightdale: 'Summary- KM East' / 'Summary- KM West' tabs (name col 1,
 #     code col 2 as NNNN-NN, months cols 4-15). #N/A errors arrive as big
 #     negative ints from Value2 - only clean doubles are loaded.
 # Idempotent: deletes property+year rows, bulk-inserts via curl.
-param([int]$Year = 2026)
+# Pass -DryRun to parse and print per-property totals without writing anything.
+param([int]$Year = 2026, [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $cfg = @{}
@@ -44,7 +46,16 @@ try {
         $c1 = $vals[$r, 1]
         if ($c1 -eq $null) { continue }
         $s = ([string]$c1).Trim()
-        if ($s -notmatch '^(\d{6})\s+(.+)$') { continue }
+        # MRI renders CHILD DETAIL rows as "<entity number> - Label" - e.g. Magnolia is
+        # entity 102801 (scenario header "2026 - 102801 - BP26"), so its proforma carries
+        # rows like "102801 - Mulch" under the real account "571600  Other Landscaping
+        # Expense". Those children sum EXACTLY to their parent, so accepting them both
+        # double-counts the budget, and 102801 is an entity, not an account code.
+        # Real account rows are always "NNNNNN<2+ spaces>Account Name". Verified 2026-07-25:
+        # Gateway 72 rows, all wide-gap, 0 detail rows; Magnolia 58 wide-gap real accounts
+        # + 86 detail rows, every one prefixed 102801. The two guards agree exactly.
+        if ($s -match '^\d{6}\s+-\s') { continue }
+        if ($s -notmatch '^(\d{6})\s{2,}(.+)$') { continue }
         $code = $Matches[1]; $name = $Matches[2].Trim(); $mcol0 = 1   # months at cols 2..13
       } else {
         $c2 = $vals[$r, 2]
@@ -70,6 +81,17 @@ try {
     Write-Output ("parsed {0} [{1}]: {2} cells" -f (Split-Path $b.path -Leaf), $b.sheet, $rows.Count)
   }
 } finally { $excel.Quit(); [Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null }
+
+# Parse summary - print before any write so a bad parse is visible without touching the DB.
+foreach ($prop in $byProp.Keys) {
+  $cells = $byProp[$prop]
+  $codes = @($cells | ForEach-Object { $_.x.code } | Sort-Object -Unique)
+  $sum = ($cells | ForEach-Object { $_.x.amount } | Measure-Object -Sum).Sum
+  Write-Output ("summary {0}: {1} cells, {2} accounts, sum {3:N0}" -f $prop, $cells.Count, $codes.Count, $sum)
+  $rev = ($cells | Where-Object { $_.x.code -match '^4' } | ForEach-Object { $_.x.amount } | Measure-Object -Sum).Sum
+  if ($rev) { Write-Output ("   4xxx revenue sum: {0:N0}" -f $rev) }
+}
+if ($DryRun) { Write-Output 'DRY RUN - nothing written.'; return }
 
 foreach ($prop in $byProp.Keys) {
   $payload = @()
