@@ -29,6 +29,12 @@ $OVERRIDES = @{
   'the collection at riverpark' = 'California\The Collection Riverpark'
   'lincoln center'              = 'Texas\Lincoln Centre'
   'intl 3'                      = 'Texas\International Plaza III'
+  # Verified 2026-07-25 by audit_folder_links.ps1 + document evidence: the sheet's
+  # 'The Renaissance' (city listed as the Chicago METRO, 173,000 SF) is Renaissance
+  # Place in Highland Park IL - same state, in-metro, GLA matches, and all 32
+  # mirrored docs (HFF OM, Landmark Theatres / Dick Blick leases) describe that one
+  # property. Pinned so the link is explicit rather than inferred from a prefix.
+  'the renaissance'             = 'Illinois\Renaissance Place, Highland Park'
 }
 
 # cache state-folder subdirectory listings (one Get-ChildItem per state)
