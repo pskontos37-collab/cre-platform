@@ -45,7 +45,7 @@ $deals = & curl.exe -s "$BASE/rest/v1/pipeline_deals?select=id,name,state&limit=
 if($DealFilter){ $deals = @($deals | Where-Object { $_.name -like "*$DealFilter*" }) }
 Write-Output ("Deals: {0}" -f $deals.Count)
 
-$matched=0; $i=0
+$matched=0; $i=0; $ambiguous=0
 foreach($d in $deals){
   $i++
   $hit = $null
@@ -61,9 +61,24 @@ foreach($d in $deals){
     $nd = Norm $d.name
     if($nd -eq ''){ continue }
     $dirs = StateDirs $st
-    # exact norm match, else startswith either direction (shortest name wins)
+    # exact norm match wins outright
     $hit = $dirs | Where-Object { $_.norm -eq $nd } | Select-Object -First 1
-    if(-not $hit){ $hit = $dirs | Where-Object { $_.norm.StartsWith($nd) -or $nd.StartsWith($_.norm) } | Sort-Object { $_.norm.Length } | Select-Object -First 1 }
+    if(-not $hit){
+      # Fall back to a prefix match, but ONLY when it is UNAMBIGUOUS. A generic
+      # deal name is a prefix of several unrelated properties: deal 'The Village'
+      # (Austin) normalizes to 'village', which prefix-matched THREE Texas
+      # folders - Village at Allen | Village at Fairview | Village on the Parkway
+      # - and the old shortest-name-wins tiebreak silently linked it to Village
+      # at Allen (a Dallas suburb ~200mi away), then mirrored 36 wrong-property
+      # documents onto the deal. When several folders match, refuse to guess and
+      # say so; pin the right one with an $OVERRIDES entry above.
+      $cand = @($dirs | Where-Object { $_.norm.StartsWith($nd) -or $nd.StartsWith($_.norm) })
+      if($cand.Count -eq 1){ $hit = $cand[0] }
+      elseif($cand.Count -gt 1){
+        Write-Output ("  AMBIGUOUS - NOT linking '{0}': {1} folders match ({2}). Add an OVERRIDES entry to pin the right one." -f $d.name, $cand.Count, (($cand | ForEach-Object { $_.name }) -join ' | '))
+        $ambiguous++
+      }
+    }
   }
   if(-not $hit){ continue }
 
@@ -77,4 +92,4 @@ foreach($d in $deals){
   if([int]$code -lt 200 -or [int]$code -ge 300){ throw "PATCH $($d.name) failed HTTP $code" }
   $matched++
 }
-Write-Output ("Linked {0} of {1} deals to acquisitions folders." -f $matched, $deals.Count)
+Write-Output ("Linked {0} of {1} deals to acquisitions folders.{2}" -f $matched, $deals.Count, $(if($ambiguous){" $ambiguous skipped as AMBIGUOUS (see above)."}else{''}))
