@@ -1725,7 +1725,9 @@ function UwSourcesPanel({ deal, docs, refetchDocs, onChanged, createdBy }: {
     try {
       const r = await reextractUw(deal.id, row.kind, documentId)
       setMsg({ text: r.message, changed: r.changed })
-      if (r.changed) onChanged()
+      // refetch on a provenance-only stamp too: no value moved, but this panel's own
+      // source line did, so without this the confirmed source would not appear until reload
+      if (r.changed || r.stamped) onChanged()
     }
     catch (e) { setErr(e instanceof Error ? e.message : 'Re-extraction failed') }
     finally { setBusyKind(null) }
@@ -1758,7 +1760,7 @@ function UwSourcesPanel({ deal, docs, refetchDocs, onChanged, createdBy }: {
               <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>{row.drives}</div>
               <div style={srcCell}>
                 {row.cur
-                  ? <>From <b>{row.cur.title}</b> · {fmtDate(row.cur.extractedAt)}{row.cur.confidence ? ` · ${row.cur.confidence} confidence` : ''}</>
+                  ? <>{row.cur.confirmed ? 'Confirmed against' : 'From'} <b>{row.cur.title}</b> · {fmtDate(row.cur.extractedAt)}{row.cur.confidence ? ` · ${row.cur.confidence} confidence` : ''}</>
                   : row.hasValues
                     ? <>Values present — source predates tracking (see the [AI] comments in Discussion)</>
                     : <>Nothing extracted yet</>}

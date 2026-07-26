@@ -134,11 +134,19 @@ $deals = & curl.exe -s "$BASE/rest/v1/pipeline_deals?select=id,name,folder_path,
 if($DealFilter){ $deals = @($deals | Where-Object { $_.name -like "*$DealFilter*" }) }
 Write-Output ("Deals: {0}   mode: {1}" -f $deals.Count, $(if($Apply){'APPLY'}else{'DRY RUN'}))
 
-$filled=0; $commented=0; $noDocs=0
+$filled=0; $commented=0; $noDocs=0; $confirmedStamps=0
 foreach($d in $deals){
-  # fully-filled deals need nothing (also prevents duplicate audit comments on re-runs)
+  # Fully-filled deals normally need nothing (this also prevents duplicate audit comments
+  # on weekly re-runs). ONE exception: a deal whose metrics are already complete but which
+  # carries NO sources.metrics stamp reads "Values present - source predates tracking" in
+  # the app's Data sources panel FOREVER, because this script only ever stamped on a fill.
+  # Let those through once so the extraction can CONFIRM the stored values and stamp the
+  # provenance. Once stamped the deal is skipped again, so this costs one extraction per
+  # deal, not one per week.
   $blank = @($FIELDS | Where-Object { $null -eq $d.$_ })
-  if($blank.Count -eq 0){ continue }
+  $uwmCur = $d.underwriting_model
+  $stampedAlready = [bool]($uwmCur -and $uwmCur.sources -and $uwmCur.sources.metrics)
+  if($blank.Count -eq 0 -and $stampedAlready){ continue }
   $links = & curl.exe -s "$BASE/rest/v1/pipeline_deal_documents?deal_id=eq.$($d.id)&select=role,documents(id,title,file_name,file_path,storage_path,file_size_bytes)" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
   $pdf = @($links | Where-Object { $_.documents.file_name -match '\.pdf$' -and $_.documents.title -notmatch '^\xAB' })
 
@@ -202,9 +210,19 @@ foreach($d in $deals){
   }
   if($summaryBits.Count -eq 0){ Write-Output "    -> found nothing statable"; continue }
 
-  if($patch.Count -gt 0){
+  # $didFill must be captured BEFORE the stamp is added to $patch, because the stamp itself
+  # makes $patch non-empty and the audit-comment logic below keys off "did we write fields".
+  $didFill = ($patch.Count -gt 0)
+  # A CONFIRM-ONLY pass: nothing to write because the stored values already equal what this
+  # document states, so the document genuinely IS the source of those metrics and saying so
+  # is a verified claim, not a guess. Broker pro-forma is excluded ($writeFields is false for
+  # it) - those numbers stay quarantined and must never be presented as the deal's source.
+  $confirmOnly = (-not $didFill) -and $writeFields
+
+  if($didFill -or $confirmOnly){
     # provenance for the app's Data sources panel: which file drove the metrics.
     # documentId resolves when the winning attempt had a single doc (or a title match).
+    # NOTE: $att still holds the WINNING attempt - we only get here after the loop `break`.
     $srcDocId = $null
     if(@($att.cand).Count -eq 1){ $srcDocId = $att.cand[0].documents.id }
     else {
@@ -214,23 +232,37 @@ foreach($d in $deals){
     $uwm = $d.underwriting_model
     if($null -eq $uwm){ $uwm = [pscustomobject]@{} }
     if($null -eq $uwm.sources){ $uwm | Add-Member -NotePropertyName sources -NotePropertyValue ([pscustomobject]@{}) -Force }
-    $uwm.sources | Add-Member -NotePropertyName metrics -NotePropertyValue ([pscustomobject]@{ title=[string]$(if($r.source_file){$r.source_file}else{'internal model'}); documentId=$srcDocId; extractedAt=(Get-Date).ToUniversalTime().ToString('o'); confidence=[string]$r.confidence }) -Force
+    $stampObj = [pscustomobject]@{
+      title       = [string]$(if($r.source_file){$r.source_file}else{'internal model'})
+      documentId  = $srcDocId
+      extractedAt = (Get-Date).ToUniversalTime().ToString('o')
+      confidence  = [string]$r.confidence
+    }
+    # 'confirmed' lets the panel say the values were VERIFIED against this source rather
+    # than freshly written from it - an honest distinction for a backfilled stamp.
+    if($confirmOnly){ $stampObj | Add-Member -NotePropertyName confirmed -NotePropertyValue $true -Force }
+    $uwm.sources | Add-Member -NotePropertyName metrics -NotePropertyValue $stampObj -Force
     $patch['underwriting_model'] = $uwm
-    $patch['updated_at'] = (Get-Date).ToUniversalTime().ToString('o')
+    # A confirm-only pass changes no reported number, so it deliberately does NOT bump
+    # updated_at - otherwise the one-time backfill would make every already-complete deal
+    # look freshly re-underwritten on the board.
+    if($didFill){ $patch['updated_at'] = (Get-Date).ToUniversalTime().ToString('o') }
     $pj = $patch | ConvertTo-Json -Depth 20   # the model jsonb is deeply nested; default depth 2 would truncate it
     [System.IO.File]::WriteAllText($TMP,$pj,$enc)
     $pc = & curl.exe -s -o NUL -w "%{http_code}" -X PATCH "$BASE/rest/v1/pipeline_deals?id=eq.$($d.id)" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP"
     if([int]$pc -lt 200 -or [int]$pc -ge 300){ Write-Output "    !! PATCH failed HTTP $pc"; continue }
-    $filled++
+    if($didFill){ $filled++ } else { $confirmedStamps++ }
   }
 
   # audit-trail comment. Three cases:
   #   filled            -> post the fill record
-  #   internal, no diff -> the fields already held these values; nothing to say
+  #   internal, no diff -> the fields already held these values; nothing to say (the
+  #                        provenance stamp above already records that we confirmed them,
+  #                        and a comment here would spam the thread on every re-run)
   #   broker-only       -> post ONCE (skip if an [AI] comment already exists)
   $srcLine = "{0}{1}" -f $r.source_file, $(if($r.source_page){", p.$($r.source_page)"}else{''})
   $bodyTxt = $null
-  if($patch.Count -gt 0){
+  if($didFill){
     $bodyTxt = "[AI] Underwriting auto-filled from $($(if($isBroker){'BROKER PRO-FORMA'}else{'internal model'})): $srcLine (confidence: $($r.confidence)). Values: $($summaryBits -join ', '). $(if($r.note){$r.note+' '})Review on the Underwriting tab before relying."
   } elseif($isBroker) {
     $prior = & curl.exe -s "$BASE/rest/v1/pipeline_deal_comments?deal_id=eq.$($d.id)&body=like.%5BAI%5D*&select=id&limit=1" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
@@ -244,6 +276,6 @@ foreach($d in $deals){
     & curl.exe -s -o NUL -X POST "$BASE/rest/v1/pipeline_deal_comments" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP" | Out-Null
     $commented++
   }
-  Write-Output ("    -> {0} [{1}] {2}" -f $(if($patch.Count){'FILLED ' + (($patch.Keys | Where-Object { $_ -ne 'updated_at' } | Sort-Object) -join ',')}elseif($isBroker){'broker pro-forma (comment-only)'}else{'no change (values already set)'}), $r.confidence, $srcLine)
+  Write-Output ("    -> {0} [{1}] {2}" -f $(if($didFill){'FILLED ' + (($patch.Keys | Where-Object { $_ -notin @('updated_at','underwriting_model') } | Sort-Object) -join ',')}elseif($isBroker){'broker pro-forma (comment-only)'}else{'no change (values already set) - source CONFIRMED + stamped'}), $r.confidence, $srcLine)
 }
-Write-Output ("SUMMARY: {0} deals filled, {1} audit comments, {2} without candidate docs." -f $filled, $commented, $noDocs)
+Write-Output ("SUMMARY: {0} deals filled, {1} source stamps confirmed on already-complete deals, {2} audit comments, {3} without candidate docs." -f $filled, $confirmedStamps, $commented, $noDocs)

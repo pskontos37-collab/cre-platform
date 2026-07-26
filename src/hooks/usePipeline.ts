@@ -132,7 +132,10 @@ export interface UnderwritingModel {
   sources?: UwSources
 }
 export interface UwScenario { name: string; model: UnderwritingModel; savedAt?: string }
-export interface UwSource { title: string; documentId?: string | null; extractedAt: string; confidence?: string | null; broker?: boolean }
+// confirmed = the extraction reproduced values that were ALREADY stored, so this document is
+// verified as their source rather than the thing that just wrote them (see extract_underwriting
+// / extract_t12 confirm-no-change stamping). Shown differently in the Data sources panel.
+export interface UwSource { title: string; documentId?: string | null; extractedAt: string; confidence?: string | null; broker?: boolean; confirmed?: boolean }
 export interface UwSources { metrics?: UwSource; rentRoll?: UwSource; opex?: UwSource }
 export interface UwPromoteTier { hurdleIrr: number | null; gpPct: number }
 export interface UwPromote { lpEquityPct: number; prefRate: number; tiers: UwPromoteTier[] }
@@ -689,7 +692,7 @@ export function useDealDocuments(dealId: string | null) {
  *  columns), 'rentroll' (tenant lease lines), 'opex' (T-12 recoverable split).
  *  Overwrites the current values (the fn snapshots the model as a scenario
  *  first) and stamps underwriting_model.sources. Returns the result message. */
-export async function reextractUw(dealId: string, kind: 'metrics' | 'rentroll' | 'opex', documentId?: string): Promise<{ changed: boolean; message: string }> {
+export async function reextractUw(dealId: string, kind: 'metrics' | 'rentroll' | 'opex', documentId?: string): Promise<{ changed: boolean; message: string; stamped?: boolean }> {
   const { data, error } = await supabase.functions.invoke('uw-reextract', {
     body: { dealId, kind, documentId, force: true },
   })
@@ -706,9 +709,9 @@ export async function reextractUw(dealId: string, kind: 'metrics' | 'rentroll' |
     } catch { /* body absent, already consumed, or not JSON */ }
     throw new Error(detail ?? error.message)
   }
-  const d = data as { error?: string; changed?: boolean; message?: string } | null
+  const d = data as { error?: string; changed?: boolean; message?: string; stamped?: boolean } | null
   if (d?.error) throw new Error(d.error)
-  return { changed: d?.changed === true, message: d?.message ?? 'Done' }
+  return { changed: d?.changed === true, message: d?.message ?? 'Done', stamped: d?.stamped === true }
 }
 
 /** Upload a document to a deal: stores under pipeline/<dealId>/<role>/, files a

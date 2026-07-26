@@ -93,12 +93,23 @@ $deals = & curl.exe -s "$BASE/rest/v1/pipeline_deals?select=$sel&$stageFilter&li
 if($DealFilter){ $deals = @($deals | Where-Object { $_.name -like "*$DealFilter*" }) }
 Write-Output ("Tenant-model deals scanned: {0}   mode: {1}" -f $deals.Count, $(if($Apply){'APPLY'}else{'DRY RUN'}))
 
-$done=0; $skip=0; $noStmt=0; $fail=0; $noModel=0
+$done=0; $skip=0; $noStmt=0; $fail=0; $noModel=0; $confirmedStamps=0; $differed=0
 foreach($d in $deals){
   $uwm = $d.underwriting_model
   if(-not $uwm -or $uwm.mode -ne 'tenant'){ Write-Output ("  {0}: no tenant model (run extract_rent_roll first)" -f $d.name); $noModel++; continue }
   $curRec = $(if($uwm.opex -and $null -ne $uwm.opex.recoverableOpexPsf){[double]$uwm.opex.recoverableOpexPsf}else{0})
-  if(-not $Force -and $curRec -gt 0){ Write-Output ("  {0}: recoverable OpEx already set (${1}/sf)" -f $d.name, $curRec); $skip++; continue }
+  # Already-set deals normally need nothing. ONE exception: an OpEx split that is set but
+  # carries NO sources.opex stamp makes the app's Data sources panel read "source predates
+  # tracking" forever, because this script only ever stamped on a write. Let those through
+  # once so the statement can CONFIRM the stored split and stamp its provenance; once
+  # stamped the deal is skipped again, so this costs one extraction per deal, not one a week.
+  $opexStamped = [bool]($uwm.sources -and $uwm.sources.opex)
+  $confirmPass = $false
+  if(-not $Force -and $curRec -gt 0){
+    if($opexStamped){ Write-Output ("  {0}: recoverable OpEx already set (${1}/sf)" -f $d.name, $curRec); $skip++; continue }
+    $confirmPass = $true
+    Write-Output ("  {0}: OpEx set (${1}/sf) but unstamped - confirming against the statement" -f $d.name, $curRec)
+  }
 
   # prefer a T-12/operating statement; fall back to a financials doc that looks like one
   $os = & curl.exe -s "$BASE/rest/v1/pipeline_deal_documents?deal_id=eq.$($d.id)&role=eq.operating_statement&select=documents(id,title,file_name,storage_path,file_size_bytes)" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
@@ -141,20 +152,50 @@ foreach($d in $deals){
   if($taxPsf -gt $recPsf){ $taxPsf = $recPsf }
   $ctrlPsf = [math]::Round([math]::Max(0.0, $recPsf - $taxPsf), 2)
 
-  if($null -eq $uwm.opex){ $uwm | Add-Member -NotePropertyName opex -NotePropertyValue ([pscustomobject]@{ opexGrowthPct=0.03; generalVacancyPct=0; creditLossPct=0.005; capitalReservePsf=0.25; otherIncomePsf=0 }) -Force }
-  $uwm.opex | Add-Member -NotePropertyName recoverableOpexPsf -NotePropertyValue $ctrlPsf -Force
-  $uwm.opex | Add-Member -NotePropertyName taxInsurancePsf -NotePropertyValue $taxPsf -Force
-  if($nonPsf -gt 0){ $uwm.opex | Add-Member -NotePropertyName nonRecoverableOpexPsf -NotePropertyValue $nonPsf -Force }
+  # A CONFIRM pass must never silently restate the analyst's numbers. Stamp provenance only
+  # when the statement REPRODUCES what is already stored; if it disagrees, the stored split
+  # came from somewhere else and naming this document as its source would be false - so leave
+  # the values alone, skip the stamp, and say so.
+  if($confirmPass){
+    $curCtrl = $(if($null -ne $uwm.opex.recoverableOpexPsf){[double]$uwm.opex.recoverableOpexPsf}else{-1})
+    $curTax  = $(if($null -ne $uwm.opex.taxInsurancePsf){[double]$uwm.opex.taxInsurancePsf}else{0})
+    if([math]::Abs($curCtrl - $ctrlPsf) -gt 0.011 -or [math]::Abs($curTax - $taxPsf) -gt 0.011){
+      Write-Output ("    -> DIFFERS from stored (stored controllable {0}/sf + tax/ins {1}/sf vs statement {2}/sf + {3}/sf) - values left alone and NOT stamped; re-run with -Force to overwrite" -f $curCtrl, $curTax, $ctrlPsf, $taxPsf)
+      $differed++
+      continue
+    }
+  }
 
-  # provenance: stamp which statement drove the OpEx split (Data sources panel)
+  # On a confirm pass the values are already equal to within a cent, so they are deliberately
+  # NOT rewritten - only the provenance stamp is added.
+  if(-not $confirmPass){
+    if($null -eq $uwm.opex){ $uwm | Add-Member -NotePropertyName opex -NotePropertyValue ([pscustomobject]@{ opexGrowthPct=0.03; generalVacancyPct=0; creditLossPct=0.005; capitalReservePsf=0.25; otherIncomePsf=0 }) -Force }
+    $uwm.opex | Add-Member -NotePropertyName recoverableOpexPsf -NotePropertyValue $ctrlPsf -Force
+    $uwm.opex | Add-Member -NotePropertyName taxInsurancePsf -NotePropertyValue $taxPsf -Force
+    if($nonPsf -gt 0){ $uwm.opex | Add-Member -NotePropertyName nonRecoverableOpexPsf -NotePropertyValue $nonPsf -Force }
+  }
+
+  # provenance: stamp which statement drove the OpEx split (Data sources panel).
+  # 'confirmed' marks a stamp that VERIFIED existing values rather than writing them.
   if($null -eq $uwm.sources){ $uwm | Add-Member -NotePropertyName sources -NotePropertyValue ([pscustomobject]@{}) -Force }
-  $uwm.sources | Add-Member -NotePropertyName opex -NotePropertyValue ([pscustomobject]@{ title=[string]$doc.title; documentId=[string]$doc.id; extractedAt=(Get-Date).ToUniversalTime().ToString('o'); confidence=[string]$r.confidence }) -Force
+  $opexStamp = [pscustomobject]@{ title=[string]$doc.title; documentId=[string]$doc.id; extractedAt=(Get-Date).ToUniversalTime().ToString('o'); confidence=[string]$r.confidence }
+  if($confirmPass){ $opexStamp | Add-Member -NotePropertyName confirmed -NotePropertyValue $true -Force }
+  $uwm.sources | Add-Member -NotePropertyName opex -NotePropertyValue $opexStamp -Force
 
-  $patch = @{ underwriting_model=$uwm; updated_at=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 20
+  # a confirm pass changes no reported number, so it does not bump updated_at
+  $patchObj = @{ underwriting_model=$uwm }
+  if(-not $confirmPass){ $patchObj['updated_at'] = (Get-Date).ToUniversalTime().ToString('o') }
+  $patch = $patchObj | ConvertTo-Json -Depth 20
   [System.IO.File]::WriteAllText($TMP,$patch,$enc)
   $pc = & curl.exe -s -o NUL -w "%{http_code}" -X PATCH "$BASE/rest/v1/pipeline_deals?id=eq.$($d.id)" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP"
   if([int]$pc -lt 200 -or [int]$pc -ge 300){ Write-Output "    !! PATCH failed HTTP $pc"; $fail++; continue }
   $impliedRec = [math]::Round($recPsf * $gla, 0)
+  if($confirmPass){
+    Write-Output ("    -> CONFIRMED stored split against the statement (controllable {0}/sf + tax/ins {1}/sf) - provenance stamped, no value changed [{2}]" -f $ctrlPsf, $taxPsf, $r.confidence)
+    $confirmedStamps++
+    # no audit comment: nothing about the deal's numbers changed
+    continue
+  }
   Write-Output ("    -> SET controllable {0}/sf + tax/ins {1}/sf (recoverable {2}/sf total), non-recov {3}/sf (GLA {4:N0}; ~{5:N0} full-NNN recoveries) [{6}]" -f $ctrlPsf, $taxPsf, $recPsf, $nonPsf, $gla, $impliedRec, $r.confidence)
   $done++
 
@@ -168,4 +209,4 @@ foreach($d in $deals){
     & curl.exe -s -o NUL -X POST "$BASE/rest/v1/pipeline_deal_comments" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=minimal" --data-binary "@$TMP" | Out-Null
   }
 }
-Write-Output ("SUMMARY: {0} set, {1} already set, {2} no statement, {3} no tenant model, {4} failed." -f $done, $skip, $noStmt, $noModel, $fail)
+Write-Output ("SUMMARY: {0} set, {1} confirmed + stamped (already set, unstamped), {2} statement disagreed with stored (left alone), {3} already set + stamped, {4} no statement, {5} no tenant model, {6} failed." -f $done, $confirmedStamps, $differed, $skip, $noStmt, $noModel, $fail)

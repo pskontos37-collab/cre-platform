@@ -135,7 +135,7 @@ function withPreSnapshot(uwm: any, today: string): any[] {
   return [...scen, { name, model: { ...uwm, scenarios: undefined, sources: undefined }, savedAt: new Date().toISOString() }]
 }
 
-function sourceStamp(doc: DocInfo, confidence: unknown, broker?: boolean) {
+function sourceStamp(doc: DocInfo, confidence: unknown, broker?: boolean, confirmed?: boolean) {
   const s: Record<string, unknown> = {
     title: doc.title ?? doc.file_name ?? 'document',
     documentId: doc.id,
@@ -143,6 +143,9 @@ function sourceStamp(doc: DocInfo, confidence: unknown, broker?: boolean) {
     confidence: typeof confidence === 'string' ? confidence : null,
   }
   if (broker) s.broker = true
+  // confirmed = this document REPRODUCED values already on the deal, so it is verified as
+  // their source rather than the thing that just wrote them.
+  if (confirmed) s.confirmed = true
   return s
 }
 
@@ -152,8 +155,11 @@ async function postComment(sb: SupabaseClient, dealId: string, body: string): Pr
 
 /** Outcome of one re-extraction. `changed: false` = a legitimate no-op (nothing
  *  stated, values identical, prerequisite missing) — reported honestly rather
- *  than dressed up as a success. */
-interface Outcome { changed: boolean; message: string }
+ *  than dressed up as a success.
+ *  `stamped: true` = no value changed but provenance WAS recorded, because the
+ *  document reproduced what the deal already held. The caller still needs to
+ *  refetch (the sources panel changed), but this is not a "changed" success. */
+interface Outcome { changed: boolean; message: string; stamped?: boolean }
 
 // ── kind: metrics (ports extract_underwriting.ps1) ────────────────────────────
 
@@ -202,7 +208,19 @@ async function runMetrics(sb: SupabaseClient, key: string, deal: DealRow, doc: D
     await postComment(sb, deal.id, `[AI] Return metrics found in BROKER PRO-FORMA only (${srcLine}, confidence: ${r.confidence}): ${summaryBits.join(', ')}. NOT written to the deal — broker numbers are quarantined; enter them on the Underwriting tab if appropriate. (re-extract requested ${by} on ${today})`)
     return { changed: false, message: `'${doc.title}' is a broker document — its pro-forma numbers were quarantined to a Discussion comment, not written to the deal.` }
   }
-  if (!Object.keys(patch).length) return { changed: false, message: `Values in '${doc.title}' match what is already on the deal. Nothing changed.` }
+  // Values already match. Nothing to write — but this document demonstrably IS the source of
+  // the metrics on the deal, so record that instead of leaving the Data sources panel saying
+  // "source predates tracking" forever. This is the in-app half of the same confirm-no-change
+  // stamping done by extract_underwriting.ps1; without it, a deal whose metrics are already
+  // complete could never acquire a stamp by any route.
+  if (!Object.keys(patch).length) {
+    const uwm0 = deal.underwriting_model ?? {}
+    const { error: sErr2 } = await sb.from('pipeline_deals')
+      .update({ underwriting_model: { ...uwm0, sources: { ...(uwm0.sources ?? {}), metrics: sourceStamp(doc, r.confidence, false, true) } } })
+      .eq('id', deal.id)   // deliberately no updated_at bump: no reported number changed
+    if (sErr2) throw new Error('DB update failed — ' + sErr2.message)
+    return { changed: false, stamped: true, message: `Values in '${doc.title}' match what is already on the deal. Nothing changed — recorded it as the confirmed source.` }
+  }
 
   // stamp provenance on the model jsonb (stub {sources} if no model exists yet)
   const uwm = deal.underwriting_model ?? {}
