@@ -13,6 +13,53 @@ import { supabase } from '../lib/supabase'
 // (scripts/backfill_doc_hashes.ps1 + SQL derivations). AI classification of
 // doc_subtype / families is a separate, flagged pass.
 
+// ── Agreement families ───────────────────────────────────────────────────────
+// document_relationships holds typed edges (today: 'amends') produced by
+// scripts/classify_doc_families.ps1. Each edge carries its own derivation in
+// `note`, and the badge below is read OUT of that note rather than invented here:
+//   'DOCUMENT-CONFIRMED'            the amendment's recital dates its lease to
+//                                   the base document we picked
+//   'document-corroborated'         base resolved FROM the recital when the
+//                                   filename party did not match (successor chain)
+//   'No document text available'    filename-derived only, no text layer to check
+//   'DATE DISPUTE'                  same instrument, the two dates disagree
+// An edge is a PROPOSAL, not a verification -- the full note is always shown so a
+// reviewer can see exactly what it rests on. Never render these as "verified".
+interface EdgeRow {
+  from_document_id: string
+  to_document_id: string
+  relationship: string
+  note: string | null
+}
+interface FamilyMember {
+  id: string
+  name: string
+  date: string | null
+  grade: 'confirmed' | 'recital' | 'filename' | 'unknown'
+  dispute: boolean
+  note: string | null
+}
+
+const GRADE_LABEL: Record<string, string> = {
+  confirmed: 'document-confirmed',
+  recital: 'recital-resolved',
+  filename: 'filename only',
+  unknown: 'basis not recorded',
+}
+const GRADE_COLOR: Record<string, string> = {
+  confirmed: 'var(--green, #22c55e)',
+  recital: 'var(--green, #22c55e)',
+  filename: 'var(--amber, #f59e0b)',
+  unknown: 'var(--text-muted)',
+}
+function gradeOf(note: string | null): FamilyMember['grade'] {
+  if (!note) return 'unknown'
+  if (note.indexOf('No document text available') >= 0) return 'filename'
+  if (note.indexOf('document-corroborated') >= 0) return 'recital'
+  if (note.indexOf('DOCUMENT-CONFIRMED') >= 0) return 'confirmed'
+  return 'unknown'
+}
+
 interface Rollup {
   property_id: string | null
   total: number
@@ -57,6 +104,18 @@ const STATUS_COLOR: Record<string, string> = {
   superseded: 'var(--text-muted)',
   irrelevant: 'var(--text-muted)',
 }
+// The firm's filing convention puts the document date in the filename --
+// "AMD-2nd-Dave & Busters (1-23-13).pdf". The register's date columns are sparse,
+// so this is used ONLY to order a chain, never presented as the document's date.
+function fnameDate(name: string): string | null {
+  const m = /\((\d{1,2})[-.](\d{1,2})[-.](\d{2,4})\)/.exec(name)
+  if (!m) return null
+  let yr = Number(m[3])
+  if (yr < 100) yr = yr >= 40 ? 1900 + yr : 2000 + yr
+  const mo = Number(m[1]), dy = Number(m[2])
+  if (mo < 1 || mo > 12 || dy < 1 || dy > 31) return null
+  return `${String(yr).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(dy).padStart(2, '0')}`
+}
 const fmtN = (n: unknown) => (n == null ? '—' : Number(n).toLocaleString('en-US'))
 const fmtMB = (b: number | null) => (b == null ? '—' : `${(b / 1048576).toFixed(1)} MB`)
 const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : '—')
@@ -67,9 +126,16 @@ const td: CSSProperties = { padding: '4px 8px', whiteSpace: 'nowrap' }
 export function DocControlPage() {
   const [rollups, setRollups] = useState<Rollup[]>([])
   const [propNames, setPropNames] = useState<Record<string, string>>({})
-  const [tab, setTab] = useState<'overview' | 'duplicates' | 'register'>('overview')
+  const [tab, setTab] = useState<'overview' | 'families' | 'duplicates' | 'register'>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // families tab
+  const [edges, setEdges] = useState<EdgeRow[]>([])
+  const [edgeDocs, setEdgeDocs] = useState<Record<string, DocRow>>({})
+  const [famLoaded, setFamLoaded] = useState(false)
+  const [famQ, setFamQ] = useState('')
+  const [famOpen, setFamOpen] = useState<Record<string, boolean>>({})
 
   // duplicates tab
   const [dupRows, setDupRows] = useState<DocRow[]>([])
@@ -102,6 +168,31 @@ export function DocControlPage() {
     }
   }, [])
   useEffect(() => { void loadOverview() }, [loadOverview])
+
+  const loadFamilies = useCallback(async () => {
+    try {
+      const { data, error: e } = await supabase.from('document_relationships')
+        .select('from_document_id, to_document_id, relationship, note')
+        .limit(2000)
+      if (e) throw new Error(e.message)
+      const rows = (data ?? []) as EdgeRow[]
+      const ids = [...new Set(rows.flatMap(r => [r.from_document_id, r.to_document_id]))]
+      const map: Record<string, DocRow> = {}
+      // chunk the id lookup: a single .in() with hundreds of uuids blows the URL length
+      for (let i = 0; i < ids.length; i += 150) {
+        const { data: ds } = await supabase.from('documents')
+          .select('id, title, file_name, doc_type, doc_subtype, processing_status, ocr_quality, page_count, content_sha256, duplicate_group_id, effective_date, stated_date, is_indexed, property_id, file_size_bytes')
+          .in('id', ids.slice(i, i + 150))
+        for (const d of ((ds ?? []) as DocRow[])) map[d.id] = d
+      }
+      setEdges(rows)
+      setEdgeDocs(map)
+      setFamLoaded(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+  useEffect(() => { if (tab === 'families' && !famLoaded) void loadFamilies() }, [tab, famLoaded, loadFamilies])
 
   const loadDups = useCallback(async () => {
     try {
@@ -154,6 +245,48 @@ export function DocControlPage() {
     return z
   }, [rollups])
 
+  // A family is keyed by its BASE lease, and members are ordered by document date
+  // so the LAST one is the currently governing instrument. That ordering is the
+  // whole point of the surface: "which amendment governs now" should be a glance,
+  // not an archaeology dig through a folder.
+  const families = useMemo(() => {
+    const byBase = new Map<string, FamilyMember[]>()
+    for (const ed of edges) {
+      if (ed.relationship !== 'amends') continue
+      const doc = edgeDocs[ed.from_document_id]
+      const arr = byBase.get(ed.to_document_id) ?? []
+      arr.push({
+        id: ed.from_document_id,
+        name: doc?.file_name ?? doc?.title ?? ed.from_document_id.slice(0, 8),
+        date: doc?.stated_date ?? doc?.effective_date ?? null,
+        grade: gradeOf(ed.note),
+        dispute: !!ed.note && ed.note.indexOf('DATE DISPUTE') >= 0,
+        note: ed.note,
+      })
+      byBase.set(ed.to_document_id, arr)
+    }
+    const out = [...byBase.entries()].map(([baseId, members]) => {
+      const base = edgeDocs[baseId]
+      // the register's date columns are sparse, so fall back to the date the firm
+      // put in the filename -- "(6-4-20)" -- purely for ordering
+      const key = (m: FamilyMember) => m.date ?? fnameDate(m.name) ?? '9999-99-99'
+      const sorted = [...members].sort((a, b) => key(a).localeCompare(key(b)))
+      return {
+        baseId,
+        baseName: base?.file_name ?? base?.title ?? baseId.slice(0, 8),
+        propertyId: base?.property_id ?? null,
+        members: sorted,
+        disputes: sorted.filter(m => m.dispute).length,
+        unconfirmed: sorted.filter(m => m.grade === 'filename' || m.grade === 'unknown').length,
+      }
+    })
+    const q = famQ.trim().toLowerCase()
+    const filtered = q
+      ? out.filter(f => f.baseName.toLowerCase().indexOf(q) >= 0 || f.members.some(m => m.name.toLowerCase().indexOf(q) >= 0))
+      : out
+    return filtered.sort((a, b) => b.members.length - a.members.length || a.baseName.localeCompare(b.baseName))
+  }, [edges, edgeDocs, famQ])
+
   const dupGroups = useMemo(() => {
     const m = new Map<string, DocRow[]>()
     for (const d of dupRows) {
@@ -184,7 +317,7 @@ export function DocControlPage() {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
         <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Document Control</h2>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>register accountability — every file known, nothing silently missing</span>
-        <button onClick={() => { setDupLoaded(false); void loadOverview(); if (tab === 'register') void loadRegister() }}
+        <button onClick={() => { setDupLoaded(false); setFamLoaded(false); void loadOverview(); if (tab === 'register') void loadRegister() }}
           style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>↻</button>
       </div>
 
@@ -200,12 +333,12 @@ export function DocControlPage() {
       </div>
 
       <div style={{ display: 'flex', gap: 6 }}>
-        {(['overview', 'duplicates', 'register'] as const).map(t => (
+        {(['overview', 'families', 'duplicates', 'register'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             style={{ fontSize: 12, fontWeight: tab === t ? 700 : 400, padding: '5px 14px', borderRadius: 6, cursor: 'pointer',
                      border: `1px solid ${tab === t ? 'var(--accent)' : 'var(--border-2)'}`,
                      background: tab === t ? 'var(--surface-2)' : 'transparent', color: 'var(--text)' }}>
-            {t === 'overview' ? 'Overview' : t === 'duplicates' ? `Duplicates` : 'Register'}
+            {t === 'overview' ? 'Overview' : t === 'families' ? 'Agreement families' : t === 'duplicates' ? `Duplicates` : 'Register'}
           </button>
         ))}
       </div>
@@ -278,6 +411,79 @@ export function DocControlPage() {
           {dupLoaded && dupRows.length >= 2000 && (
             <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Showing the first 2,000 duplicate rows.</div>
           )}
+        </div>
+      )}
+
+      {tab === 'families' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, maxWidth: 900 }}>
+            Amendment chains from <code>document_relationships</code>, newest last, so the bottom row of each
+            chain is the instrument that currently governs. Edges are <b>proposals</b> derived by script, not
+            human verifications: each shows how it was resolved, and the full derivation is one click away.
+            Amendments that could not be tied to a base lease are deliberately absent rather than guessed at.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input value={famQ} onChange={e => setFamQ(e.target.value)} placeholder="filter by tenant or file name"
+              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)', minWidth: 240 }} />
+            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+              {!famLoaded ? 'Loading…' : `${fmtN(families.length)} chains · ${fmtN(edges.length)} edges`}
+            </span>
+            {famLoaded && families.some(f => f.disputes > 0) && (
+              <span style={{ fontSize: 11, color: 'var(--amber, #f59e0b)', fontWeight: 600 }}>
+                {families.reduce((n, f) => n + f.disputes, 0)} date dispute(s)
+              </span>
+            )}
+          </div>
+
+          {famLoaded && families.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              No agreement-family edges recorded. Run scripts/classify_doc_families.ps1 -Apply to populate.
+            </div>
+          )}
+
+          {families.map(f => (
+            <div key={f.baseId} style={{ border: '1px solid var(--border-2)', borderRadius: 8, padding: '8px 12px' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-faint)', minWidth: 130 }}>{propName(f.propertyId)}</span>
+                <b style={{ fontSize: 12 }}>{f.baseName}</b>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  base lease · {f.members.length} amendment{f.members.length === 1 ? '' : 's'}
+                </span>
+                {f.disputes > 0 && (
+                  <span style={{ fontSize: 10, color: 'var(--amber, #f59e0b)', fontWeight: 700 }}>{f.disputes} date dispute</span>
+                )}
+                {f.unconfirmed > 0 && (
+                  <span style={{ fontSize: 10, color: 'var(--amber, #f59e0b)' }}>{f.unconfirmed} not document-checked</span>
+                )}
+              </div>
+              {f.members.map((m, i) => {
+                const governing = i === f.members.length - 1
+                const key = `${f.baseId}:${m.id}`
+                return (
+                  <div key={m.id} style={{ marginTop: 3, paddingLeft: 12, borderLeft: '2px solid var(--border-2)' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 12 }}>
+                      <span style={{ color: 'var(--text-faint)', fontSize: 11, minWidth: 22 }}>{i + 1}.</span>
+                      <span style={{ fontWeight: governing ? 700 : 400 }}>{m.name}</span>
+                      {governing && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)' }}>GOVERNING</span>
+                      )}
+                      <span style={{ fontSize: 10, color: GRADE_COLOR[m.grade] }}>{GRADE_LABEL[m.grade]}</span>
+                      {m.dispute && <span style={{ fontSize: 10, color: 'var(--amber, #f59e0b)', fontWeight: 700 }}>date dispute</span>}
+                      <button onClick={() => setFamOpen(o => ({ ...o, [key]: !o[key] }))}
+                        style={{ fontSize: 10, padding: '0 6px', borderRadius: 4, border: '1px solid var(--border-2)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                        {famOpen[key] ? 'hide basis' : 'basis'}
+                      </button>
+                    </div>
+                    {famOpen[key] && (
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'normal', padding: '3px 0 5px 30px', lineHeight: 1.5 }}>
+                        {m.note ?? 'No derivation recorded on this edge.'}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
         </div>
       )}
 
