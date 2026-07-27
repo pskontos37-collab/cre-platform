@@ -11,9 +11,20 @@
 //                           leg alone under-ranks (e.g. JV Operating Agreements).
 //        d. TENANT leg    — tenant-folder docs (…\TENANTS\<name>\…).
 //        e. TITLE leg     — scored title search (search_documents_by_title).
+//        f. EXCLUSIVES leg — for "can I put a <use> here?" questions, route through
+//                           the curated property_exclusives registry to the tenant
+//                           that HOLDS the implicated exclusive and pin THAT tenant's
+//                           own lease as the primary source. Exclusives are restated
+//                           in other tenants' "Existing Exclusives" exhibits in an
+//                           ABRIDGED form (carve-outs dropped) and those restatements
+//                           out-retrieve the real covenant, so they are demoted and
+//                           labelled secondary rather than allowed to be cited as
+//                           controlling.
 //      Semantic + lexical are fused with Reciprocal Rank Fusion; doc-kind/tenant/
 //      title docs are PINNED (guaranteed into the candidate set with their most
-//      on-topic chunks).
+//      on-topic chunks). Exclusives-leg chunks are pinned AND re-seated ahead of the
+//      reranked list, because the cross-encoder prefers the plain-language
+//      restatement over the covenant that actually binds.
 //   3. RERANK (Voyage rerank-2.5 cross-encoder): order candidates by true relevance;
 //      a small haiku pass then emits a LOCATOR per top hit for the PDF viewer.
 //   4. SYNTHESIS (sonnet): answer strictly from excerpts with [n] citations.
@@ -69,14 +80,29 @@ async function anthropic(key: string, model: string, prompt: string, maxTokens: 
   return (d.content ?? []).filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text).join('')
 }
 
-interface Intent { tenant: string | null; property: string | null; kinds: string[]; wants_documents: boolean; tenancy: 'current' | 'past' | 'any' }
+interface Intent {
+  tenant: string | null; property: string | null; kinds: string[]; wants_documents: boolean
+  tenancy: 'current' | 'past' | 'any'
+  // A "can I put a <use> here?" / "what exclusives restrict <use>?" question. Drives
+  // the exclusives-registry leg below.
+  use_question: boolean
+  proposed_use: string | null
+}
+
+// Belt-and-braces for the use_question flag: if the parse fails or the model is
+// conservative, these phrasings still open the exclusives leg.
+const USE_Q_RE = /\b(exclusive|exclusivit|prohibited use|restricted use|use restriction|permitted use|radius restriction|violate|conflict)\w*\b|\bcan (?:i|we|you|the landlord|landlord)\b.*\b(put|lease|sign|bring|add|place|open|backfill|re-?let)\b|\b(allowed|permitted|able) to (?:put|lease|sign|bring|add|place|open)\b/i
 
 async function parseIntent(q: string, key: string): Promise<Intent> {
-  const fallback: Intent = { tenant: null, property: null, kinds: [], wants_documents: false, tenancy: 'current' }
+  const fallback: Intent = {
+    tenant: null, property: null, kinds: [], wants_documents: false, tenancy: 'current',
+    use_question: USE_Q_RE.test(q), proposed_use: null,
+  }
   try {
     const raw = await anthropic(key, PARSE_MODEL, `Parse this commercial-real-estate document question. Reply with ONLY minified JSON, no prose:
-{"tenant": <tenant/company name mentioned or null>, "property": <property/shopping-center name mentioned or null>, "kinds": <array from ["lease","amendment","loan","jv","title","management","closing","estoppel","other"] describing the document kinds sought, or []>, "wants_documents": <true if the user wants the documents themselves pulled up/listed, false if they only want a factual answer>, "tenancy": <"past" if the question asks about expired/terminated/former/previous/inactive/vacated tenants or leases; "any" if it explicitly spans both current and past; otherwise "current">}
+{"tenant": <tenant/company name mentioned or null>, "property": <property/shopping-center name mentioned or null>, "kinds": <array from ["lease","amendment","loan","jv","title","management","closing","estoppel","other"] describing the document kinds sought, or []>, "wants_documents": <true if the user wants the documents themselves pulled up/listed, false if they only want a factual answer>, "tenancy": <"past" if the question asks about expired/terminated/former/previous/inactive/vacated tenants or leases; "any" if it explicitly spans both current and past; otherwise "current">, "use_question": <true if the question asks whether some USE or TENANT TYPE may be placed/leased at the property, or asks what exclusive-use / prohibited-use restrictions apply>, "proposed_use": <the use or business type at issue, as a short noun phrase (e.g. "hamburger restaurant", "nail salon", "off-price apparel"), or null>}
 Notes: "JV", "joint venture", "promote", "waterfall", "operating agreement", "OA", "capital account", "distribution", "IRR hurdle", "carried interest" all imply kind "jv". "mortgage", "deed of trust", "loan", "note", "DSCR", "covenant" imply "loan". "PMA", "property management" imply "management".
+A question like "can I put in a hamburger restaurant at X" is use_question=true, proposed_use="hamburger restaurant", tenant=null (Five Guys is NOT mentioned — do not infer the incumbent).
 Question: ${q}`, 300)
     const m = raw.match(/\{[\s\S]*\}/)
     if (!m) return fallback
@@ -87,14 +113,107 @@ Question: ${q}`, 300)
       kinds: Array.isArray(j.kinds) ? j.kinds.filter((x: unknown) => typeof x === 'string') : [],
       wants_documents: j.wants_documents === true,
       tenancy: j.tenancy === 'past' || j.tenancy === 'any' ? j.tenancy : 'current',
+      use_question: j.use_question === true || USE_Q_RE.test(q),
+      proposed_use: typeof j.proposed_use === 'string' && j.proposed_use.trim() ? j.proposed_use.trim() : null,
     }
   } catch (_e) {
     return fallback
   }
 }
 
+// ── Exclusives registry support ──────────────────────────────────────────────
+// property_exclusives is the curated ground truth for WHO holds which exclusive.
+// Its `description` is capped at ~500 chars by the seeder, so it is a ROUTER, not
+// a source: it tells us which tenant's lease to pin, and that lease supplies the
+// controlling text (including carve-outs the 500-char summary drops).
+interface ExclusiveRow {
+  id: string; property_id: string; owner_tenant: string; category: string | null
+  description: string | null; source_citation: string | null; keywords: string[] | null
+}
+
+// Corporate suffixes / connectors that must not constrain a tenant-folder match.
+// "Five Guys Burgers and Fries" has to reach the folder "Five Guys Burgers & Fries
+// (Quintet Acquisitions)"; "PETSMART LLC#3279" has to reach "PetSmart LLC".
+const NAME_NOISE = new Set(['and', 'the', 'llc', 'inc', 'corp', 'lp', 'llp', 'ltd', 'co', 'company', 'stores', 'store'])
+function coreTokens(owner: string): string[] {
+  return owner.toLowerCase()
+    .replace(/#\s*\d+/g, ' ')            // store numbers: "Michaels #6725", "LLC#3279"
+    .replace(/\bd\/?b\/?a\b/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')        // & ' , . ( ) all become separators
+    .split(/\s+/)
+    .filter(t => t.length >= 2 && !NAME_NOISE.has(t))
+    .slice(0, 4)
+}
+
+// Lease boilerplate that appears in EVERY exclusive clause — scoring chunks on these
+// would rank any random lease page. What discriminates is the protected-use nouns
+// ("hamburgers", "fries"), so strip the shell and keep the substance.
+const EXCL_BOILERPLATE = new Set([
+  'landlord', 'landlords', 'tenant', 'tenants', 'lease', 'leases', 'leased', 'premises',
+  'shopping', 'center', 'exclusive', 'exclusives', 'agrees', 'agree', 'shall', 'will', 'not',
+  'hereafter', 'enter', 'into', 'new', 'whose', 'principal', 'permitted', 'use', 'defined',
+  'hereinafter', 'default', 'provisions', 'term', 'during', 'business', 'open', 'operating',
+  'restriction', 'apply', 'aforementioned', 'existing', 'successors', 'assigns', 'replacements',
+  'renewed', 'extended', 'modified', 'amended', 'sale', 'retail', 'other', 'any', 'such', 'that',
+  'this', 'with', 'from', 'section', 'article', 'exhibit', 'rider', 'provided', 'purposes',
+  'means', 'deemed', 'only', 'long', 'using', 'otherwise', 'beyond', 'applicable', 'cure',
+  'period', 'herein', 'hereby', 'respect', 'connection', 'including', 'limited', 'without',
+  'within', 'upon', 'each', 'more', 'less', 'than', 'been', 'have', 'their', 'which', 'where',
+  'when', 'while', 'also', 'must', 'notice', 'written', 'right', 'rights', 'party', 'parties',
+  'space', 'store', 'stores', 'area', 'operate', 'conduct', 'primary', 'auto', 'seeded',
+])
+// The discriminating nouns only ("hamburgers", "fries") — the clause shell appears in
+// every exclusive at every property and would match any random lease page. These terms
+// both rank chunks and, crucially, keep the chunk fetch from pulling whole 300-chunk leases.
+function exclusiveTerms(row: ExclusiveRow): string[] {
+  const cat = row.category && row.category !== 'auto-seeded' ? row.category : ''
+  const src = `${cat} ${row.description ?? ''}`.toLowerCase()
+  return [...new Set(
+    src.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/)
+      .filter(w => w.length >= 4 && !EXCL_BOILERPLATE.has(w))
+  )].slice(0, 12)
+}
+
+// Which registry entries does the proposed use actually implicate? Term overlap is
+// hopeless here ("burger joint" vs "hamburgers and French fries"), so ask the small
+// model over the property-scoped list — at most 26 rows for the largest property.
+async function matchExclusives(q: string, use: string | null, rows: ExclusiveRow[], key: string): Promise<Set<string>> {
+  if (!rows.length) return new Set()
+  const listing = rows.map((r, i) =>
+    `${i}: OWNER=${r.owner_tenant} | CATEGORY=${r.category ?? '-'} | ${(r.description ?? '').slice(0, 280).replace(/\s+/g, ' ')}`
+  ).join('\n')
+  try {
+    const raw = await anthropic(key, PARSE_MODEL, `You are screening a proposed retail use against a shopping center's recorded exclusive-use restrictions. Return the restrictions that must be reviewed.
+
+These clauses bind on the NEW tenant's "principal permitted use" / "primary use", so:
+- INCLUDE a restriction when the proposed use's own core offering IS the protected category or a recognised sub-type of it, or when the protected category is drawn broadly enough to cover it (e.g. "any restaurant", "any quick-service restaurant").
+- EXCLUDE a restriction when the overlap would only be incidental, and EXCLUDE sibling sub-types of the same broad industry — a hamburger restaurant does NOT implicate a submarine-sandwich exclusive, a pizza exclusive, or a steakhouse exclusive, because none of those is its principal use.
+- If you genuinely cannot tell whether the categories overlap, include it.
+
+Reply ONLY with minified JSON: {"hits":[<indices>]}. Empty array if none apply.
+
+PROPOSED USE: ${use ?? '(not stated explicitly)'}
+FULL QUESTION: ${q}
+
+RESTRICTIONS:
+${listing}`, 400)
+    const m = raw.match(/\{[\s\S]*\}/)
+    if (!m) return new Set()
+    const idx = (JSON.parse(m[0]).hits ?? []) as unknown[]
+    const out = new Set<string>()
+    for (const i of idx) if (typeof i === 'number' && rows[i]) out.add(rows[i].id)
+    return out
+  } catch (_e) {
+    return new Set()
+  }
+}
+
 // Tenant-folder docs live at …\TENANTS\<name>\… (or …\TENANTS\_TERMINATED TENANTS\<name>\…).
-const normName = (s: string) => s.toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-z0-9]/g, '')
+// "and" is dropped because folder names and rent-roll names disagree on it: the folder
+// "Five Guys Burgers & Fries (Quintet Acquisitions)" and the rent-roll "Five Guys Burgers
+// and Fries" otherwise normalise to different strings, and the tenancy classifier below
+// would file a live tenant as FORMER.
+const normName = (s: string) => s.toLowerCase().replace(/\(.*?\)/g, '').replace(/\band\b/g, '').replace(/[^a-z0-9]/g, '')
 function tenantFolderOf(fp: string | null): { name: string | null; terminated: boolean } {
   if (!fp) return { name: null, terminated: false }
   const m = fp.match(/\\TENANTS\\([^\\]+)(?:\\([^\\]+))?/i)
@@ -211,8 +330,12 @@ serve(async (req) => {
       .filter(w => w.length >= 4 && !STOP.has(w)).map(stem))].slice(0, 8)
 
     // ── 2. Retrieval legs (in parallel) ──
+    // Exclusives registry is admin/AM-gated by RLS, but this function runs as the
+    // service role — so scope it to the properties the CALLER may actually read.
+    const exclScope = (scope ?? []).filter(pid => caller.access === 'all' || canReadProperty(caller, pid))
+
     const fetchCount = 40
-    const [vecRes, ftsRes, kindDocsRes, titleRes, tenantDocsRaw] = await Promise.all([
+    const [vecRes, ftsRes, kindDocsRes, titleRes, tenantDocsRaw, exclRes] = await Promise.all([
       // a. semantic (scoped, Voyage vectors)
       sb.rpc('match_chunks_voyage', { query_embedding: `[${vec.join(',')}]`, match_count: fetchCount, p_property_ids: scope }),
       // b. lexical (scoped)
@@ -241,6 +364,13 @@ serve(async (req) => {
         if (propertyIds.length) tq = tq.in('property_id', propertyIds)
         return await tq
       })(),
+      // f. exclusives-registry leg — only for property-scoped use questions. A
+      //    portfolio-wide "what exclusives exist" is not what this leg is for.
+      (intent.use_question && exclScope.length)
+        ? sb.from('property_exclusives')
+            .select('id, property_id, owner_tenant, category, description, source_citation, keywords')
+            .in('property_id', exclScope).eq('active', true).limit(60)
+        : Promise.resolve({ data: [] } as any),
     ])
     if (vecRes.error) throw new Error('match_chunks_voyage failed: ' + vecRes.error.message)
 
@@ -298,6 +428,122 @@ serve(async (req) => {
       tenantDocs = tenantDocs.filter(d => canReadProperty(caller, d.property_id))
     }
 
+    // ── f. EXCLUSIVES-REGISTRY LEG ────────────────────────────────────────────
+    // Exclusives get restated in OTHER tenants' leases as "Existing Exclusives"
+    // exhibits, and those restatements are abridged — the HomeGoods schedule states
+    // the Five Guys hamburger exclusive but keeps only the 10,000 sf carve-out,
+    // dropping the outparcel and existing-tenant carve-outs that decide real deals.
+    // They also read as better answers to a plain-language use question ("...is
+    // prohibited") than the owner's own covenant language ("Landlord will not
+    // hereafter enter into a new lease..."), so they win retrieval outright.
+    // This leg fixes the attribution: route through the curated registry to the
+    // tenant that HOLDS the exclusive, pin THAT tenant's lease as the primary
+    // source, and mark every restatement as secondary.
+    const exclRows = ((exclRes.data ?? []) as ExclusiveRow[])
+    const implicatedIds = intent.use_question
+      ? await matchExclusives(q, intent.proposed_use, exclRows, anthropicKey)
+      : new Set<string>()
+    const implicated = exclRows.filter(r => implicatedIds.has(r.id)).slice(0, 4)
+
+    // Owner tenant -> that tenant's own lease documents. Token-joined ilike so
+    // "Five Guys Burgers and Fries" reaches the folder "…\Five Guys Burgers & Fries
+    // (Quintet Acquisitions)\…" and "Salt Grass" reaches "Saltgrass".
+    const primaryDocIds = new Set<string>()
+    const primaryOwnerByDoc = new Map<string, string>()
+    const exclChunks: Chunk[] = []
+    const ownerCores: Array<{ owner: string; toks: string[] }> = []
+
+    if (implicated.length) {
+      const leaseScore = (d: DocMeta): number => {
+        const path = (d.file_path ?? '').toLowerCase()
+        let s = 0
+        if (d.doc_type === 'lease') s += 5
+        if (path.includes('\\tenants\\')) s += 3
+        if (/\blse-/.test(path)) s += 5                                  // house naming for an original lease
+        if (/\bamd-|amendment/.test(path)) s += 3                        // amendments can modify the exclusive
+        if (/ocr\.pdf$/.test(path)) s += 1                               // richer text layer of a duplicate pair
+        if (/control sheet|cover sheet|cover page|table of contents/.test(path)) s -= 8
+        if (/est cert|estoppel|\bguar-|fedex|\bltr-|\bntc ltr|\blic agr/.test(path)) s -= 4
+        return s
+      }
+      // Most leases here were ingested twice — "LSE-Five Guys (6-30-06).pdf" and
+      // "…(6-30-06)OCR.pdf" are one instrument. Pinning both would spend half the
+      // excerpt budget quoting the same clause to itself.
+      const instrumentKey = (fp: string | null) =>
+        (fp ?? '').toLowerCase().replace(/.*[\\/]/, '').replace(/ocr/g, '').replace(/[^a-z0-9]/g, '')
+
+      const ownerDocs = await Promise.all(implicated.map(async (row) => {
+        const toks = coreTokens(row.owner_tenant)
+        ownerCores.push({ owner: row.owner_tenant, toks })
+        if (toks.join('').length < 4) return { row, docs: [] as DocMeta[] }
+        const pat = '%' + toks.join('%') + '%'
+        let dq = sb.from('documents')
+          .select('id, doc_type, title, file_name, file_path, property_id')
+          .or(`file_path.ilike.${pat},title.ilike.${pat}`)
+          .limit(60)
+        if (exclScope.length) dq = dq.in('property_id', exclScope)
+        const { data } = await dq
+        const docs = ((data ?? []) as DocMeta[])
+          .map(d => ({ d, s: leaseScore(d) })).filter(x => x.s > 0)
+          .sort((a, b) => b.s - a.s).slice(0, 3).map(x => x.d)
+        return { row, docs }
+      }))
+
+      // Per owner, fetch only the chunks that could carry the clause (term match, plus
+      // chunk 0 as the OCR fallback) — a lease runs 300+ chunks and pulling them whole
+      // would blow the response budget for no gain.
+      await Promise.all(ownerDocs.map(async ({ row, docs }) => {
+        if (!docs.length) return
+        const terms = exclusiveTerms(row)
+        if (!terms.length) return
+        const orFilter = [...terms.slice(0, 4).map(t => `content.ilike.%${t}%`), 'chunk_index.eq.0'].join(',')
+        const { data: oc } = await sb.from('document_chunks')
+          .select('document_id, chunk_index, content')
+          .in('document_id', docs.map(d => d.id))
+          .or(orFilter)
+          .limit(120)
+        const byDoc = new Map<string, Array<{ chunk_index: number; content: string }>>()
+        for (const c of (oc ?? []) as Array<{ document_id: string; chunk_index: number; content: string }>) {
+          if (!byDoc.has(c.document_id)) byDoc.set(c.document_id, [])
+          byDoc.get(c.document_id)!.push({ chunk_index: c.chunk_index, content: c.content })
+        }
+        const seenInstrument = new Set<string>()
+        for (const d of docs) {
+          const ik = instrumentKey(d.file_path)
+          if (ik && seenInstrument.has(ik)) continue
+          const chunks = byDoc.get(d.id) ?? []
+          if (!chunks.length) continue
+          seenInstrument.add(ik)
+          const scored = chunks.map(c => {
+            const lc = (c.content ?? '').toLowerCase()
+            let s = 0
+            for (const t of terms) if (lc.includes(t)) s += 2
+            s += conceptHits(c.content)
+            // Term hits alone tie the operative covenant with the Article 1 "Permitted
+            // Use" box and the AI summary — all three name the protected goods. Only
+            // the covenant carries the carve-outs, which is the whole point of citing
+            // the primary lease, so score the drafting itself. Patterns are chosen to
+            // survive OCR damage ("Landlord wil not hereafter enter...").
+            if (/hereafter enter into|shall not (?:lease|sell|permit|enter)|covenants and agrees/i.test(lc)) s += 3
+            if (/shall not apply to|does not apply to|shall not include|except for/i.test(lc)) s += 3
+            if (/exclusiv/i.test(lc)) s += 2
+            return { c, s }
+          }).sort((a, b) => b.s - a.s || a.c.chunk_index - b.c.chunk_index)
+          // Text layers are incomplete on roughly a third of the scanned leases;
+          // when the clause itself did not OCR, chunk 0 (the AI summary) still
+          // states the exclusive, so fall back to it rather than dropping the doc.
+          const take = scored[0].s > 0 ? scored.slice(0, 2)
+                     : chunks.filter(c => c.chunk_index === 0).map(c => ({ c, s: 0 })).slice(0, 1)
+          if (!take.length) continue
+          primaryDocIds.add(d.id)
+          primaryOwnerByDoc.set(d.id, row.owner_tenant)
+          for (const { c } of take) {
+            exclChunks.push({ document_id: d.id, chunk_index: c.chunk_index, content: c.content, similarity: 0.998 })
+          }
+        }
+      }))
+    }
+
     // Ordered, de-duplicated list of pinned document ids.
     const pinnedIds: string[] = []
     const pinnedSeen = new Set<string>()
@@ -339,6 +585,9 @@ serve(async (req) => {
       if (n >= capPerDoc) return
       seenChunk.add(key); perDoc.set(c.document_id, n + 1); candidates.push(c)
     }
+    // Exclusives first: these are the owning tenants' own leases, and they must not
+    // be crowded out by the near-duplicate site plans that dominate this corpus.
+    for (const c of exclChunks.slice(0, 8)) pushChunk(c, 3)
     for (const c of pinnedChunks) pushChunk(c, 3)
     for (const c of fusedChunks) pushChunk(c, 3)
 
@@ -354,6 +603,16 @@ serve(async (req) => {
         const rr = await rerank(q, ranked.map(h => (h.content ?? '').slice(0, 4000)), voyageKey, Math.min(ranked.length, 20))
         if (rr.length) ranked = rr.map(x => ranked[x.index]).filter(Boolean)
       } catch (_e) { /* keep fused order */ }
+      // The cross-encoder judges "…is prohibited" (a restatement) a better answer to
+      // a use question than "Landlord will not hereafter enter into a new lease…"
+      // (the actual covenant), and its top_k would drop the covenant entirely. So
+      // the owning tenant's own lease chunks are re-seated at the front rather than
+      // left to compete on phrasing.
+      if (primaryDocIds.size) {
+        const primaries = candidates.filter(c => primaryDocIds.has(c.document_id))
+        const rest = ranked.filter(c => !primaryDocIds.has(c.document_id))
+        ranked = [...primaries, ...rest]
+      }
       // 3b. Locators for the top hits — the phrase the in-app PDF viewer jumps to. Non-fatal.
       try {
         const top = ranked.slice(0, 10)
@@ -394,7 +653,11 @@ ${listing}`, 500)
       hits = scoped.length ? scoped : hits
     }
     {
-      const tenancyScoped = hits.filter(h => tenancyAllows((byId.get(h.document_id) as any)?.file_path ?? null))
+      // Registry-selected leases are exempt. The holder is fixed by curated data, and
+      // folder-name-vs-rent-roll matching will never be perfect — a false 'former'
+      // reading here would silently drop the one clause the question turns on.
+      const tenancyScoped = hits.filter(h =>
+        primaryDocIds.has(h.document_id) || tenancyAllows((byId.get(h.document_id) as any)?.file_path ?? null))
       hits = tenancyScoped.length ? tenancyScoped : hits
     }
     // Keep up to ~14 excerpt chunks (still capped ≤3 per doc from earlier).
@@ -446,11 +709,12 @@ ${listing}`, 500)
     const sources = hits.filter(h => { if (srcSeen.has(h.document_id)) return false; srcSeen.add(h.document_id); return true })
       .map((h, i) => {
         const d = byId.get(h.document_id) as any
-        const isPinned = h.similarity === 0.999
+        const isExcl = h.similarity === 0.998
+        const isPinned = isExcl || h.similarity === 0.999
         const { link, path } = linkFor(d?.file_path ?? null, d?.storage_path ?? null)
         return {
           n: i + 1,
-          match: isPinned ? 'targeted' : 'semantic',
+          match: isExcl ? 'exclusive-registry' : isPinned ? 'targeted' : 'semantic',
           similarity: isPinned || h.similarity == null ? null : Number(h.similarity.toFixed(4)),
           document_id: h.document_id,
           title: d?.title ?? d?.file_name ?? h.document_id,
@@ -464,13 +728,52 @@ ${listing}`, 500)
 
     // Excerpts: number by the SOURCE the chunk belongs to (multiple chunks of one
     // doc share its [n]) so citations line up with the sources list.
+    // A chunk from someone ELSE's lease that recites an implicated owner's exclusive
+    // is secondary evidence. Match on the owner's leading name tokens only — these
+    // schedules carry OCR damage ("french flies") that defeats whole-phrase matching.
+    const restatementOf = (c: Chunk): string | null => {
+      if (primaryDocIds.has(c.document_id)) return null
+      const lc = (c.content ?? '').toLowerCase()
+      if (!lc.includes('exclusiv')) return null
+      for (const { owner, toks } of ownerCores) {
+        if (toks.length && toks.slice(0, 2).every(t => lc.includes(t))) return owner
+      }
+      return null
+    }
+
     const excerpts = hits.map(h => {
       const d = byId.get(h.document_id) as any
       const n = srcNum.get(h.document_id) ?? '?'
       const t = docTenancy(d?.file_path ?? null)
-      const head = `[${n}] "${d?.title ?? 'Untitled'}"${d?.properties?.name ? ` (${d.properties.name})` : ''}${t === 'former' ? ' [FORMER TENANT — not on current rent roll]' : ''}`
+      const owner = primaryOwnerByDoc.get(h.document_id)
+      const restated = owner ? null : restatementOf(h)
+      const tag = owner
+        ? ` [PRIMARY SOURCE — ${owner}'s own lease; controlling text for its exclusive]`
+        : restated
+          ? ` [RESTATEMENT of ${restated}'s exclusive, inside another tenant's lease — SECONDARY and frequently abridged]`
+          : ''
+      const head = `[${n}] "${d?.title ?? 'Untitled'}"${d?.properties?.name ? ` (${d.properties.name})` : ''}${t === 'former' ? ' [FORMER TENANT — not on current rent roll]' : ''}${tag}`
       return `${head}\n${(h.content ?? '').slice(0, 6000)}`
     }).join('\n\n---\n\n')
+
+    // Curated ownership ground truth. Included so the model cannot misattribute an
+    // exclusive even when the only retrieved text is someone else's schedule — but
+    // the description is a 500-char truncation, so it must never be quoted as the clause.
+    const exclusivesNote = implicated.length
+      ? `\n\nEXCLUSIVES REGISTRY — curated ground truth for WHO HOLDS each exclusive at this property. Authoritative on ownership and on which lease is controlling. The text here is a TRUNCATED summary, not the clause: quote the lease excerpts, never this block.\n` +
+        implicated.map(r => {
+          const cat = r.category && r.category !== 'auto-seeded' ? ` (${r.category})` : ''
+          return `- HOLDER: ${r.owner_tenant}${cat} — ${(r.description ?? '').slice(0, 300).replace(/\s+/g, ' ')}… [documented at: ${r.source_citation ?? 'n/a'}]`
+        }).join('\n')
+      : ''
+
+    const exclusivesRules = implicated.length
+      ? `
+- EXCLUSIVES — attribute every exclusive to the tenant that HOLDS it per the registry, and cite that holder's OWN lease as the source.
+- An "Existing Exclusives" / "Prohibited Uses" schedule inside a DIFFERENT tenant's lease is a secondary restatement (tagged RESTATEMENT above). Never present it as the controlling text. If it is your only excerpt for a clause, say so explicitly and warn that its carve-outs may be incomplete.
+- Whenever you state that a use is restricted, enumerate the carve-outs and exceptions from the controlling clause — existing tenants and their successors, renewals of existing leases, floor-area thresholds, outparcels. These frequently decide whether a deal can proceed, and abridged restatements routinely omit them.
+- The registry block lists only the restrictions screened as potentially relevant to this use. Do not assert that no other exclusive applies.`
+      : ''
 
     const tenancyNote = intent.tenancy === 'past'
       ? '\n- The user asked about PAST/terminated tenancies; excerpts are scoped accordingly.'
@@ -486,9 +789,9 @@ ${listing}`, 500)
 - Multiple excerpts may share a citation number when they come from the same document — that is expected.
 - If the excerpts do not contain the answer, say so plainly — do not guess.
 - Note when later amendments supersede earlier terms (use effective dates).
-- Be concise: a short direct answer first, then supporting detail.${tenancyNote}${docListNote}
+- Be concise: a short direct answer first, then supporting detail.${tenancyNote}${exclusivesRules}${docListNote}
 
-QUESTION: ${q}
+QUESTION: ${q}${exclusivesNote}
 
 EXCERPTS:
 ${excerpts}`
