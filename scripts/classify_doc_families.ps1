@@ -357,9 +357,17 @@ function Parse-Recital([string]$text) {
     }
     $res.recited = @($kept)
   }
-  # predecessor-in-interest names the party the filename may be filed under
-  $sm = [regex]::Match($t, '(?i)successor[- ]in[- ]interest\s+to\s+([A-Z][A-Za-z0-9&.,\'' -]{3,60}?)(?:,\s+(?:with|having)|\s+\(|\.)')
-  if ($sm.Success) { $res.successor_to = $sm.Groups[1].Value.Trim() }
+  # A successor-in-interest reference hints at the party the filename may be filed
+  # under. Terminate on a real clause break, NOT on any period -- a bare '\.' cut
+  # "Allan V. Rose d/b/a AVR Realty" down to "Allan V". And do not claim WHICH side
+  # the reference belongs to: the phrase attaches to the landlord as often as the
+  # tenant, so the note reports the reference, not an attribution.
+  $sm = [regex]::Match($t, '(?i)successor[- ]in[- ]interest\s+to\s+([A-Z][A-Za-z0-9&.,''/ -]{3,70}?)(?:,\s+(?:with|having|a\s)|\s+\(|;|\.\s+[A-Z][a-z])')
+  if ($sm.Success) {
+    $cand = $sm.Groups[1].Value.Trim().TrimEnd(',','.',' ')
+    # require a plausible entity name: at least two tokens, not a dangling initial
+    if ($cand -match '[A-Za-z]{2,}\s+\S' -and $cand.Length -ge 6) { $res.successor_to = $cand }
+  }
   return $res
 }
 
@@ -759,7 +767,7 @@ if (-not $SkipRecitals) {
           $sq = $a.ord
           if ($r.self_ordinal) { $sq = $r.self_ordinal }
           $succ = ''
-          if ($r.successor_to) { $succ = " Document names the tenant successor-in-interest to '" + $r.successor_to + "'." }
+          if ($r.successor_to) { $succ = " Document carries a successor-in-interest reference to '" + $r.successor_to + "' (side not determined)." }
           $edges.Add([pscustomobject]@{
             from_document_id = $a.id; to_document_id = $baseLease.id; relationship = 'amends'
             seq = $sq; stated_ordinal = $r.self_ordinal; party = $a.party; scope = $um.scope
