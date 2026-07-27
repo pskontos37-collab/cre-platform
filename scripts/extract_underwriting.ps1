@@ -30,6 +30,18 @@ $TMP = "$env:TEMP\_uw_post.json"
 
 $FIELDS = @('proj_irr','equity_multiple','avg_coc','hold_years','exit_cap','stabilized_yield','equity_required','total_capitalization')
 
+# Two stated numbers are "the same figure" when they agree within half a basis point OR 0.5%
+# relative - loose enough for a document that rounds (6.75% printed as 6.8%, $42,535,000
+# printed as $42.5M), tight enough to catch a genuinely different underwriting (10.9% vs
+# 12.2%). One tolerance covers all 8 fields because it scales: rates ~0.10, multiples ~1.6,
+# hold years ~5, dollars ~4e7.
+function Test-SameFigure([double]$a, [double]$b){
+  # 1e-12 makes the floor genuinely inclusive: 0.068 - 0.0675 is 0.0005000000000000004 in
+  # binary floating point, which would otherwise fail a half-basis-point comparison.
+  $tol = [math]::Max(0.0005, 0.005 * [math]::Max([math]::Abs($a), [math]::Abs($b)))
+  return ([math]::Abs($a - $b) -le ($tol + 1e-12))
+}
+
 function Sign([string]$spath){
   $b = '{"expiresIn":3600}'
   [System.IO.File]::WriteAllText($TMP,$b,$enc)
@@ -134,7 +146,7 @@ $deals = & curl.exe -s "$BASE/rest/v1/pipeline_deals?select=id,name,folder_path,
 if($DealFilter){ $deals = @($deals | Where-Object { $_.name -like "*$DealFilter*" }) }
 Write-Output ("Deals: {0}   mode: {1}" -f $deals.Count, $(if($Apply){'APPLY'}else{'DRY RUN'}))
 
-$filled=0; $commented=0; $noDocs=0; $confirmedStamps=0
+$filled=0; $commented=0; $noDocs=0; $confirmedStamps=0; $differed=0
 foreach($d in $deals){
   # Fully-filled deals normally need nothing (this also prevents duplicate audit comments
   # on weekly re-runs). ONE exception: a deal whose metrics are already complete but which
@@ -201,11 +213,15 @@ foreach($d in $deals){
 
   $patch = @{}
   $summaryBits = @()
+  $conflicts = @()
   foreach($f in $FIELDS){
     $v = $r.$f
     if($null -eq $v){ continue }
     $summaryBits += ("{0}={1}" -f $f, $v)
     $cur = $d.$f
+    if($null -ne $cur -and -not (Test-SameFigure ([double]$cur) ([double]$v))){
+      $conflicts += ("{0}: stored {1} vs document {2}" -f $f, $cur, $v)
+    }
     if($writeFields -and ($Force -or $null -eq $cur)){ $patch[$f] = $v }
   }
   if($summaryBits.Count -eq 0){ Write-Output "    -> found nothing statable"; continue }
@@ -218,6 +234,19 @@ foreach($d in $deals){
   # is a verified claim, not a guess. Broker pro-forma is excluded ($writeFields is false for
   # it) - those numbers stay quarantined and must never be presented as the deal's source.
   $confirmOnly = (-not $didFill) -and $writeFields
+
+  # ...but "nothing to write" only means every field was ALREADY SET - it is NOT evidence that
+  # this document is where those numbers came from. Stamp a confirmation only when the document
+  # REPRODUCES them. If it states something different, the stored values came from somewhere
+  # else (an analyst's bottoms-up model, a newer file) and naming this document as their source
+  # would be a false provenance claim. Same discipline as extract_t12.ps1's confirm pass.
+  # Live example: East Washington Place holds the analyst's 10.9%/1.61x while its CF-model print
+  # states 12.2%/1.70x.
+  if($confirmOnly -and $conflicts.Count -gt 0){
+    Write-Output ("    -> DIFFERS from stored ({0}) - values left alone and NOT stamped; re-run with -Force to overwrite" -f ($conflicts -join '; '))
+    $differed++
+    continue
+  }
 
   if($didFill -or $confirmOnly){
     # provenance for the app's Data sources panel: which file drove the metrics.
@@ -264,6 +293,12 @@ foreach($d in $deals){
   $bodyTxt = $null
   if($didFill){
     $bodyTxt = "[AI] Underwriting auto-filled from $($(if($isBroker){'BROKER PRO-FORMA'}else{'internal model'})): $srcLine (confidence: $($r.confidence)). Values: $($summaryBits -join ', '). $(if($r.note){$r.note+' '})Review on the Underwriting tab before relying."
+    # Blanks were filled from this document, but it disagrees with fields the deal ALREADY held
+    # (never clobbered - see NEVER CLOBBER above). Say so, or the provenance stamp implies the
+    # whole metrics slice came from this one file.
+    if($conflicts.Count -gt 0){
+      $bodyTxt += " NOTE: this document DISAGREES with values already on the deal ($($conflicts -join '; ')) - those were left as entered; only blank fields were filled."
+    }
   } elseif($isBroker) {
     $prior = & curl.exe -s "$BASE/rest/v1/pipeline_deal_comments?deal_id=eq.$($d.id)&body=like.%5BAI%5D*&select=id&limit=1" -H "apikey: $AK" -H "Authorization: Bearer $AK" | ConvertFrom-Json
     if(@($prior).Count -eq 0){
@@ -278,4 +313,4 @@ foreach($d in $deals){
   }
   Write-Output ("    -> {0} [{1}] {2}" -f $(if($didFill){'FILLED ' + (($patch.Keys | Where-Object { $_ -notin @('updated_at','underwriting_model') } | Sort-Object) -join ',')}elseif($isBroker){'broker pro-forma (comment-only)'}else{'no change (values already set) - source CONFIRMED + stamped'}), $r.confidence, $srcLine)
 }
-Write-Output ("SUMMARY: {0} deals filled, {1} source stamps confirmed on already-complete deals, {2} audit comments, {3} without candidate docs." -f $filled, $confirmedStamps, $commented, $noDocs)
+Write-Output ("SUMMARY: {0} deals filled, {1} source stamps confirmed on already-complete deals, {2} document disagreed with stored values (left alone, NOT stamped), {3} audit comments, {4} without candidate docs." -f $filled, $confirmedStamps, $differed, $commented, $noDocs)
