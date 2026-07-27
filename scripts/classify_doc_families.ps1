@@ -227,6 +227,20 @@ function Get-EditDistance([string]$a, [string]$b) {
   return $prev[$lb]
 }
 
+function Test-PartyRelated($a, $b) {
+  # Is there ANY name relation between two party tokens? Used to corroborate a
+  # cross-folder match, where a date alone is not identity: in a shopping centre
+  # many leases are signed the same day, and matching on date alone wired Yard
+  # House's amendments to ALLEN TATE's lease because both leases are dated
+  # 2013-10-17. Accepts exact, containment either way, or a filing typo.
+  if (-not $a -or -not $b) { return $false }
+  if ($a -eq $b) { return $true }
+  if ($a.Length -ge 4 -and $b.Contains($a)) { return $true }
+  if ($b.Length -ge 4 -and $a.Contains($b)) { return $true }
+  if ($a.Length -ge 8 -and $b.Length -ge 8 -and (Get-EditDistance $a $b) -le 2) { return $true }
+  return $false
+}
+
 function Find-PartyMatch($party, $origs) {
   # Tiered, conservative. Each tier must yield EXACTLY ONE candidate or we fall
   # through; if no tier resolves to one, the caller fails closed. The tier used
@@ -603,6 +617,7 @@ foreach ($g in $scopes) {
         from_name        = $a.name
         to_name          = $baseLease.name
         from_date        = $a.fdate
+        date_dispute     = $null   # set by the Stage A2 pass when the recital disagrees
         match_basis      = $r.basis
         note             = "[Stage A deterministic] " + $posText + "; document date " + $dpart +
                            "; base lease resolved by " + $r.basis + "." + $gapNote +
@@ -657,7 +672,7 @@ if ($ordGaps.Count -gt 0) {
 # --- 4b. STAGE A2: corroborate against the DOCUMENTS themselves -----------
 $recitalStats = @{
   fetched = 0; parsed = 0; confirmed = 0; conflict = 0; filename_only = 0
-  resolved_successor = 0; ordinal_confirmed = 0; ordinal_disagreed = 0
+  resolved_successor = 0; ordinal_confirmed = 0; ordinal_disagreed = 0; deep_hits = 0; date_dispute = 0
 }
 $conflicts = New-Object System.Collections.Generic.List[object]
 $realGaps = New-Object System.Collections.Generic.List[object]
@@ -698,12 +713,33 @@ if (-not $SkipRecitals) {
     if ($null -eq $rows) { $failed++; continue }
     if ($rows.Count -eq 0) { continue }   # no text layer for this document
     $txt = (($rows | Sort-Object chunk_index | ForEach-Object { $_.content }) -join ' ')
-    $recitalCache[$docId] = Parse-Recital $txt
+    $parsed = Parse-Recital $txt
+    # Some documents open with front matter that pushes the recital past the first
+    # few chunks -- Saltgrass's 1st Amendment leads with a "Tenant Document Profile
+    # Sheet". If nothing was found, look deeper before giving up.
+    if (-not $parsed.had_recital) {
+      $url2 = "$BASE/rest/v1/document_chunks?select=chunk_index,content&kind=eq.text&document_id=eq.$docId&order=chunk_index.asc&limit=18"
+      $rows2 = $null
+      for ($try = 1; $try -le 2; $try++) {
+        $raw2 = (& curl.exe -s "$url2" -H "apikey: $KEY" -H "Authorization: Bearer $KEY") -join "`n"
+        if ($raw2 -and -not ($raw2 -match '"message"\s*:' -and $raw2 -match '"code"')) {
+          try { $rows2 = @((ConvertFrom-Json -InputObject $raw2) | ForEach-Object { $_ }); break } catch { $rows2 = $null }
+        }
+        Start-Sleep -Milliseconds (400 * $try)
+      }
+      if ($null -ne $rows2 -and $rows2.Count -gt $rows.Count) {
+        $txt2 = (($rows2 | Sort-Object chunk_index | ForEach-Object { $_.content }) -join ' ')
+        $deeper = Parse-Recital $txt2
+        if ($deeper.had_recital) { $parsed = $deeper; $recitalStats.deep_hits++ }
+      }
+    }
+    $recitalCache[$docId] = $parsed
     $recitalStats.fetched++
-    if ($recitalCache[$docId].had_recital) { $recitalStats.parsed++ }
+    if ($parsed.had_recital) { $recitalStats.parsed++ }
     if (($i + 1) % 150 -eq 0) { Write-Output ("  ... " + ($i + 1) + "/" + $needIds.Count + " checked") }
   }
   if ($failed -gt 0) { Write-Output ("  WARN: " + $failed + " text fetches failed after retries") }
+  Write-Output ("  recitals found only on a DEEPER read = " + $recitalStats.deep_hits + "  (front matter pushed the recital past the opening chunks)")
   Write-Output ("  documents with a text layer = " + $recitalStats.fetched +
                 ";  recital parsed = " + $recitalStats.parsed)
 
@@ -743,10 +779,30 @@ if (-not $SkipRecitals) {
       }
       $keep.Add($ed); continue
     }
+    # Same month and day, different year = the SAME instrument with a year
+    # disagreement, not a different lease. Keep the edge and flag the dispute;
+    # dropping it discards a correct link. And do NOT call the recital wrong --
+    # Saltgrass proved OUR filing date is often the wrong side.
+    if ($baseDoc.fdate -and $r.base_date.Substring(5) -eq $baseDoc.fdate.Substring(5)) {
+      $ed.match_basis = $ed.match_basis + '; DATE DISPUTE (same month/day, year differs)'
+      $ed.date_dispute = $r.base_date + ' vs ' + $baseDoc.fdate
+      $ed.note = $ed.note + ' DATE DISPUTE: the recital dates this lease ' + $r.base_date +
+                 ' while our filing date is ' + $baseDoc.fdate +
+                 ' -- same month and day, so it is the same instrument and one of the two is wrong.' +
+                 ' Read the document; the FILENAME is often the wrong side.'
+      $recitalStats.date_dispute++
+      $conflicts.Add([pscustomobject]@{
+        amendment = $ed.from_name; filename_base = $ed.to_name
+        recited_base_date = $r.base_date; base_filename_date = $baseDoc.fdate
+        resolution = 'EDGE KEPT -- same instrument, year disagreement'; scope = $ed.scope
+      })
+      $keep.Add($ed); continue
+    }
     $recitalStats.conflict++
     $conflicts.Add([pscustomobject]@{
       amendment = $ed.from_name; filename_base = $ed.to_name
-      recited_base_date = $r.base_date; base_filename_date = $baseDoc.fdate; scope = $ed.scope
+      recited_base_date = $r.base_date; base_filename_date = $baseDoc.fdate
+      resolution = 'EDGE DROPPED -- recital points at a different instrument'; scope = $ed.scope
     })
   }
   $edges = $keep
@@ -754,6 +810,13 @@ if (-not $SkipRecitals) {
   # (b) rescue the successor-party rejects using the recited base-lease date --
   # the JAG Footwear / Jones Retail case: the filename records the operating
   # entity, the recital records the lease.
+  # property-wide originals index: a tenant's lease is sometimes filed outside the
+  # tenant's own folder, so folder scope alone loses it
+  $origByProp = @{}
+  foreach ($pg in ($classified | Where-Object { $_.subtype -eq $ORIGINAL_SUBTYPE -and $_.property_id } | Group-Object property_id)) {
+    $origByProp[$pg.Name] = Get-DedupedOriginals @($pg.Group)
+  }
+  $crossRejected = 0
   $stillUnmatched = New-Object System.Collections.Generic.List[object]
   foreach ($um in $unmatched) {
     $doc = @($classified | Where-Object { $_.name -eq $um.amendment -and $_.scope -eq $um.scope })
@@ -761,7 +824,52 @@ if (-not $SkipRecitals) {
     if ($doc.Count -eq 1 -and $recitalCache.ContainsKey($doc[0].id)) {
       $r = $recitalCache[$doc[0].id]
       if ($r.base_date) {
+        $matchWhere = 'in the tenant folder'
         $cands = @($origByScope[$um.scope] | Where-Object { Test-DateNear $r.base_date $_.fdate 5 })
+        # FALLBACK 1: the lease may be filed outside this tenant's folder. Widen to
+        # the PROPERTY, still keyed on the date the document itself recites.
+        # The date alone is NOT enough here: leases across a shopping centre are
+        # routinely signed the same day, and a date-only rule wired Yard House's
+        # amendments to ALLEN TATE's lease (both dated 2013-10-17). Require the
+        # party names to be related as well -- two independent signals.
+        if ($cands.Count -eq 0 -and $doc[0].property_id -and $origByProp.ContainsKey([string]$doc[0].property_id)) {
+          # second signal = the amendment's filename party, OR the predecessor the
+          # DOCUMENT itself names ("successor-in-interest to Red Skye Wireless").
+          # The recital-sourced one is the stronger of the two.
+          $succTok = ''
+          if ($r.successor_to) { $succTok = ($r.successor_to -replace '[^A-Za-z0-9]','').ToLower() }
+          $wide = @($origByProp[[string]$doc[0].property_id] | Where-Object {
+            (Test-DateNear $r.base_date $_.fdate 5) -and
+            ((Test-PartyRelated $doc[0].party $_.party) -or ($succTok -and (Test-PartyRelated $succTok $_.party)))
+          })
+          if ($wide.Count -eq 1) {
+            $cands = $wide
+            $matchWhere = 'ELSEWHERE IN THE PROPERTY (date + related party name)'
+            if ($succTok -and (Test-PartyRelated $succTok $wide[0].party)) {
+              $matchWhere = 'ELSEWHERE IN THE PROPERTY (date + the predecessor the document names)'
+            }
+          }
+          elseif ($wide.Count -eq 0) { $crossRejected++ }
+        }
+        # FALLBACK 2: several same-party originals in scope -- the recited date
+        # picks the right one (this is what the Tripodis case needed).
+        if ($cands.Count -gt 1) {
+          $exact = @($cands | Where-Object { $_.fdate -eq $r.base_date })
+          if ($exact.Count -eq 1) { $cands = $exact; $matchWhere = 'in the tenant folder, disambiguated by the recited date' }
+        }
+        # FALLBACK 3: no date match anywhere, but exactly ONE same-party original
+        # exists and the recited date shares its month and day. That is the
+        # same instrument with a year disagreement (the Saltgrass/Bad Daddy's
+        # pattern, where the FILENAME is often the wrong side). Wire it, and say so.
+        $dateDispute = $null
+        if ($cands.Count -eq 0) {
+          $sameParty = @($origByScope[$um.scope] | Where-Object { $_.party -eq $doc[0].party -and $_.fdate })
+          if ($sameParty.Count -eq 1 -and $r.base_date.Substring(5) -eq $sameParty[0].fdate.Substring(5)) {
+            $cands = $sameParty
+            $dateDispute = $r.base_date + ' vs ' + $sameParty[0].fdate
+            $matchWhere = 'in the tenant folder, DATE DISPUTE ' + $dateDispute
+          }
+        }
         if ($cands.Count -eq 1) {
           $a = $doc[0]; $baseLease = $cands[0]
           $sq = $a.ord
@@ -772,11 +880,12 @@ if (-not $SkipRecitals) {
             from_document_id = $a.id; to_document_id = $baseLease.id; relationship = 'amends'
             seq = $sq; stated_ordinal = $r.self_ordinal; party = $a.party; scope = $um.scope
             from_name = $a.name; to_name = $baseLease.name; from_date = $a.fdate
-            match_basis = 'RECITAL-RESOLVED successor chain; DOCUMENT-CONFIRMED'
-            note = "[Stage A2 document-corroborated] The filename party ('" + $a.party +
+            match_basis = ('RECITAL-RESOLVED (' + $matchWhere + '); DOCUMENT-CONFIRMED')
+            date_dispute = $dateDispute
+            note = "[Stage A2 document-corroborated] Base lease matched " + $matchWhere + ". The filename party ('" + $a.party +
                    "') does not match the base lease, but this amendment's own recital dates its lease " +
                    $r.base_date + ", matching the base document." + $succ +
-                   " Wired on the DOCUMENT's statement, not the filename."
+                   " Wired on the DOCUMENT's statement, not the filename." + $(if ($dateDispute) { " DATE DISPUTE: the recital dates the lease " + $dateDispute + " -- one of the two is wrong; read the document (the FILENAME is often the wrong side)." } else { "" })
           })
           $recitalStats.resolved_successor++
           $resolvedIt = $true
@@ -842,8 +951,16 @@ if (-not $SkipRecitals) {
   Write-Output "  -- corroboration result --"
   Write-Output ("  edges DOCUMENT-CONFIRMED          = " + $recitalStats.confirmed)
   Write-Output ("  edges rescued from successor pile = " + $recitalStats.resolved_successor + "  (recital-resolved)")
+  if ($recitalStats.resolved_successor -gt 0) {
+    Write-Output "  -- how the rescued base leases were located --"
+    $edges | Where-Object { $_.match_basis -match 'RECITAL-RESOLVED' } | Group-Object match_basis | Sort-Object Count -Descending | ForEach-Object {
+      Write-Output ("   {0,4}  {1}" -f $_.Count, $_.Name)
+    }
+  }
+  Write-Output ("  cross-folder matches REJECTED     = " + $crossRejected + "  (date matched property-wide but party names unrelated -- fail-closed)")
   Write-Output ("  edges left FILENAME-ONLY          = " + $recitalStats.filename_only + "  (no text layer)")
-  Write-Output ("  edges DROPPED on recital conflict = " + $recitalStats.conflict)
+  Write-Output ("  edges DROPPED on recital conflict = " + $recitalStats.conflict + "  (recital points at a different instrument)")
+  Write-Output ("  edges KEPT with a DATE DISPUTE     = " + $recitalStats.date_dispute + "  (same month/day, year differs: same instrument, one date wrong)")
   Write-Output ("  ordinals confirmed by document    = " + $recitalStats.ordinal_confirmed +
                 ";  disagreed = " + $recitalStats.ordinal_disagreed)
   Write-Output ("  FINAL edge count                  = " + $edges.Count)
@@ -904,7 +1021,7 @@ $ordGaps | Select-Object base, present, missing, unordinaled_in_chain, scope | E
 $realGapCsv = "$ReportDir\cre_recited_missing_documents.csv"
 $conflictCsv = "$ReportDir\cre_recital_conflicts.csv"
 $realGaps  | Select-Object recited_date, recited_by, reciting_doc_date, chain_base_date, scope | Export-Csv -Path $realGapCsv -NoTypeInformation -Encoding UTF8
-$conflicts | Select-Object amendment, recited_base_date, base_filename_date, filename_base, scope | Export-Csv -Path $conflictCsv -NoTypeInformation -Encoding UTF8
+$conflicts | Select-Object resolution, amendment, recited_base_date, base_filename_date, filename_base, scope | Export-Csv -Path $conflictCsv -NoTypeInformation -Encoding UTF8
 $unmatched  | Select-Object reason, party, amendment, scope, originals_in_scope | Export-Csv -Path $unmCsv -NoTypeInformation -Encoding UTF8
 $classified | Where-Object { $_.subtype } | Select-Object id, subtype, family, via_folder, name | Export-Csv -Path $subCsv -NoTypeInformation -Encoding UTF8
 Write-Output ""
