@@ -834,6 +834,13 @@ serve(async (req) => {
           title:       String(extraction.summary ?? '').slice(0, 200),
           notes:       JSON.stringify(wasSplit ? { ...extraction, _segments: extractions, _segMeta: segMeta } : extraction),
           is_indexed:  false,
+          // Stamp a status at insert. A null status plus is_indexed=false is what the
+          // register counts as "unaccounted", so every row this function created was
+          // silently reopening that gap until a manual backfill closed it again.
+          // 'extracted' is the honest value: this function has just extracted the doc.
+          // content_sha256 stays null here -- the bytes came from storage/Drive, not a
+          // local file, so hashing belongs to scripts/backfill_doc_hashes.ps1.
+          processing_status: 'extracted',
         }).select('id').single()
         if (error) throw new Error('documents insert failed: ' + error.message)
         documentId = data?.id ?? null

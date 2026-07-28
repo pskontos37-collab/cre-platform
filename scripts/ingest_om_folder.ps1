@@ -98,7 +98,11 @@ foreach($pdf in $pdfs){
     $uc = & curl.exe -s -o NUL -w "%{http_code}" -X POST "$BASE/storage/v1/object/documents/$spath" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/pdf" -H "x-upsert: true" --data-binary "@$($pdf.FullName)"
     if([int]$uc -lt 200 -or [int]$uc -ge 300){ throw "upload HTTP $uc" }
     # 2. documents row
-    $docBody = @{ title=$pdf.BaseName; file_name=$pdf.Name; storage_path=$spath; doc_type='other'; file_size_bytes=[long]$pdf.Length; property_id=$null } | ConvertTo-Json
+    # stamp at insert -- see the register-accountability note in mirror_deal_docs.ps1
+    $sha = $null
+    try { $sha = (Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLower() } catch {}
+    $docBody = @{ title=$pdf.BaseName; file_name=$pdf.Name; storage_path=$spath; doc_type='other'; file_size_bytes=[long]$pdf.Length; property_id=$null;
+      processing_status='classified'; content_sha256=$sha } | ConvertTo-Json
     [System.IO.File]::WriteAllText($TMP,$docBody,$enc)
     $docResp = & curl.exe -s -X POST "$BASE/rest/v1/documents" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=representation" --data-binary "@$TMP"
     $doc = $null; try { $doc = ($docResp | ConvertFrom-Json) } catch {}

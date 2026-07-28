@@ -1,4 +1,4 @@
-param([int]$MaxDocs = 0, [string]$IdGte = '', [string]$IdLt = '', [string]$Tag = '')
+param([int]$MaxDocs = 0, [string]$IdGte = '', [string]$IdLt = '', [string]$Tag = '', [switch]$NoResume)
 $ErrorActionPreference = "Stop"
 # Register backfill (audit Phase 2, Document Control): SHA-256 every document from
 # its LOCAL source file (documents.file_path; 'file:' UNC prefix stripped, K:\ used
@@ -25,14 +25,34 @@ $TMP  = "$env:LOCALAPPDATA\cre_doc_hash_post$Tag.json"
 
 Write-Output ("start[$Tag] pid=" + ([System.Diagnostics.Process]::GetCurrentProcess().Id) + " done=$DONE gte='$IdGte' lt='$IdLt'")
 
-# resume: ids already hashed (or known-missing) in a previous run
+# resume: ids already hashed (or known-missing) in a previous run.
+#
+# -NoResume ignores the done-set. USE IT when re-running to pick up files that
+# were absent before and are present now: a previous run records those ids as
+# {"missing":true}, and the resume load then SKIPS them forever, so the re-run
+# silently does almost nothing. That happened 2026-07-27 -- a run meant to hash
+# 290 now-present files attempted 4 documents and reported success. A fresh -Tag
+# is NOT a reliable escape either: the done-set path can resolve differently for
+# a detached/sandboxed process than for the shell that checked for it, so the
+# file can be absent to you and present to the run.
+#
+# The DB filter (content_sha256=is.null) is the durable resume state anyway --
+# the done-set only saves re-testing missing/error files within a single run.
 $done = @{}
-if (Test-Path $DONE) {
-  foreach ($ln in [System.IO.File]::ReadAllLines($DONE, $enc)) {
-    if ($ln -match '"id"\s*:\s*"([0-9a-f-]{36})"') { $done[$matches[1]] = $true }
+if ($NoResume) {
+  Write-Output "resume[$Tag]: SKIPPED (-NoResume) -- every sha-null document will be re-tested"
+} else {
+  if (Test-Path $DONE) {
+    foreach ($ln in [System.IO.File]::ReadAllLines($DONE, $enc)) {
+      if ($ln -match '"id"\s*:\s*"([0-9a-f-]{36})"') { $done[$matches[1]] = $true }
+    }
+  }
+  Write-Output ("resume[$Tag]: " + $done.Count + " docs already in done-set")
+  if ($done.Count -gt 0) {
+    Write-Output "  NOTE: those ids will be SKIPPED. If you are re-running to catch files that have since"
+    Write-Output "        appeared, or that were recorded missing, re-run with -NoResume."
   }
 }
-Write-Output ("resume[$Tag]: " + $done.Count + " docs already in done-set")
 
 function PostChunk($rows) {
   if ($rows.Count -eq 0) { return }
@@ -83,7 +103,14 @@ while ($true) {
     $fetched++
     if ($MaxDocs -gt 0 -and $fetched -gt $MaxDocs) { break }
     $p = $doc.file_path
-    if ($p -match '^file:(\\\\.*)$') { $p = $matches[1] }
+    # Strip the 'file:' prefix whatever follows it. The old pattern was
+    # '^file:(\\\\.*)$' -- UNC only -- so a drive-letter path like
+    # 'file:V:\Gateway...\x.pdf' kept its prefix, got Test-Path'd as the literal
+    # string "file:V:\...", failed, and was recorded missing. That silently made
+    # 361 documents permanently unhashable, 96 of whose files were sitting right
+    # there on disk. Verified 2026-07-27: old regex stripped 0 of 361, this one
+    # strips 361 of 361.
+    if ($p -match '^file:(.+)$') { $p = $matches[1] }
     $line = $null
     if (-not (Test-Path -LiteralPath $p)) {
       $missing++

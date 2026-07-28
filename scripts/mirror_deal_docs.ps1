@@ -123,8 +123,17 @@ foreach($d in $deals){
     $ucode = & curl.exe -s -o NUL -w "%{http_code}" -X POST "$BASE/storage/v1/object/documents/$spath" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: $ct" -H "x-upsert: true" --data-binary "@$($p.file.FullName)"
     if([int]$ucode -lt 200 -or [int]$ucode -ge 300){ Write-Output ("    !! upload failed HTTP {0}: {1}" -f $ucode, $p.rel); continue }
     # 2. documents row
+    # Stamp processing_status and content_sha256 AT INSERT. Leaving them null made
+    # the register's "0 unaccounted" a snapshot instead of an invariant: every one
+    # of the 17,125 docs predating the 2026-07-24 backfill had a status, and none of
+    # the 43 created after it did -- all 43 from this writer. 'classified' matches
+    # what the 7/24 no-property triage assigned to exactly this class (deal docs are
+    # accounted for via pipeline_deal_documents and keep property_id NULL by design).
+    $sha = $null
+    try { $sha = (Get-FileHash -LiteralPath $p.file.FullName -Algorithm SHA256).Hash.ToLower() } catch {}
     $docBody = @{ title=$p.title; file_name=$p.file.Name; file_path=$p.file.FullName; storage_path=$spath;
-      doc_type=$DOCTYPE[$p.role]; file_size_bytes=[long]$p.file.Length; property_id=$null } | ConvertTo-Json
+      doc_type=$DOCTYPE[$p.role]; file_size_bytes=[long]$p.file.Length; property_id=$null;
+      processing_status='classified'; content_sha256=$sha } | ConvertTo-Json
     [System.IO.File]::WriteAllText($TMP,$docBody,$enc)
     $docResp = & curl.exe -s -X POST "$BASE/rest/v1/documents" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=representation" --data-binary "@$TMP"
     $doc = $null; try { $doc = ($docResp | ConvertFrom-Json) } catch {}

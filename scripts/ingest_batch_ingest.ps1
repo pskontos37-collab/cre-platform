@@ -82,8 +82,16 @@ function IngestResult($custom_id, $msg) {
   $ebody = @{ model = $VOYAGE_MODEL; input = $blob.Substring(0, [Math]::Min(32000, $blob.Length)); input_type = 'document'; output_dimension = 1024 } | ConvertTo-Json
   $er = Invoke-RestMethod -Method Post -Uri "https://api.voyageai.com/v1/embeddings" -Headers @{ Authorization = "Bearer $VOYAGE_KEY" } -ContentType "application/json" -Body ([System.Text.Encoding]::UTF8.GetBytes($ebody)) -TimeoutSec 120
   $vec = $er.data[0].embedding
+  # processing_status + content_sha256 at insert (register accountability as an
+  # invariant, not a backfill artifact). 'extracted': this path embeds and chunks.
+  # $meta.fp may carry the 'file:' UNC prefix, so strip it before hashing.
+  $sha = $null
+  $hp = [string]$meta.fp
+  if ($hp -match '^file:(\\\\.*)$') { $hp = $matches[1] }
+  try { if ($hp) { $sha = (Get-FileHash -LiteralPath $hp -Algorithm SHA256).Hash.ToLower() } } catch {}
   $docRow = @{ property_id = $meta.property_id; doc_type = (ToDocType $abs.doc_type); title = $title;
-    file_name = $meta.file_name; file_path = $meta.fp; is_indexed = $true; notes = (ConvertTo-Json $abs -Depth 8 -Compress)
+    file_name = $meta.file_name; file_path = $meta.fp; is_indexed = $true; notes = (ConvertTo-Json $abs -Depth 8 -Compress);
+    processing_status = 'extracted'; content_sha256 = $sha
   }
   $ins = (Post 'documents' $docRow 'return=representation') | ConvertFrom-Json
   $docId = $ins[0].id
