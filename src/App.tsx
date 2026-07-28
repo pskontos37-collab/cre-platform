@@ -9,6 +9,7 @@ import { DocumentsPage } from './pages/DocumentsPage'
 import { FormsPage } from './pages/FormsPage'
 import { EmergencyManualsPage } from './pages/EmergencyManualsPage'
 import { MonthlyReportsPage } from './pages/MonthlyReportsPage'
+import { PcfPage } from './pages/PcfPage'
 import { InspectionsPage } from './pages/InspectionsPage'
 import { InspectFieldPage } from './pages/InspectFieldPage'
 import { ContactsPage } from './pages/ContactsPage'
@@ -313,6 +314,18 @@ function AppRoutes() {
             <RequirePage pageKey="documents">
               <AppLayout>
                 <DocumentsPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/pcf"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="pcf">
+              <AppLayout>
+                <PcfPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
