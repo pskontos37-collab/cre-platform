@@ -862,7 +862,8 @@ ${listing}`, 500)
       ? `
 - TERM DATES — use the LEASE REGISTER below for expirations, commencements and option counts. It is the system of record. Estoppel certificates, notice letters, rent rolls and monthly operational reports state the term AS OF THEIR OWN DATE and are routinely superseded by a later amendment; never prefer such a document over the register, and do not repeat an expiration from one without checking it against the register.
 - The register is maintained but not infallible. If an excerpt shows an EXECUTED instrument dated later than the register appears to reflect, do not silently pick one — give the register value, then flag the conflict and name the document so it can be reconciled.
-- When asked what expires soonest, measure against today's date given in the register block, and do not present an already-passed expiration as upcoming.`
+- When asked what expires soonest, measure against today's date given in the register block, and do not present an already-passed expiration as upcoming.
+- Answer the question actually asked: only enumerate the whole register when the user asked for a full list. For a narrower question give the relevant rows. If you do list everything and cannot finish, say which rows you omitted rather than stopping mid-table.`
       : ''
 
     const tenancyNote = intent.tenancy === 'past'
@@ -886,7 +887,12 @@ QUESTION: ${q}${leaseRegisterNote}${exclusivesNote}
 EXCERPTS:
 ${excerpts}`
 
-    const answer = await anthropic(anthropicKey, ANSWER_MODEL, prompt, 1500)
+    // "List every expiration at this property" legitimately enumerates the whole
+    // register, and 32 rows of table overran the 1500-token cap mid-row (the answer
+    // stopped at "Kay Jewelers | C2 | 2031-12-", losing everything past 2031). Scale
+    // the budget with the register, since that is the only block that can be long.
+    const answerMax = shown.length > 12 ? 3000 : 1500
+    const answer = await anthropic(anthropicKey, ANSWER_MODEL, prompt, answerMax)
 
     return new Response(JSON.stringify({ success: true, query: q, intent, answer, sources, documents }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } })
