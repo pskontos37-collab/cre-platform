@@ -119,7 +119,10 @@ export function PcfPage() {
   const { data: versions, refetch: refetchVersions } = usePcfVersions(activeProperty)
   const activeVersionId = versionId ?? versions?.[0]?.id ?? null
   const version = versions?.find(v => v.id === activeVersionId) ?? null
-  const { data: grid, loading: gridLoading, refetch: refetchGrid } = usePcfGrid(activeVersionId)
+  // gridError is surfaced deliberately. The first live test 500'd (statement timeout)
+  // and the page rendered NOTHING below the toolbar, because this error was dropped on
+  // the floor - loading was false, grid was null, so every render branch was false.
+  const { data: grid, loading: gridLoading, error: gridError, refetch: refetchGrid } = usePcfGrid(activeVersionId)
   const { data: detail } = useLineDetail(activeProperty, drillLine, grid?.fiscalYear ?? new Date().getFullYear())
 
   const openingCash = version?.opening_cash ?? 0
@@ -285,6 +288,15 @@ export function PcfPage() {
       )}
 
       {gridLoading && <WidgetSkeleton />}
+
+      {gridError && !gridLoading && (
+        <Widget title="Could not load the grid">
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '4px 2px' }}>
+            <div style={{ color: 'var(--red, #b91c1c)', marginBottom: 8 }}>{gridError}</div>
+            <button onClick={() => refetchGrid()} style={{ fontSize: 12, padding: '5px 10px' }}>Retry</button>
+          </div>
+        </Widget>
+      )}
 
       {grid && totals && (
         <Widget title={`FY${grid.fiscalYear}`} fullWidth>

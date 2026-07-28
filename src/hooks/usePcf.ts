@@ -94,12 +94,17 @@ export function usePcfGrid(versionId: string | null) {
   return useQuery<PcfGrid | null>(async () => {
     if (!versionId) return null
 
-    // 113 canonical lines x 12 months clears the 1,000-row PostgREST cap, so this
-    // MUST be paged or the back half of the grid silently disappears.
+    // pcf_grid() the FUNCTION, not v_pcf_grid the view. The view could not push the
+    // version's property/year down into the GL, so it seq-scanned gl_entries three times
+    // and 500'd on a statement timeout under RLS. The function reads the version first;
+    // same output, ~9x faster (mig 20240141).
+    //
+    // Still paged: db-max-rows caps RPC responses too, and Magnolia (1,032) and Gateway
+    // (1,020) both exceed 1,000. Unpaged, they would silently lose the tail of the grid -
+    // the equity lines that feed Net cash.
     const rows = await fetchAllRows<any>((from, to) => supabase
-      .from('v_pcf_grid')
+      .rpc('pcf_grid', { p_version_id: versionId })
       .select('property_id, fiscal_year, line_key, section, subsection, label, sort_order, is_non_cash, period_month, is_actual, amount, method, note, derived_from_year, has_budget_seed')
-      .eq('version_id', versionId)
       .order('sort_order').order('line_key').order('period_month')
       .range(from, to))
 
