@@ -20,6 +20,15 @@
 //                           out-retrieve the real covenant, so they are demoted and
 //                           labelled secondary rather than allowed to be cited as
 //                           controlling.
+//        g. LEASE REGISTER — for TERM questions, inject the structured `leases` rows
+//                           for the scoped property. Term dates are NOT a document
+//                           question: `leases` is MRI-reconciled and updated as
+//                           amendments execute, while estoppels / notice letters /
+//                           monthly reports state the term as of their own date. With
+//                           no tenant named the tenant leg cannot fire and retrieval
+//                           returns ZERO lease documents, so term answers were being
+//                           built from stale snapshots. REA-member rows are held out:
+//                           0-sf easement placeholders on an artificial horizon date.
 //      Semantic + lexical are fused with Reciprocal Rank Fusion; doc-kind/tenant/
 //      title docs are PINNED (guaranteed into the candidate set with their most
 //      on-topic chunks). Exclusives-leg chunks are pinned AND re-seated ahead of the
@@ -87,20 +96,28 @@ interface Intent {
   // the exclusives-registry leg below.
   use_question: boolean
   proposed_use: string | null
+  // A question about lease TERM — expiration, commencement, rollover, option timing.
+  // Drives the lease-register leg: those dates live in `leases`, which is
+  // MRI-reconciled and kept current, whereas an estoppel or a monthly report is a
+  // point-in-time snapshot that a later amendment may have superseded.
+  term_question: boolean
 }
 
 // Belt-and-braces for the use_question flag: if the parse fails or the model is
 // conservative, these phrasings still open the exclusives leg.
 const USE_Q_RE = /\b(exclusive|exclusivit|prohibited use|restricted use|use restriction|permitted use|radius restriction|violate|conflict)\w*\b|\bcan (?:i|we|you|the landlord|landlord)\b.*\b(put|lease|sign|bring|add|place|open|backfill|re-?let)\b|\b(allowed|permitted|able) to (?:put|lease|sign|bring|add|place|open)\b/i
 
+// Same belt-and-braces for term questions.
+const TERM_Q_RE = /\b(expir\w*|lease end|end of (?:the )?term|lease term|term end\w*|roll ?over|rollover|renew\w*|extension option|option to extend|commence\w*|walt|weighted average lease term|maturit\w*|vacat\w*|when does .{0,40}\blease\b|how (?:long|much time) .{0,30}\blease\b)\b/i
+
 async function parseIntent(q: string, key: string): Promise<Intent> {
   const fallback: Intent = {
     tenant: null, property: null, kinds: [], wants_documents: false, tenancy: 'current',
-    use_question: USE_Q_RE.test(q), proposed_use: null,
+    use_question: USE_Q_RE.test(q), proposed_use: null, term_question: TERM_Q_RE.test(q),
   }
   try {
     const raw = await anthropic(key, PARSE_MODEL, `Parse this commercial-real-estate document question. Reply with ONLY minified JSON, no prose:
-{"tenant": <tenant/company name mentioned or null>, "property": <property/shopping-center name mentioned or null>, "kinds": <array from ["lease","amendment","loan","jv","title","management","closing","estoppel","other"] describing the document kinds sought, or []>, "wants_documents": <true if the user wants the documents themselves pulled up/listed, false if they only want a factual answer>, "tenancy": <"past" if the question asks about expired/terminated/former/previous/inactive/vacated tenants or leases; "any" if it explicitly spans both current and past; otherwise "current">, "use_question": <true if the question asks whether some USE or TENANT TYPE may be placed/leased at the property, or asks what exclusive-use / prohibited-use restrictions apply>, "proposed_use": <the use or business type at issue, as a short noun phrase (e.g. "hamburger restaurant", "nail salon", "off-price apparel"), or null>}
+{"tenant": <tenant/company name mentioned or null>, "property": <property/shopping-center name mentioned or null>, "kinds": <array from ["lease","amendment","loan","jv","title","management","closing","estoppel","other"] describing the document kinds sought, or []>, "wants_documents": <true if the user wants the documents themselves pulled up/listed, false if they only want a factual answer>, "tenancy": <"past" if the question asks about expired/terminated/former/previous/inactive/vacated tenants or leases; "any" if it explicitly spans both current and past; otherwise "current">, "use_question": <true if the question asks whether some USE or TENANT TYPE may be placed/leased at the property, or asks what exclusive-use / prohibited-use restrictions apply>, "proposed_use": <the use or business type at issue, as a short noun phrase (e.g. "hamburger restaurant", "nail salon", "off-price apparel"), or null>, "term_question": <true if the question concerns lease TERM — when a lease expires or commences, what is rolling over, remaining term, renewal/extension option timing, or WALT>}
 Notes: "JV", "joint venture", "promote", "waterfall", "operating agreement", "OA", "capital account", "distribution", "IRR hurdle", "carried interest" all imply kind "jv". "mortgage", "deed of trust", "loan", "note", "DSCR", "covenant" imply "loan". "PMA", "property management" imply "management".
 A question like "can I put in a hamburger restaurant at X" is use_question=true, proposed_use="hamburger restaurant", tenant=null (Five Guys is NOT mentioned — do not infer the incumbent).
 Question: ${q}`, 300)
@@ -115,6 +132,7 @@ Question: ${q}`, 300)
       tenancy: j.tenancy === 'past' || j.tenancy === 'any' ? j.tenancy : 'current',
       use_question: j.use_question === true || USE_Q_RE.test(q),
       proposed_use: typeof j.proposed_use === 'string' && j.proposed_use.trim() ? j.proposed_use.trim() : null,
+      term_question: j.term_question === true || TERM_Q_RE.test(q),
     }
   } catch (_e) {
     return fallback
@@ -335,7 +353,7 @@ serve(async (req) => {
     const exclScope = (scope ?? []).filter(pid => caller.access === 'all' || canReadProperty(caller, pid))
 
     const fetchCount = 40
-    const [vecRes, ftsRes, kindDocsRes, titleRes, tenantDocsRaw, exclRes] = await Promise.all([
+    const [vecRes, ftsRes, kindDocsRes, titleRes, tenantDocsRaw, exclRes, leaseRegRes] = await Promise.all([
       // a. semantic (scoped, Voyage vectors)
       sb.rpc('match_chunks_voyage', { query_embedding: `[${vec.join(',')}]`, match_count: fetchCount, p_property_ids: scope }),
       // b. lexical (scoped)
@@ -370,6 +388,16 @@ serve(async (req) => {
         ? sb.from('property_exclusives')
             .select('id, property_id, owner_tenant, category, description, source_citation, keywords')
             .in('property_id', exclScope).eq('active', true).limit(60)
+        : Promise.resolve({ data: [] } as any),
+      // g. LEASE-REGISTER leg — term dates come from `leases`, not from documents.
+      //    An estoppel or a monthly report states the term as of ITS date; a later
+      //    amendment supersedes it, and the register already carries that. Retrieval
+      //    with no tenant named returns zero lease documents, so without this the
+      //    model answers term questions off stale snapshots.
+      (intent.term_question && exclScope.length)
+        ? sb.from('leases')
+            .select('id, property_id, expiration_date, commencement_date, leased_sf, status, is_rea_member, tenants(name), units(unit_number), lease_options(is_exercised, option_type, notice_deadline, term_if_exercised_months)')
+            .in('property_id', exclScope).eq('status', 'active').limit(200)
         : Promise.resolve({ data: [] } as any),
     ])
     if (vecRes.error) throw new Error('match_chunks_voyage failed: ' + vecRes.error.message)
@@ -775,6 +803,68 @@ ${listing}`, 500)
 - The registry block lists only the restrictions screened as potentially relevant to this use. Do not assert that no other exclusive applies.`
       : ''
 
+    // ── LEASE REGISTER — structured term data, authoritative over documents ──────
+    // `leases` is MRI-reconciled and updated as amendments are executed. An estoppel,
+    // notice letter or monthly report states the term AS OF ITS OWN DATE. With no
+    // tenant named, retrieval returns ZERO lease documents, so term answers were being
+    // assembled from those snapshots: Ross read 1/31/2027 "with two remaining options"
+    // when the option was exercised and the term runs to 1/31/2032; Krispy Kreme read
+    // 2026-04-30 against a true 2036-04-30. Both were already correct in this table.
+    type LeaseRow = {
+      expiration_date: string | null; commencement_date: string | null
+      leased_sf: number | null; is_rea_member: boolean | null
+      tenants: { name: string } | null
+      units: { unit_number: string } | null
+      lease_options: Array<{ is_exercised: boolean | null; option_type: string | null; notice_deadline: string | null }> | null
+    }
+    const allLeases = ((leaseRegRes.data ?? []) as unknown as LeaseRow[])
+    const regTenantNorm = intent.tenant ? normName(intent.tenant) : null
+    const matchesAsked = (n: string) => {
+      if (!regTenantNorm) return true
+      const a = normName(n)
+      return !!a && (a.includes(regTenantNorm) || regTenantNorm.includes(a))
+    }
+    // REA members are 0-sf reciprocal-easement placeholders on an artificial horizon
+    // date (2065 at KM East, 2073 at KM West). Listing them as expirations is wrong.
+    const reaLeases  = allLeases.filter(l => l.is_rea_member === true)
+    const realLeases = allLeases.filter(l => l.is_rea_member !== true && matchesAsked(l.tenants?.name ?? ''))
+      .sort((a, b) => (a.expiration_date ?? '9999-99-99').localeCompare(b.expiration_date ?? '9999-99-99'))
+
+    const fmtLease = (l: LeaseRow): string => {
+      const opts = l.lease_options ?? []
+      const remaining = opts.filter(o => o.is_exercised !== true).length
+      const nextNotice = opts.filter(o => o.is_exercised !== true && o.notice_deadline)
+        .map(o => o.notice_deadline as string).sort()[0] ?? null
+      return '- ' + [
+        l.tenants?.name ?? 'Unknown tenant',
+        l.units?.unit_number ? `Unit ${l.units.unit_number}` : null,
+        l.leased_sf ? `${Number(l.leased_sf).toLocaleString('en-US')} sf` : null,
+        l.commencement_date ? `commenced ${l.commencement_date}` : null,
+        `EXPIRES ${l.expiration_date ?? 'not set'}`,
+        opts.length
+          ? `${remaining} of ${opts.length} option(s) unexercised${nextNotice ? `, next notice due ${nextNotice}` : ''}`
+          : 'no options of record',
+      ].filter(Boolean).join(' | ')
+    }
+
+    const REG_CAP = 80
+    const shown = realLeases.slice(0, REG_CAP)
+    const today = new Date().toISOString().slice(0, 10)
+    const leaseRegisterNote = shown.length
+      ? `\n\nLEASE REGISTER — structured lease data, reconciled against MRI and maintained as amendments are executed. AUTHORITATIVE for term dates; prefer it over any date read out of a document. Today's date is ${today}. ${shown.length} active lease(s)${realLeases.length > REG_CAP ? ` shown of ${realLeases.length} (truncated — say so if the user needs the full list)` : ''}, earliest expiration first:\n` +
+        shown.map(fmtLease).join('\n') +
+        (reaLeases.length
+          ? `\nEXCLUDED — ${reaLeases.length} REA-member row(s) (${reaLeases.map(r => r.tenants?.name ?? '?').join(', ')}): 0-sf reciprocal-easement placeholders carrying an artificial horizon date, NOT real lease expirations. Do not list them as upcoming expirations.`
+          : '')
+      : ''
+
+    const termRules = shown.length
+      ? `
+- TERM DATES — use the LEASE REGISTER below for expirations, commencements and option counts. It is the system of record. Estoppel certificates, notice letters, rent rolls and monthly operational reports state the term AS OF THEIR OWN DATE and are routinely superseded by a later amendment; never prefer such a document over the register, and do not repeat an expiration from one without checking it against the register.
+- The register is maintained but not infallible. If an excerpt shows an EXECUTED instrument dated later than the register appears to reflect, do not silently pick one — give the register value, then flag the conflict and name the document so it can be reconciled.
+- When asked what expires soonest, measure against today's date given in the register block, and do not present an already-passed expiration as upcoming.`
+      : ''
+
     const tenancyNote = intent.tenancy === 'past'
       ? '\n- The user asked about PAST/terminated tenancies; excerpts are scoped accordingly.'
       : '\n- Scope is CURRENT tenants (per the latest rent roll). If an excerpt is tagged [FORMER TENANT], state plainly that the tenant is no longer current before describing its terms; never present former-tenant terms as active obligations.'
@@ -783,15 +873,15 @@ ${listing}`, 500)
       ? `\n\nA "Matched documents" list of ${documents.length} document(s) is shown to the user alongside your answer — if the user asked to pull up documents, briefly confirm what was found (count, kinds, date order) and refer them to that list; do not enumerate every file yourself.`
       : ''
 
-    const prompt = `You are the document-intelligence assistant for M&J Wilkow's commercial real estate asset-management platform. Answer the user's question using ONLY the document excerpts below. Rules:
+    const prompt = `You are the document-intelligence assistant for M&J Wilkow's commercial real estate asset-management platform. Answer the user's question using ONLY the material below — the document excerpts plus any structured register blocks. Rules:
 - Cite excerpts inline as [1], [2], … after each claim they support.
 - Quote exact figures ($, %, dates, section numbers) when present.
 - Multiple excerpts may share a citation number when they come from the same document — that is expected.
 - If the excerpts do not contain the answer, say so plainly — do not guess.
 - Note when later amendments supersede earlier terms (use effective dates).
-- Be concise: a short direct answer first, then supporting detail.${tenancyNote}${exclusivesRules}${docListNote}
+- Be concise: a short direct answer first, then supporting detail.${tenancyNote}${termRules}${exclusivesRules}${docListNote}
 
-QUESTION: ${q}${exclusivesNote}
+QUESTION: ${q}${leaseRegisterNote}${exclusivesNote}
 
 EXCERPTS:
 ${excerpts}`
