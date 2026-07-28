@@ -1,5 +1,8 @@
--- 20240137_pcf_versions_and_forecast
+-- 20240138_pcf_versions_and_forecast
 -- PCF Phase 4: the interaction layer - versions, forecast cells, and the resolved grid.
+--
+-- Renumbered from 20240137: a parallel session applied 20240137_comps_schema first, and the
+-- applied one wins. Nothing here collides with it - comps is the acquisitions leasing-comps DB.
 --
 -- THREE DECISIONS BY THE USER 2026-07-27 that this migration implements literally:
 --
