@@ -103,7 +103,12 @@ foreach ($dealId in $byDeal.Keys) {
     $uc = & curl.exe -s -o NUL -w "%{http_code}" -X POST "$BASE/storage/v1/object/documents/$spath" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: image/jpeg" -H "x-upsert: true" --data-binary "@$jpg"
     if ([int]$uc -lt 200 -or [int]$uc -ge 300) { throw "upload HTTP $uc" }
     if (@($existing).Count -eq 0) {
-      $docBody = @{ title=("Site plan (rendered) - " + $name); file_name='plan.jpg'; storage_path=$spath; doc_type='site_plan'; file_size_bytes=[long](Get-Item $jpg).Length; property_id=$null } | ConvertTo-Json
+      # stamp at insert -- see the register-accountability note in mirror_deal_docs.ps1.
+      # A rendered JPG is a derived artifact; hash the render this row describes.
+      $sha = $null
+      try { $sha = (Get-FileHash -LiteralPath $jpg -Algorithm SHA256).Hash.ToLower() } catch {}
+      $docBody = @{ title=("Site plan (rendered) - " + $name); file_name='plan.jpg'; storage_path=$spath; doc_type='site_plan'; file_size_bytes=[long](Get-Item $jpg).Length; property_id=$null;
+        processing_status='classified'; content_sha256=$sha } | ConvertTo-Json
       [System.IO.File]::WriteAllText($TMP,$docBody,$enc)
       $doc = & curl.exe -s -X POST "$BASE/rest/v1/documents" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=representation" --data-binary "@$TMP" | ConvertFrom-Json
       if (-not $doc[0].id) { throw 'documents row failed' }

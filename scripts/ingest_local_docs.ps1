@@ -124,8 +124,14 @@ foreach($f in $pdfs){
     $ebody = @{ model=$VOYAGE_MODEL; input=$blob.Substring(0,[Math]::Min(32000,$blob.Length)); input_type='document'; output_dimension=1024 } | ConvertTo-Json
     $er = Invoke-RestMethod -Method Post -Uri "https://api.voyageai.com/v1/embeddings" -Headers @{ Authorization="Bearer $VOYAGE_KEY" } -ContentType "application/json" -Body ([System.Text.Encoding]::UTF8.GetBytes($ebody)) -TimeoutSec 120
     $vec = $er.data[0].embedding
+    # processing_status + content_sha256 at insert, so register accountability is an
+    # invariant rather than something a periodic backfill has to keep restoring.
+    # 'extracted': this path embeds the doc and writes a chunk, so it IS processed.
+    $sha = $null
+    try { $sha = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLower() } catch {}
     $docRow = @{ property_id=$PropertyId; doc_type=(ToDocType $abs.doc_type); title=$title;
-                 file_name=$f.Name; file_path=$fp; is_indexed=$true; notes=(ConvertTo-Json $abs -Depth 8 -Compress) }
+                 file_name=$f.Name; file_path=$fp; is_indexed=$true; notes=(ConvertTo-Json $abs -Depth 8 -Compress);
+                 processing_status='extracted'; content_sha256=$sha }
     $ins = (Post 'documents' $docRow 'return=representation') | ConvertFrom-Json
     $docId = $ins[0].id
     $chunk = @{ document_id=$docId; chunk_index=0; content=$blob; embedding_voyage="[$($vec -join ',')]" }

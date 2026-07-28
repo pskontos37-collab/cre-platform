@@ -129,8 +129,14 @@ foreach($d in $deals){
   $spath = "pipeline/$($d.id)/mirror/_extracted/Site_Plan_from_OM.pdf"
   $uc = & curl.exe -s -o NUL -w "%{http_code}" -X POST "$BASE/storage/v1/object/documents/$spath" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/pdf" -H "x-upsert: true" --data-binary "@$out"
   if([int]$uc -lt 200 -or [int]$uc -ge 300){ Write-Output "    !! upload failed HTTP $uc"; continue }
+  # stamp at insert -- see the register-accountability note in mirror_deal_docs.ps1.
+  # This is a DERIVED artifact (a page range carved out of an OM), so hash the file
+  # we produced, which is the one this row actually describes.
+  $sha = $null
+  try { $sha = (Get-FileHash -LiteralPath $out -Algorithm SHA256).Hash.ToLower() } catch {}
   $docBody = @{ title="Site Plan (from OM, p.$range)"; file_name="Site_Plan_from_OM.pdf"; file_path=$src;
-    storage_path=$spath; doc_type='site_plan'; file_size_bytes=[long](Get-Item $out).Length; property_id=$null } | ConvertTo-Json
+    storage_path=$spath; doc_type='site_plan'; file_size_bytes=[long](Get-Item $out).Length; property_id=$null;
+    processing_status='classified'; content_sha256=$sha } | ConvertTo-Json
   [System.IO.File]::WriteAllText($TMP,$docBody,$enc)
   $docResp = & curl.exe -s -X POST "$BASE/rest/v1/documents" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H "Content-Type: application/json" -H "Prefer: return=representation" --data-binary "@$TMP" | ConvertFrom-Json
   if(-not $docResp -or -not $docResp[0].id){ Write-Output "    !! documents row failed"; continue }
