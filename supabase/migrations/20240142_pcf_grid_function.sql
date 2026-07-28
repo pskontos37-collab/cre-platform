@@ -1,4 +1,6 @@
--- 20240141_pcf_grid_function
+-- 20240142_pcf_grid_function
+-- (Renumbered twice: the comps session applied 20240141_comps_lookup_api, and before that
+--  20240137/139/140. The applied number always wins.)
 -- Replace the v_pcf_grid VIEW with a set-returning FUNCTION, because the view was
 -- unusable in the app.
 --
@@ -119,4 +121,4 @@ grant  execute on function public.pcf_grid(uuid) to authenticated, service_role;
 -- v_pcf_grid is left in place on purpose: it is the readable reference definition and is
 -- still fine for service-role/analytical use. The app must call pcf_grid() instead.
 comment on view public.v_pcf_grid is
-  'Reference definition only. Do NOT call from the app - it cannot push the version filter into the GL and times out under RLS. Use pcf_grid(version_id) (mig 20240141).';
+  'Reference definition only. Do NOT call from the app - it cannot push the version filter into the GL and times out under RLS. Use pcf_grid(version_id) (mig 20240142).';
