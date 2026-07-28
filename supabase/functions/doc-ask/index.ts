@@ -837,6 +837,7 @@ ${listing}`, 500)
     // when the option was exercised and the term runs to 1/31/2032; Krispy Kreme read
     // 2026-04-30 against a true 2036-04-30. Both were already correct in this table.
     type LeaseRow = {
+      property_id: string | null
       expiration_date: string | null; commencement_date: string | null
       rent_commencement_date: string | null
       leased_sf: number | null; is_rea_member: boolean | null
@@ -860,6 +861,45 @@ ${listing}`, 500)
 
     const today = new Date().toISOString().slice(0, 10)
 
+    // ── Rent-roll fallback ───────────────────────────────────────────────────────
+    // `lease_rent_schedule` is the contractual source but it is incomplete: Cold Stone
+    // and Barnes & Noble are both PAYING per the July 2026 MRI rent roll ($38.00/sf and
+    // $15.75/sf) and neither has a schedule row, so the schedule alone would report them
+    // as not-yet-commenced. Fall back to the newest loaded rent-roll snapshot.
+    // Keyed on SUITE, not tenant name: rent-roll rows carry no lease_id (0 of 48 linked),
+    // and the names genuinely differ — "SPIK, LLC" vs "Cold Stone Creamery",
+    // "Barnes & Noble Booksellers, Inc." vs "Barnes and Noble #3603".
+    type RrRow = { property_id: string; suite: string | null; tenant_name: string | null
+                   monthly_base_rent: number | null; annual_base_rent: number | null; base_rent_psf: number | null }
+    const rrSnaps = ((rrPeriodRes.data ?? []) as Array<{ property_id: string; period_year: number; period_month: number; properties?: { name: string } | null }>)
+    const latestSnapByProp = new Map<string, { ym: number; year: number; month: number; name: string }>()
+    for (const s of rrSnaps) {
+      const ym = s.period_year * 100 + s.period_month
+      const prev = latestSnapByProp.get(s.property_id)
+      if (!prev || ym > prev.ym) latestSnapByProp.set(s.property_id, { ym, year: s.period_year, month: s.period_month, name: s.properties?.name ?? s.property_id })
+    }
+    const suiteKey = (pid: string | null, suite: string | null) =>
+      `${pid ?? ''}|${(suite ?? '').trim().toUpperCase()}`
+    const rrBySuite = new Map<string, RrRow>()
+    if (intent.rent_question && latestSnapByProp.size) {
+      for (const [pid, snap] of latestSnapByProp) {
+        const { data: rrRows } = await sb.from('rent_roll_rows')
+          .select('property_id, suite, tenant_name, monthly_base_rent, annual_base_rent, base_rent_psf, rent_roll_snapshots!inner(period_year, period_month)')
+          .eq('property_id', pid)
+          .eq('rent_roll_snapshots.period_year', snap.year)
+          .eq('rent_roll_snapshots.period_month', snap.month)
+          .limit(400)
+        for (const r of ((rrRows ?? []) as unknown as RrRow[])) {
+          if (!r.suite) continue
+          const k = suiteKey(r.property_id, r.suite)
+          const existing = rrBySuite.get(k)
+          // A suite can appear twice (e.g. the tenant row plus a "Vacant" row) — keep the
+          // one that actually carries rent.
+          if (!existing || (existing.monthly_base_rent == null && r.monthly_base_rent != null)) rrBySuite.set(k, r)
+        }
+      }
+    }
+
     // Current contractual rent = the latest schedule step already in effect. Most leases
     // here carry only ONE step (29 of 32 at KM East, avg 1.6 rows), so an effective date
     // of 2006 usually means flat rent rather than a stale row — Arby's, GNC and Island
@@ -879,16 +919,22 @@ ${listing}`, 500)
           + ` as of ${inEffect.effective_date}`
           + (next ? `; next step ${usd(next.annual_rent ?? 0)} on ${next.effective_date}` : '')
       }
-      // No step in effect. Distinguish a lease that is EXECUTED but not yet paying from
-      // one that IS paying but whose rent has not been loaded here — the two look
-      // identical in the table and mean opposite things.
+      // No contractual step. Try the rent roll before concluding anything — it is the
+      // more complete source and covers tenants the schedule has never had a row for.
+      const rr = rrBySuite.get(suiteKey(l.property_id, l.units?.unit_number ?? null))
+      if (rr && rr.monthly_base_rent != null) {
+        const snap = latestSnapByProp.get(l.property_id ?? '')
+        const annual = rr.annual_base_rent ?? Number(rr.monthly_base_rent) * 12
+        const psf = rr.base_rent_psf ?? (l.leased_sf ? annual / Number(l.leased_sf) : null)
+        return `rent ${usd(annual)}/yr` + (psf ? ` ($${Number(psf).toFixed(2)}/sf)` : '')
+          + ` per the MRI rent roll${snap ? ` ${snap.year}-${String(snap.month).padStart(2, '0')}` : ''}`
+          + ' (no contractual step in the lease rent schedule — rent-roll figure)'
+      }
+      // Genuinely nothing in either source. Now the RCD tells us which case this is.
       const rcd = l.rent_commencement_date
       if (!rcd) return 'rent NOT YET COMMENCED — lease/amendment EXECUTED, rent commencement date still TBD'
       if (rcd > today) return `rent NOT YET COMMENCED — lease EXECUTED, RCD ${rcd} (future)`
-      // NOT "no rent exists". Cold Stone at KM East reads $4,433.33/mo ($38.00/sf) on the
-      // July 2026 MRI rent roll while the platform's newest LOADED snapshot is 2025-09,
-      // which predates its 4/1/2026 rent start. The rent is real; this copy is behind.
-      return `RENT RUNNING BUT NOT LOADED HERE — RCD ${rcd} has PASSED, so this tenant IS paying. The figure is absent from the platform's schedule, most likely because the loaded rent roll predates the rent start. Do NOT report $0 or "no rent" — say the amount is not loaded and point at the current MRI rent roll`
+      return `RENT RUNNING BUT NOT IN EITHER SOURCE — RCD ${rcd} has PASSED, so this tenant IS paying and the figure is missing from both the lease rent schedule and the loaded rent roll. Do NOT report $0 or "no rent" — say the amount is not available here and point at the current MRI rent roll`
     }
 
     const fmtLease = (l: LeaseRow): string => {
