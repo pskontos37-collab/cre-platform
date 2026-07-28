@@ -29,6 +29,12 @@
 //                           returns ZERO lease documents, so term answers were being
 //                           built from stale snapshots. REA-member rows are held out:
 //                           0-sf easement placeholders on an artificial horizon date.
+//                           For RENT questions the same register carries the contractual
+//                           rent step in effect (from lease_rent_schedule, which
+//                           reconciles to the MRI rent roll) plus the latest LOADED
+//                           rent-roll period as provenance. Zero-rent is reported as one
+//                           of two DIFFERENT things: executed-but-RCD-not-yet-in-effect,
+//                           or a genuine missing row where the RCD has already passed.
 //      Semantic + lexical are fused with Reciprocal Rank Fusion; doc-kind/tenant/
 //      title docs are PINNED (guaranteed into the candidate set with their most
 //      on-topic chunks). Exclusives-leg chunks are pinned AND re-seated ahead of the
@@ -101,6 +107,10 @@ interface Intent {
   // MRI-reconciled and kept current, whereas an estoppel or a monthly report is a
   // point-in-time snapshot that a later amendment may have superseded.
   term_question: boolean
+  // A question about RENT — base rent, psf, escalations, totals. Same reasoning as
+  // term: the figures live in `lease_rent_schedule` (which reconciles to the MRI rent
+  // roll), while documents carry budgets and years-old snapshots.
+  rent_question: boolean
 }
 
 // Belt-and-braces for the use_question flag: if the parse fails or the model is
@@ -110,14 +120,19 @@ const USE_Q_RE = /\b(exclusive|exclusivit|prohibited use|restricted use|use rest
 // Same belt-and-braces for term questions.
 const TERM_Q_RE = /\b(expir\w*|lease end|end of (?:the )?term|lease term|term end\w*|roll ?over|rollover|renew\w*|extension option|option to extend|commence\w*|walt|weighted average lease term|maturit\w*|vacat\w*|when does .{0,40}\blease\b|how (?:long|much time) .{0,30}\blease\b)\b/i
 
+// ...and for rent questions. "psf"/"per square foot" counts on its own because that is
+// almost always a rent question in this corpus.
+const RENT_Q_RE = /\b(base rent|rent|rents|rental rate|escalation|escalat\w*|psf|per square foot|per sf|rent roll|abatement|free rent|gross rent|net effective)\b/i
+
 async function parseIntent(q: string, key: string): Promise<Intent> {
   const fallback: Intent = {
     tenant: null, property: null, kinds: [], wants_documents: false, tenancy: 'current',
-    use_question: USE_Q_RE.test(q), proposed_use: null, term_question: TERM_Q_RE.test(q),
+    use_question: USE_Q_RE.test(q), proposed_use: null,
+    term_question: TERM_Q_RE.test(q), rent_question: RENT_Q_RE.test(q),
   }
   try {
     const raw = await anthropic(key, PARSE_MODEL, `Parse this commercial-real-estate document question. Reply with ONLY minified JSON, no prose:
-{"tenant": <tenant/company name mentioned or null>, "property": <property/shopping-center name mentioned or null>, "kinds": <array from ["lease","amendment","loan","jv","title","management","closing","estoppel","other"] describing the document kinds sought, or []>, "wants_documents": <true if the user wants the documents themselves pulled up/listed, false if they only want a factual answer>, "tenancy": <"past" if the question asks about expired/terminated/former/previous/inactive/vacated tenants or leases; "any" if it explicitly spans both current and past; otherwise "current">, "use_question": <true if the question asks whether some USE or TENANT TYPE may be placed/leased at the property, or asks what exclusive-use / prohibited-use restrictions apply>, "proposed_use": <the use or business type at issue, as a short noun phrase (e.g. "hamburger restaurant", "nail salon", "off-price apparel"), or null>, "term_question": <true if the question concerns lease TERM — when a lease expires or commences, what is rolling over, remaining term, renewal/extension option timing, or WALT>}
+{"tenant": <tenant/company name mentioned or null>, "property": <property/shopping-center name mentioned or null>, "kinds": <array from ["lease","amendment","loan","jv","title","management","closing","estoppel","other"] describing the document kinds sought, or []>, "wants_documents": <true if the user wants the documents themselves pulled up/listed, false if they only want a factual answer>, "tenancy": <"past" if the question asks about expired/terminated/former/previous/inactive/vacated tenants or leases; "any" if it explicitly spans both current and past; otherwise "current">, "use_question": <true if the question asks whether some USE or TENANT TYPE may be placed/leased at the property, or asks what exclusive-use / prohibited-use restrictions apply>, "proposed_use": <the use or business type at issue, as a short noun phrase (e.g. "hamburger restaurant", "nail salon", "off-price apparel"), or null>, "term_question": <true if the question concerns lease TERM — when a lease expires or commences, what is rolling over, remaining term, renewal/extension option timing, or WALT>, "rent_question": <true if the question concerns RENT — base rent, rent per square foot, escalations, rent totals, or rent roll figures>}
 Notes: "JV", "joint venture", "promote", "waterfall", "operating agreement", "OA", "capital account", "distribution", "IRR hurdle", "carried interest" all imply kind "jv". "mortgage", "deed of trust", "loan", "note", "DSCR", "covenant" imply "loan". "PMA", "property management" imply "management".
 A question like "can I put in a hamburger restaurant at X" is use_question=true, proposed_use="hamburger restaurant", tenant=null (Five Guys is NOT mentioned — do not infer the incumbent).
 Question: ${q}`, 300)
@@ -133,6 +148,7 @@ Question: ${q}`, 300)
       use_question: j.use_question === true || USE_Q_RE.test(q),
       proposed_use: typeof j.proposed_use === 'string' && j.proposed_use.trim() ? j.proposed_use.trim() : null,
       term_question: j.term_question === true || TERM_Q_RE.test(q),
+      rent_question: j.rent_question === true || RENT_Q_RE.test(q),
     }
   } catch (_e) {
     return fallback
@@ -353,7 +369,7 @@ serve(async (req) => {
     const exclScope = (scope ?? []).filter(pid => caller.access === 'all' || canReadProperty(caller, pid))
 
     const fetchCount = 40
-    const [vecRes, ftsRes, kindDocsRes, titleRes, tenantDocsRaw, exclRes, leaseRegRes] = await Promise.all([
+    const [vecRes, ftsRes, kindDocsRes, titleRes, tenantDocsRaw, exclRes, leaseRegRes, rrPeriodRes] = await Promise.all([
       // a. semantic (scoped, Voyage vectors)
       sb.rpc('match_chunks_voyage', { query_embedding: `[${vec.join(',')}]`, match_count: fetchCount, p_property_ids: scope }),
       // b. lexical (scoped)
@@ -394,10 +410,20 @@ serve(async (req) => {
       //    amendment supersedes it, and the register already carries that. Retrieval
       //    with no tenant named returns zero lease documents, so without this the
       //    model answers term questions off stale snapshots.
-      (intent.term_question && exclScope.length)
+      ((intent.term_question || intent.rent_question) && exclScope.length)
         ? sb.from('leases')
-            .select('id, property_id, expiration_date, commencement_date, leased_sf, status, is_rea_member, tenants(name), units(unit_number), lease_options(is_exercised, option_type, notice_deadline, term_if_exercised_months)')
+            .select('id, property_id, expiration_date, commencement_date, rent_commencement_date, leased_sf, status, is_rea_member, tenants(name), units(unit_number), lease_options(is_exercised, option_type, notice_deadline, term_if_exercised_months), lease_rent_schedule(effective_date, annual_rent, rent_per_sf)')
             .in('property_id', exclScope).eq('status', 'active').limit(200)
+        : Promise.resolve({ data: [] } as any),
+      // h. Latest MRI rent-roll period per scoped property — provenance only, so the
+      //    answer can say how current the independent cross-check is. The KM East
+      //    snapshot sat at 2025-09 while 2026 rent rolls waited unloaded on the file
+      //    server, and nothing in the answer surfaced that gap.
+      (intent.rent_question && exclScope.length)
+        ? sb.from('rent_roll_snapshots')
+            .select('property_id, period_year, period_month, properties(name)')
+            .in('property_id', exclScope)
+            .order('period_year', { ascending: false }).order('period_month', { ascending: false }).limit(20)
         : Promise.resolve({ data: [] } as any),
     ])
     if (vecRes.error) throw new Error('match_chunks_voyage failed: ' + vecRes.error.message)
@@ -812,10 +838,12 @@ ${listing}`, 500)
     // 2026-04-30 against a true 2036-04-30. Both were already correct in this table.
     type LeaseRow = {
       expiration_date: string | null; commencement_date: string | null
+      rent_commencement_date: string | null
       leased_sf: number | null; is_rea_member: boolean | null
       tenants: { name: string } | null
       units: { unit_number: string } | null
       lease_options: Array<{ is_exercised: boolean | null; option_type: string | null; notice_deadline: string | null }> | null
+      lease_rent_schedule: Array<{ effective_date: string | null; annual_rent: number | null; rent_per_sf: number | null }> | null
     }
     const allLeases = ((leaseRegRes.data ?? []) as unknown as LeaseRow[])
     const regTenantNorm = intent.tenant ? normName(intent.tenant) : null
@@ -829,6 +857,35 @@ ${listing}`, 500)
     const reaLeases  = allLeases.filter(l => l.is_rea_member === true)
     const realLeases = allLeases.filter(l => l.is_rea_member !== true && matchesAsked(l.tenants?.name ?? ''))
       .sort((a, b) => (a.expiration_date ?? '9999-99-99').localeCompare(b.expiration_date ?? '9999-99-99'))
+
+    const today = new Date().toISOString().slice(0, 10)
+
+    // Current contractual rent = the latest schedule step already in effect. Most leases
+    // here carry only ONE step (29 of 32 at KM East, avg 1.6 rows), so an effective date
+    // of 2006 usually means flat rent rather than a stale row — Arby's, GNC and Island
+    // Nails all reconcile to the MRI rent roll to the penny. The effective date is
+    // always stated so a genuinely stale row is visible rather than implied.
+    const usd = (n: number) => '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
+    const rentOf = (l: LeaseRow): string => {
+      const steps = (l.lease_rent_schedule ?? []).filter(s => s.effective_date)
+      const inEffect = steps.filter(s => (s.effective_date as string) <= today)
+        .sort((a, b) => (b.effective_date as string).localeCompare(a.effective_date as string))[0]
+      if (inEffect && inEffect.annual_rent != null) {
+        const psf = inEffect.rent_per_sf ?? (l.leased_sf ? Number(inEffect.annual_rent) / Number(l.leased_sf) : null)
+        const next = steps.filter(s => (s.effective_date as string) > today)
+          .sort((a, b) => (a.effective_date as string).localeCompare(b.effective_date as string))[0]
+        return `rent ${usd(inEffect.annual_rent)}/yr`
+          + (psf ? ` ($${Number(psf).toFixed(2)}/sf)` : '')
+          + ` as of ${inEffect.effective_date}`
+          + (next ? `; next step ${usd(next.annual_rent ?? 0)} on ${next.effective_date}` : '')
+      }
+      // No step in effect. Distinguish a lease that is EXECUTED but not yet paying from
+      // a genuine data gap — the two look identical in the table and mean opposite things.
+      const rcd = l.rent_commencement_date
+      if (!rcd) return 'rent NOT YET COMMENCED — lease/amendment EXECUTED, rent commencement date still TBD'
+      if (rcd > today) return `rent NOT YET COMMENCED — lease EXECUTED, RCD ${rcd} (future)`
+      return `NO RENT ROW LOADED — RCD ${rcd} has PASSED, so rent should be running; this is a data gap, not a free-rent period`
+    }
 
     const fmtLease = (l: LeaseRow): string => {
       const opts = l.lease_options ?? []
@@ -844,18 +901,36 @@ ${listing}`, 500)
         opts.length
           ? `${remaining} of ${opts.length} option(s) unexercised${nextNotice ? `, next notice due ${nextNotice}` : ''}`
           : 'no options of record',
+        intent.rent_question ? rentOf(l) : null,
       ].filter(Boolean).join(' | ')
     }
 
     const REG_CAP = 80
     const shown = realLeases.slice(0, REG_CAP)
-    const today = new Date().toISOString().slice(0, 10)
     const leaseRegisterNote = shown.length
       ? `\n\nLEASE REGISTER — structured lease data, reconciled against MRI and maintained as amendments are executed. AUTHORITATIVE for term dates; prefer it over any date read out of a document. Today's date is ${today}. ${shown.length} active lease(s)${realLeases.length > REG_CAP ? ` shown of ${realLeases.length} (truncated — say so if the user needs the full list)` : ''}, earliest expiration first:\n` +
         shown.map(fmtLease).join('\n') +
         (reaLeases.length
           ? `\nEXCLUDED — ${reaLeases.length} REA-member row(s) (${reaLeases.map(r => r.tenants?.name ?? '?').join(', ')}): 0-sf reciprocal-easement placeholders carrying an artificial horizon date, NOT real lease expirations. Do not list them as upcoming expirations.`
           : '')
+        // Rent figures above are CONTRACTUAL. State how current the independent MRI
+        // cross-check is, because a loaded snapshot can lag the executed schedule by
+        // months and the answer should not imply otherwise.
+        + (intent.rent_question ? (() => {
+            const snaps = ((rrPeriodRes.data ?? []) as Array<{ property_id: string; period_year: number; period_month: number; properties?: { name: string } | null }>)
+            const latest = new Map<string, { label: string; ym: number }>()
+            for (const s of snaps) {
+              const ym = s.period_year * 100 + s.period_month
+              const prev = latest.get(s.property_id)
+              if (!prev || ym > prev.ym) {
+                latest.set(s.property_id, { label: `${s.properties?.name ?? s.property_id} = ${s.period_year}-${String(s.period_month).padStart(2, '0')}`, ym })
+              }
+            }
+            const lines = [...latest.values()].map(v => v.label)
+            return lines.length
+              ? `\nRENT PROVENANCE — rent above is CONTRACTUAL, from the lease rent schedule. The most recent MRI rent-roll snapshot LOADED into the platform is: ${lines.join('; ')}. If that period is well behind today, say so when quoting rent, because the independent cross-check is that old — do not describe the snapshot as current.`
+              : '\nRENT PROVENANCE — rent above is CONTRACTUAL, from the lease rent schedule. NO MRI rent-roll snapshot is loaded for this property, so there is no independent cross-check; say so when quoting rent.'
+          })() : '')
       : ''
 
     const termRules = shown.length
@@ -864,6 +939,14 @@ ${listing}`, 500)
 - The register is maintained but not infallible. If an excerpt shows an EXECUTED instrument dated later than the register appears to reflect, do not silently pick one — give the register value, then flag the conflict and name the document so it can be reconciled.
 - When asked what expires soonest, measure against today's date given in the register block, and do not present an already-passed expiration as upcoming.
 - Answer the question actually asked: only enumerate the whole register when the user asked for a full list. For a narrower question give the relevant rows. If you do list everything and cannot finish, say which rows you omitted rather than stopping mid-table.`
+      : ''
+
+    const rentRules = (shown.length && intent.rent_question)
+      ? `
+- RENT — use the LEASE REGISTER for base rent and rent per square foot. Documents in this corpus carry BUDGET rent (a plan, not actuals) and rent rolls that are years old; a budget total is not the answer to "what is the rent". If you cite a document figure at all, label it as budget or as an as-of-date snapshot and give the register figure as the answer.
+- Each rent figure carries an "as of" effective date. Quote it. Most leases here hold a single flat step, so an old effective date usually means rent has not escalated — do not describe it as stale unless something contradicts it.
+- Distinguish the two zero-rent cases exactly as the register labels them: "NOT YET COMMENCED" means the lease or amendment IS EXECUTED and rent simply has not started (RCD future or still TBD) — say that, and never report it as $0, vacant, or missing. "NO RENT ROW LOADED" means the RCD has already passed and the figure is genuinely absent — call that out as a data gap to be fixed.
+- Do not total or average rent across leases without saying how many of them you actually had figures for, and name the ones you excluded.`
       : ''
 
     const tenancyNote = intent.tenancy === 'past'
@@ -880,7 +963,7 @@ ${listing}`, 500)
 - Multiple excerpts may share a citation number when they come from the same document — that is expected.
 - If the excerpts do not contain the answer, say so plainly — do not guess.
 - Note when later amendments supersede earlier terms (use effective dates).
-- Be concise: a short direct answer first, then supporting detail.${tenancyNote}${termRules}${exclusivesRules}${docListNote}
+- Be concise: a short direct answer first, then supporting detail.${tenancyNote}${termRules}${rentRules}${exclusivesRules}${docListNote}
 
 QUESTION: ${q}${leaseRegisterNote}${exclusivesNote}
 
@@ -892,7 +975,21 @@ ${excerpts}`
     // stopped at "Kay Jewelers | C2 | 2031-12-", losing everything past 2031). Scale
     // the budget with the register, since that is the only block that can be long.
     const answerMax = shown.length > 12 ? 3000 : 1500
-    const answer = await anthropic(anthropicKey, ANSWER_MODEL, prompt, answerMax)
+    let answer = await anthropic(anthropicKey, ANSWER_MODEL, prompt, answerMax)
+
+    // "What is the current base rent for each tenant at KM East?" returned success:true
+    // with a ZERO-LENGTH answer, reproducibly (2/2), while still returning 11 sources —
+    // so the UI showed sources under a blank answer. Retry once with more headroom, and
+    // if it is still empty say so rather than handing back silence that reads as "no
+    // answer exists". Root cause not yet identified; this stops it being invisible.
+    if (!answer.trim()) {
+      answer = await anthropic(anthropicKey, ANSWER_MODEL, prompt, Math.max(answerMax, 3000))
+      if (!answer.trim()) {
+        console.error('doc-ask: empty answer', JSON.stringify({ q, promptChars: prompt.length, excerpts: hits.length, register: shown.length }))
+        answer = 'The answer could not be generated for this question (the model returned an empty response twice). '
+          + `The ${hits.length} source excerpt(s) below were retrieved and are listed alongside this message — try narrowing the question, or asking about fewer tenants at a time.`
+      }
+    }
 
     return new Response(JSON.stringify({ success: true, query: q, intent, answer, sources, documents }),
       { headers: { ...CORS, 'Content-Type': 'application/json' } })
