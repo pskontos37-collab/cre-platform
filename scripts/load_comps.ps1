@@ -97,6 +97,35 @@ $EMPTY = [ordered]@{
 }
 function NewVal { $h=[ordered]@{}; foreach($k in $EMPTY.Keys){ $h[$k]=$EMPTY[$k] }; return $h }
 
+# Mirror of the DB's CHECK constraints. Some cells hold prose, not assumptions -- e.g. a
+# rent-bump cell reading "Assumed to vacate upon expiration in 2021" yields 2021, which the
+# database correctly rejects as a percentage. Rather than learn that from a failed batch,
+# enforce the same invariants here and downgrade a violator to 'unparsed' (raw_value is
+# still kept, so nothing is lost and the cell surfaces for review).
+function Sanitize($v, [string]$metric){
+  $bad = $false
+  switch($v.value_kind){
+    'scalar'         { if($null -eq $v.num_value -or $null -ne $v.num_new -or $null -ne $v.num_min){ $bad=$true } }
+    'new_renew_pair' { if($null -eq $v.num_new -or $null -ne $v.num_value -or $null -ne $v.num_min){ $bad=$true } }
+    'range'          { if($null -eq $v.num_min -or $null -eq $v.num_max -or $v.num_max -lt $v.num_min -or $null -ne $v.num_value){ $bad=$true } }
+    'at_year'        { if($null -eq $v.num_value -or $null -eq $v.at_year){ $bad=$true } }
+    'vocab'          { if([string]::IsNullOrWhiteSpace($v.vocab_value)){ $bad=$true } }
+  }
+  # percentages live on 0-100 (assumption_pct_range_ck)
+  if($v.unit -eq 'pct' -or $v.unit -eq 'pct_of_rent'){
+    foreach($f in @('num_value','num_new','num_renew','num_min','num_max')){
+      $x = $v[$f]
+      if($null -ne $x -and ($x -lt 0 -or $x -gt 100)){ $bad=$true }
+    }
+  }
+  # renewal probability is never a fraction of a percent (assumption_pct_scale_ck)
+  if($metric -eq 'renewal_probability' -and $null -ne $v.num_value -and $v.num_value -ne 0 -and $v.num_value -lt 1){ $bad=$true }
+  if($bad){
+    $c = NewVal; $c.value_kind='unparsed'; return $c
+  }
+  return $v
+}
+
 function Normalize([string]$metric, [string]$raw){
   $v = NewVal
   $t = "$raw".Trim()
@@ -330,26 +359,32 @@ L ("built: source_property={0}  source_document={1}  assumption_set={2}" -f $pro
 
 # ---- assumption facts (scoped) --------------------------------------------
 $scopeTally=@{}; $kindTally=@{}; $unparsed=@{}
-$colPos=@{}
+# Column POSITION, not the label, identifies a cell. A tab can repeat a header (two
+# 'Retail' columns, or blanks), so keying the id on (set, metric, label) collides and
+# Postgres rejects the whole batch with 21000 "ON CONFLICT DO UPDATE command cannot
+# affect row a second time". dryrun_argus3 emits columns in order within each metric,
+# so the running index per (set, metric) IS the true column position.
+$emitIdx=@{}
 foreach($r in $as){
   $dKey = "$($r.state)|$($r.prop)|$($r.file)"
   if(-not $setIdByDocKey.ContainsKey($dKey)){ continue }
   $setId = $setIdByDocKey[$dKey]
-  $ck  = "$setId|$($r.category)"
-  if(-not $colPos.ContainsKey($ck)){ $colPos[$ck] = $colPos.Count }
+  $ek = "$setId|$($r.label)"
+  if(-not $emitIdx.ContainsKey($ek)){ $emitIdx[$ek] = 0 } else { $emitIdx[$ek] = $emitIdx[$ek] + 1 }
+  $colIdx = $emitIdx[$ek]
   $sk = ScopeKind $r.category
   $scopeTally[$sk] = [int]$scopeTally[$sk] + 1
-  $n  = Normalize $r.label $r.raw_value
+  $n  = Sanitize (Normalize $r.label $r.raw_value) $r.label
   $kindTally[$n.value_kind] = [int]$kindTally[$n.value_kind] + 1
   if($n.value_kind -eq 'unparsed'){
     $uk = "$($r.label) :: $($r.raw_value)"
     $unparsed[$uk] = [int]$unparsed[$uk] + 1
   }
   $factRows += [ordered]@{
-    id=(DetId ("a|$setId|$($r.label)|$($r.category)"))
+    id=(DetId ("a|$setId|$($r.label)|#$colIdx"))
     assumption_set_id=$setId; metric=$r.label
     scope_label=(NullOr $r.category); scope_kind=$sk; tenant_id=$null
-    column_position=$colPos[$ck]
+    column_position=$colIdx
     raw_value=$r.raw_value
     value_kind=$n.value_kind; unit=$n.unit; recurrence=$n.recurrence
     num_value=$n.num_value; num_new=$n.num_new; num_renew=$n.num_renew
@@ -362,7 +397,7 @@ foreach($r in $gl){
   $dKey = "$($r.state)|$($r.prop)|$($r.file)"
   if(-not $setIdByDocKey.ContainsKey($dKey)){ continue }
   $setId = $setIdByDocKey[$dKey]
-  $n = Normalize $r.label $r.raw_value
+  $n = Sanitize (Normalize $r.label $r.raw_value) $r.label
   $kindTally[$n.value_kind] = [int]$kindTally[$n.value_kind] + 1
   if($n.value_kind -eq 'unparsed'){
     $uk = "$($r.label) :: $($r.raw_value)"
@@ -465,6 +500,20 @@ function PostBatch($table, $rows, $conflictCols){
   $url = "$BASE/rest/v1/$table"
   if($conflictCols){ $url = "$url" + "?on_conflict=$conflictCols" }
   $payload = Join-Path $env:TEMP ("comps_" + $table + ".json")
+  # A duplicate conflict key inside one request makes Postgres reject the ENTIRE batch
+  # with 21000. Catch it here and say which key, instead of failing 2,000 rows in.
+  if($conflictCols){
+    $seenKey=@{}; $dupes=@(); $dedup=@()
+    foreach($row in $rows){
+      $kv = ($conflictCols -split ',' | ForEach-Object { "$($row[$_.Trim()])" }) -join '|'
+      if($seenKey.ContainsKey($kv)){ $dupes += $kv } else { $seenKey[$kv]=$true; $dedup += $row }
+    }
+    if($dupes.Count -gt 0){
+      L ("  WARN $table had {0} duplicate '{1}' values - kept first of each" -f $dupes.Count,$conflictCols)
+      ($dupes | Select-Object -First 5) | ForEach-Object { L "    dup: $_" }
+      $rows = $dedup
+    }
+  }
   $total = 0
   for($i=0; $i -lt $rows.Count; $i += $BatchSize){
     $slice = @($rows[$i..([Math]::Min($i+$BatchSize-1, $rows.Count-1))])
@@ -519,10 +568,28 @@ PostBatch 'assumption_set'  @($setRows.Values)  'id'
 PostBatch 'assumption'      $factRows           'id'
 
 # read back: return=minimal can 201 without persisting, so never trust the POST alone
-foreach($t in @('source_property','source_document','assumption_set','assumption')){
-  $cf = Join-Path $env:TEMP 'comps_count.json'
-  $cc = curl.exe -s -o $cf -w "%{http_code}" -H "apikey: $SECRET" -H "Authorization: Bearer $SECRET" `
-        -H "Accept-Profile: comps" -H "Prefer: count=exact" -H "Range: 0-0" -H "User-Agent: $UA" "$BASE/rest/v1/$t?select=id"
-  L ("  read-back $t -> HTTP $cc")
+# NOTE the ${tbl} braces. '?' is a LEGAL character in a PowerShell variable name (hence the
+# automatic variable $?), so "$BASE/rest/v1/$tbl?select=id" parses '$tbl?select' as one
+# undefined variable and silently requests /rest/v1/=id -> a 404 that looks like missing
+# data on a table that is in fact fully populated. PostBatch escaped this only because it
+# concatenates its query string separately.
+$expected = @{
+  source_property = $propRows.Count; source_document = $docRows.Count
+  assumption_set  = $setRows.Count;  assumption      = $factRows.Count
 }
-L 'DONE'
+$mismatch = $false
+foreach($tbl in @('source_property','source_document','assumption_set','assumption')){
+  $cf = Join-Path $env:TEMP 'comps_count.json'
+  $hf = Join-Path $env:TEMP 'comps_count.hdr'
+  $cc = curl.exe -s -o $cf -D $hf -w "%{http_code}" -H "apikey: $SECRET" -H "Authorization: Bearer $SECRET" `
+        -H "Accept-Profile: comps" -H "Prefer: count=exact" -H "Range: 0-0" -H "User-Agent: $UA" "$BASE/rest/v1/${tbl}?select=id"
+  $actual = $null
+  $cr = (Select-String -Path $hf -Pattern '^content-range:\s*\S+/(\d+)' -AllMatches)
+  if($cr){ $actual = [int]$cr.Matches[0].Groups[1].Value }
+  $exp = $expected[$tbl]
+  if($cc -ne '200' -and $cc -ne '206'){ L ("  read-back $tbl -> HTTP $cc  FAILED"); $mismatch=$true }
+  elseif($actual -ne $exp){ L ("  read-back $tbl -> $actual rows, EXPECTED $exp  MISMATCH"); $mismatch=$true }
+  else { L ("  read-back $tbl -> $actual rows  ok") }
+}
+if($mismatch){ throw 'read-back did not match what was sent' }
+L 'DONE - all tables verified against what this run built'
