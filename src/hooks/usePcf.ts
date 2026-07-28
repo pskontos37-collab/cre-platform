@@ -276,13 +276,17 @@ export function useLineDetail(propertyId: string | null, lineKey: string | null,
 // Writes
 // ---------------------------------------------------------------------------
 
-// Creating a version seeds BOTH sources, which is the whole of decision (1) plus
-// the balance-sheet carve-out:
+// Creating a version seeds from two sources, which is decision (1) plus the
+// balance-sheet carve-out:
 //   * judgment sections (income / opex / capital / non_operating) <- the approved
 //     budget, then they stay put
-//   * balance_sheet + equity <- v_pcf_bs_schedule_proposal, because MRI
-//     BF_PROFORMD budgets carry no A/R, payable, escrow or distribution lines and
-//     that is precisely the accrual->cash bridge
+//   * balance_sheet <- v_pcf_bs_schedule_proposal, because MRI BF_PROFORMD budgets
+//     carry no A/R, payable or escrow lines and that is precisely the accrual->cash
+//     bridge. Those deltas are mechanical, so last year's shape is a fair prior.
+//   * equity <- NOTHING, deliberately (mig 20240146). The first live test caught the
+//     seed repeating a one-time $15.7M November capital contribution into the next
+//     November, which silently invented cash in the recap. Contributions and
+//     distributions are discretionary decisions, not patterns; they stay blank.
 // A line with neither source is left genuinely blank, and the grid says so.
 export async function createPcfVersion(
   propertyId: string,
