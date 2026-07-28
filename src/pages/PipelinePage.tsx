@@ -1697,10 +1697,19 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
   const [market, setMarket] = useState<string | null>(null)
   const [pinned, setPinned] = useState(false)   // analyst overrode the guessed market
   // The K: tree keeps metro folders next to state folders, so Chicago and Illinois are
-  // separate markets covering one metro. OFF by default on purpose: a metro and its state
-  // are not the same rent market, so this stays an informed opt-in rather than a silent
-  // merge. The label carries the sibling's size so the choice is not invisible.
+  // separate markets covering one metro.
+  //
+  // ON by default when the market was AUTO-MATCHED from the deal: the deal really is in
+  // that metro, and the wider sample is the more useful answer -- Chicago alone is 52
+  // market-rent observations, Chicago + Illinois is 140. It is never hidden: the coverage
+  // line reads "... assumptions in Chicago + Illinois" and the checkbox shows checked.
+  //
+  // OFF when the analyst PICKS a market by hand, because choosing "Chicago" from the list
+  // is a deliberate narrowing and should be honoured literally.
+  //
+  // Once the analyst touches the checkbox themselves, neither rule overrides them again.
   const [withRelated, setWithRelated] = useState(false)
+  const [relatedTouched, setRelatedTouched] = useState(false)
 
   const marketsQ = useCompsMarkets()
   const marketRows = marketsQ.data
@@ -1710,11 +1719,17 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
   )
   useEffect(() => { if (!pinned) setMarket(guess) }, [guess, pinned])
 
+  const cover = (marketRows ?? []).find(m => m.market === market)
+  const nSiblings = cover?.relatedMarkets?.length ?? 0
+  // depend on the COUNT, not the derived array -- `siblings` is rebuilt every render
+  useEffect(() => {
+    if (!relatedTouched) setWithRelated(!pinned && nSiblings > 0)
+  }, [pinned, nSiblings, relatedTouched])
+
   const showTenantList = scope === 'tenant' && !tenant
   const rollupQ  = useCompsRollup(market, scope, tier, tenant, withRelated, open && !showTenantList)
   const tenantsQ = useCompsTenants(q, market, withRelated, open && showTenantList)
 
-  const cover = (marketRows ?? []).find(m => m.market === market)
   const totalCells = (marketRows ?? []).reduce((s, m) => s + m.nCells, 0)
   // siblings of the selected market, with their size, so the opt-in can be labelled honestly
   const siblings = (cover?.relatedMarkets ?? [])
@@ -1763,14 +1778,14 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
                 <option key={m.market} value={m.market}>{m.market} ({m.nProperties})</option>
               ))}
             </select>
-            {!pinned && market && <span style={{ ...ppill }}>matched from {deal.market || deal.state}</span>}
+            {!pinned && market && <span style={{ ...ppill }}>matched from {deal.market || deal.state}{withRelated && siblings.length > 0 ? ' (+ ' + siblings.map(s => s.market).join(' + ') + ')' : ''}</span>}
 
             {siblings.length > 0 && (
               <label
                 title={'The corpus files a metro folder next to its state folder, so these cover the same area. They are kept separate because a metro and its state are not the same rent market.'}
                 style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}
               >
-                <input type="checkbox" checked={withRelated} onChange={e => setWithRelated(e.target.checked)} />
+                <input type="checkbox" checked={withRelated} onChange={e => { setRelatedTouched(true); setWithRelated(e.target.checked) }} />
                 + {siblings.map(s => s.market).join(' + ')} ({sibProps} more {sibProps === 1 ? 'property' : 'properties'})
               </label>
             )}
