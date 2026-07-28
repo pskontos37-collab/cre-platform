@@ -26,6 +26,7 @@ import { AbstractsPage } from './pages/AbstractsPage'
 import { ReviewCenterPage } from './pages/ReviewCenterPage'
 import { ImportsPage } from './pages/ImportsPage'
 import { DocControlPage } from './pages/DocControlPage'
+import { OnboardingPage } from './pages/OnboardingPage'
 import { ClausesPage } from './pages/ClausesPage'
 import { DiligencePage } from './pages/DiligencePage'
 import { MriReconPage } from './pages/MriReconPage'
@@ -481,6 +482,18 @@ function AppRoutes() {
             <RequirePage pageKey="doccontrol">
               <AppLayout>
                 <DocControlPage />
+              </AppLayout>
+            </RequirePage>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute>
+            <RequirePage pageKey="onboarding">
+              <AppLayout>
+                <OnboardingPage />
               </AppLayout>
             </RequirePage>
           </ProtectedRoute>
