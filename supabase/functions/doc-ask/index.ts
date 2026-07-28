@@ -880,11 +880,15 @@ ${listing}`, 500)
           + (next ? `; next step ${usd(next.annual_rent ?? 0)} on ${next.effective_date}` : '')
       }
       // No step in effect. Distinguish a lease that is EXECUTED but not yet paying from
-      // a genuine data gap — the two look identical in the table and mean opposite things.
+      // one that IS paying but whose rent has not been loaded here — the two look
+      // identical in the table and mean opposite things.
       const rcd = l.rent_commencement_date
       if (!rcd) return 'rent NOT YET COMMENCED — lease/amendment EXECUTED, rent commencement date still TBD'
       if (rcd > today) return `rent NOT YET COMMENCED — lease EXECUTED, RCD ${rcd} (future)`
-      return `NO RENT ROW LOADED — RCD ${rcd} has PASSED, so rent should be running; this is a data gap, not a free-rent period`
+      // NOT "no rent exists". Cold Stone at KM East reads $4,433.33/mo ($38.00/sf) on the
+      // July 2026 MRI rent roll while the platform's newest LOADED snapshot is 2025-09,
+      // which predates its 4/1/2026 rent start. The rent is real; this copy is behind.
+      return `RENT RUNNING BUT NOT LOADED HERE — RCD ${rcd} has PASSED, so this tenant IS paying. The figure is absent from the platform's schedule, most likely because the loaded rent roll predates the rent start. Do NOT report $0 or "no rent" — say the amount is not loaded and point at the current MRI rent roll`
     }
 
     const fmtLease = (l: LeaseRow): string => {
@@ -945,7 +949,7 @@ ${listing}`, 500)
       ? `
 - RENT — use the LEASE REGISTER for base rent and rent per square foot. Documents in this corpus carry BUDGET rent (a plan, not actuals) and rent rolls that are years old; a budget total is not the answer to "what is the rent". If you cite a document figure at all, label it as budget or as an as-of-date snapshot and give the register figure as the answer.
 - Each rent figure carries an "as of" effective date. Quote it. Most leases here hold a single flat step, so an old effective date usually means rent has not escalated — do not describe it as stale unless something contradicts it.
-- Distinguish the two zero-rent cases exactly as the register labels them: "NOT YET COMMENCED" means the lease or amendment IS EXECUTED and rent simply has not started (RCD future or still TBD) — say that, and never report it as $0, vacant, or missing. "NO RENT ROW LOADED" means the RCD has already passed and the figure is genuinely absent — call that out as a data gap to be fixed.
+- Distinguish the two zero-rent cases exactly as the register labels them, and never report either as $0, vacant, or "no rent". "NOT YET COMMENCED" means the lease or amendment IS EXECUTED and rent simply has not started (RCD future or still TBD). "RENT RUNNING BUT NOT LOADED HERE" means the tenant IS paying and only this platform's copy is missing the figure — say the amount is not loaded and refer the user to the current MRI rent roll; do not describe it as an absent or unknown rent.
 - Do not total or average rent across leases without saying how many of them you actually had figures for, and name the ones you excluded.`
       : ''
 
