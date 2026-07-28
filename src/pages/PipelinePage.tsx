@@ -1696,6 +1696,11 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
   const [q, setQ] = useState('')
   const [market, setMarket] = useState<string | null>(null)
   const [pinned, setPinned] = useState(false)   // analyst overrode the guessed market
+  // The K: tree keeps metro folders next to state folders, so Chicago and Illinois are
+  // separate markets covering one metro. OFF by default on purpose: a metro and its state
+  // are not the same rent market, so this stays an informed opt-in rather than a silent
+  // merge. The label carries the sibling's size so the choice is not invisible.
+  const [withRelated, setWithRelated] = useState(false)
 
   const marketsQ = useCompsMarkets()
   const marketRows = marketsQ.data
@@ -1706,11 +1711,19 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
   useEffect(() => { if (!pinned) setMarket(guess) }, [guess, pinned])
 
   const showTenantList = scope === 'tenant' && !tenant
-  const rollupQ  = useCompsRollup(market, scope, tier, tenant, open && !showTenantList)
-  const tenantsQ = useCompsTenants(q, market, open && showTenantList)
+  const rollupQ  = useCompsRollup(market, scope, tier, tenant, withRelated, open && !showTenantList)
+  const tenantsQ = useCompsTenants(q, market, withRelated, open && showTenantList)
 
   const cover = (marketRows ?? []).find(m => m.market === market)
   const totalCells = (marketRows ?? []).reduce((s, m) => s + m.nCells, 0)
+  // siblings of the selected market, with their size, so the opt-in can be labelled honestly
+  const siblings = (cover?.relatedMarkets ?? [])
+    .map(rm => (marketRows ?? []).find(m => m.market === rm))
+    .filter((m): m is NonNullable<typeof m> => !!m)
+  const sibProps = siblings.reduce((s, m) => s + m.nProperties, 0)
+  const included = withRelated && siblings.length
+    ? [market, ...siblings.map(s => s.market)].join(' + ')
+    : market
   const rows = rollupQ.data ?? []
   const tenants = tenantsQ.data ?? []
   const err = marketsQ.error ?? rollupQ.error ?? tenantsQ.error
@@ -1724,7 +1737,12 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
         <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>Leasing comps</div>
         <div style={{ fontSize: 10.5, color: 'var(--text-faint)', flex: 1 }}>
           {marketsQ.loading ? 'Loading corpus coverage...'
-            : market ? (cover ? cover.nProperties + ' properties, ' + cover.nCells.toLocaleString() + ' assumptions in ' + market : 'No comps in ' + market)
+            : market
+              ? (cover
+                  ? (cover.nProperties + (withRelated ? sibProps : 0)) + ' properties, '
+                    + (cover.nCells + (withRelated ? siblings.reduce((s, m) => s + m.nCells, 0) : 0)).toLocaleString()
+                    + ' assumptions in ' + included
+                  : 'No comps in ' + market)
             : totalCells.toLocaleString() + ' assumptions across ' + (marketRows ?? []).length + ' markets'}
         </div>
         <button onClick={() => setOpen(o => !o)} style={{ ...segBtn, border: '1px solid var(--border-2)', borderRadius: 6, background: 'var(--surface)', color: 'var(--text-muted)' }}>
@@ -1746,6 +1764,16 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
               ))}
             </select>
             {!pinned && market && <span style={{ ...ppill }}>matched from {deal.market || deal.state}</span>}
+
+            {siblings.length > 0 && (
+              <label
+                title={'The corpus files a metro folder next to its state folder, so these cover the same area. They are kept separate because a metro and its state are not the same rent market.'}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <input type="checkbox" checked={withRelated} onChange={e => setWithRelated(e.target.checked)} />
+                + {siblings.map(s => s.market).join(' + ')} ({sibProps} more {sibProps === 1 ? 'property' : 'properties'})
+              </label>
+            )}
 
             <div style={{ display: 'flex', border: '1px solid var(--border-2)', borderRadius: 6, overflow: 'hidden' }}>
               {(['space_category', 'tenant', 'floor_area'] as CompsScope[]).map(s => (
@@ -1773,7 +1801,7 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
               <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search a retailer, e.g. Starbucks"
                 style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }} />
               {tenantsQ.loading ? <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Searching...</div>
-                : tenants.length === 0 ? <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>No tenant comps{market ? ' in ' + market : ''} match that.</div>
+                : tenants.length === 0 ? <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>No tenant comps{market ? ' in ' + included : ''} match that.{siblings.length > 0 && !withRelated ? ' Try including ' + siblings.map(s => s.market).join(' + ') + '.' : ''}</div>
                 : (
                   <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
@@ -1811,7 +1839,7 @@ function CompsLookupPanel({ deal }: { deal: Deal }) {
               {rollupQ.loading ? <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Loading...</div>
                 : rows.length === 0 ? (
                   <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                    No {tier === 'all' ? '' : tier + ' '}comps for this filter{market ? ' in ' + market : ''}. Try All markets, or the Both tier.
+                    No {tier === 'all' ? '' : tier + ' '}comps for this filter{market ? ' in ' + included : ''}.{siblings.length > 0 && !withRelated ? ' Try including ' + siblings.map(s => s.market).join(' + ') + ', or' : ' Try'} All markets, or the Both tier.
                   </div>
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>

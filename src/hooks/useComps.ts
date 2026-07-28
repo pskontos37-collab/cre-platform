@@ -49,6 +49,11 @@ export interface CompsMarket {
   nCells: number
   earliest: string | null
   latest: string | null
+  // Markets covering the same geography, because the K: tree keeps a metro folder next
+  // to its state folder: Chicago/Illinois, Atlanta/Georgia, Boston/Massachusetts,
+  // DC/Maryland, DC/Virginia. Expansion is OPT-IN -- a metro and its state are not the
+  // same rent market, so we surface the choice rather than silently merging.
+  relatedMarkets: string[]
 }
 
 export type CompsScope = 'space_category' | 'tenant' | 'floor_area' | 'suite' | 'lease_term'
@@ -135,18 +140,20 @@ export function useCompsMarkets() {
   return useQuery<CompsMarket[]>(async () => {
     const { data, error } = await supabase.schema('comps')
       .from('v_market_coverage')
-      .select('market, n_properties, n_cells, earliest, latest')
+      .select('market, n_properties, n_cells, earliest, latest, related_markets')
       .order('market')
     if (error) throw new Error(error.message)
     return ((data ?? []) as any[]).map(r => ({
       market: r.market, nProperties: num(r.n_properties), nCells: num(r.n_cells),
       earliest: r.earliest ?? null, latest: r.latest ?? null,
+      relatedMarkets: (r.related_markets ?? []) as string[],
     }))
   }, [])
 }
 
 export function useCompsRollup(
-  market: string | null, scope: CompsScope, tier: CompsTier, tenant: string | null, enabled: boolean,
+  market: string | null, scope: CompsScope, tier: CompsTier, tenant: string | null,
+  includeRelated: boolean, enabled: boolean,
 ) {
   return useQuery<CompsRollupRow[]>(async () => {
     if (!enabled) return []
@@ -156,6 +163,7 @@ export function useCompsRollup(
       p_tier: tier === 'all' ? null : tier,
       p_asset: null,
       p_tenant: tenant,
+      p_include_related: includeRelated,
     })
     if (error) throw new Error(error.message)
     return ((data ?? []) as any[]).map(r => ({
@@ -165,14 +173,17 @@ export function useCompsRollup(
       minValue: numOrNull(r.min_value), maxValue: numOrNull(r.max_value),
       earliest: r.earliest ?? null, latest: r.latest ?? null,
     }))
-  }, [market, scope, tier, tenant, enabled])
+  }, [market, scope, tier, tenant, includeRelated, enabled])
 }
 
-export function useCompsTenants(query: string, market: string | null, enabled: boolean) {
+export function useCompsTenants(
+  query: string, market: string | null, includeRelated: boolean, enabled: boolean,
+) {
   return useQuery<CompsTenantRow[]>(async () => {
     if (!enabled) return []
     const { data, error } = await supabase.schema('comps').rpc('lookup_tenants', {
       p_query: query || null, p_market: market, p_limit: 40,
+      p_include_related: includeRelated,
     })
     if (error) throw new Error(error.message)
     return ((data ?? []) as any[]).map(r => ({
@@ -182,5 +193,5 @@ export function useCompsTenants(query: string, market: string | null, enabled: b
       earliest: r.earliest ?? null, latest: r.latest ?? null,
       inTenantMaster: Boolean(r.in_tenant_master),
     }))
-  }, [query, market, enabled])
+  }, [query, market, includeRelated, enabled])
 }
