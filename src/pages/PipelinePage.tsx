@@ -20,6 +20,11 @@ import {
   type CapitalPartner, type NewDeal, type OmExtraction,
 } from '../hooks/usePipeline'
 import { useAssignableUsers, indexUsers, userLabel } from '../hooks/useTasks'
+import {
+  useCompsMarkets, useCompsRollup, useCompsTenants, resolveCompsMarket,
+  formatCompsValue, COMPS_SCOPE_LABEL, COMPS_UNIT_NOTE,
+  type CompsScope, type CompsTier,
+} from '../hooks/useComps'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { PdfDownloadButton, sanitizeFilename } from '../reports/PdfDownloadButton'
@@ -1655,6 +1660,7 @@ function UnderwritingTab({ deal, busy, onSaveModel, docs, refetchDocs, onChanged
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <UwSourcesPanel deal={deal} docs={docs} refetchDocs={refetchDocs} onChanged={onChanged} createdBy={createdBy} />
+      <CompsLookupPanel deal={deal} />
       <div style={{ display: 'flex', border: '1px solid var(--border-2)', borderRadius: 6, overflow: 'hidden', alignSelf: 'flex-start' }}>
         {(['simple', 'tenant'] as const).map(md => (
           <button key={md} onClick={() => setMode(md)} style={{ ...segBtn, background: mode === md ? 'var(--accent, #466371)' : 'var(--surface)', color: mode === md ? '#fff' : 'var(--text-muted)' }}>
@@ -1665,6 +1671,183 @@ function UnderwritingTab({ deal, busy, onSaveModel, docs, refetchDocs, onChanged
       {mode === 'simple'
         ? <SimpleUwEditor key={uwKey} deal={deal} busy={busy} onSaveModel={onSaveModel} />
         : <TenantUwEditor key={uwKey} deal={deal} busy={busy} onSaveModel={onSaveModel} />}
+    </div>
+  )
+}
+
+// ── Leasing comps — what this firm has historically ASSUMED for a market, a
+// space category, or a named tenant, mined from the Argus Assumptions tab of
+// ~800 CF models in the acquisition corpus (schema `comps`, mig 20240137+).
+//
+// Read-only on purpose: it answers "what did we use last time" while the analyst
+// fills the model in, and never writes. INTERNAL ONLY -- the source material came
+// under confidentiality agreements, so this must not reach LP-facing output.
+//
+// Two rules the UI has to respect, both learned from the data:
+//   - Rows are grouped by UNIT, so leasing commissions can legitimately show two
+//     lines (percent of rent AND dollars PSF). Never collapse them.
+//   - Every figure carries n and a vintage range. Corpus models span 2017-2026;
+//     an undated comp is worse than no comp.
+function CompsLookupPanel({ deal }: { deal: Deal }) {
+  const [open, setOpen] = useState(false)
+  const [scope, setScope] = useState<CompsScope>('space_category')
+  const [tier, setTier] = useState<CompsTier>('internal')
+  const [tenant, setTenant] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  const [market, setMarket] = useState<string | null>(null)
+  const [pinned, setPinned] = useState(false)   // analyst overrode the guessed market
+
+  const marketsQ = useCompsMarkets()
+  const marketRows = marketsQ.data
+  const guess = useMemo(
+    () => resolveCompsMarket(deal.market, deal.state, (marketRows ?? []).map(m => m.market)),
+    [deal.market, deal.state, marketRows],
+  )
+  useEffect(() => { if (!pinned) setMarket(guess) }, [guess, pinned])
+
+  const showTenantList = scope === 'tenant' && !tenant
+  const rollupQ  = useCompsRollup(market, scope, tier, tenant, open && !showTenantList)
+  const tenantsQ = useCompsTenants(q, market, open && showTenantList)
+
+  const cover = (marketRows ?? []).find(m => m.market === market)
+  const totalCells = (marketRows ?? []).reduce((s, m) => s + m.nCells, 0)
+  const rows = rollupQ.data ?? []
+  const tenants = tenantsQ.data ?? []
+  const err = marketsQ.error ?? rollupQ.error ?? tenantsQ.error
+
+  const vintage = (a: string | null, b: string | null) =>
+    !a ? '--' : (a.slice(0, 4) === (b ?? '').slice(0, 4) ? a.slice(0, 4) : a.slice(0, 4) + '-' + (b ?? '').slice(0, 4))
+
+  return (
+    <div style={{ border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: 10, padding: '11px 13px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>Leasing comps</div>
+        <div style={{ fontSize: 10.5, color: 'var(--text-faint)', flex: 1 }}>
+          {marketsQ.loading ? 'Loading corpus coverage...'
+            : market ? (cover ? cover.nProperties + ' properties, ' + cover.nCells.toLocaleString() + ' assumptions in ' + market : 'No comps in ' + market)
+            : totalCells.toLocaleString() + ' assumptions across ' + (marketRows ?? []).length + ' markets'}
+        </div>
+        <button onClick={() => setOpen(o => !o)} style={{ ...segBtn, border: '1px solid var(--border-2)', borderRadius: 6, background: 'var(--surface)', color: 'var(--text-muted)' }}>
+          {open ? 'Hide' : 'What have we assumed before?'}
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 11, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <select
+              value={market ?? ''}
+              onChange={e => { setPinned(true); setMarket(e.target.value || null); setTenant(null) }}
+              style={{ fontSize: 11.5, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }}
+            >
+              <option value="">All markets</option>
+              {(marketRows ?? []).map(m => (
+                <option key={m.market} value={m.market}>{m.market} ({m.nProperties})</option>
+              ))}
+            </select>
+            {!pinned && market && <span style={{ ...ppill }}>matched from {deal.market || deal.state}</span>}
+
+            <div style={{ display: 'flex', border: '1px solid var(--border-2)', borderRadius: 6, overflow: 'hidden' }}>
+              {(['space_category', 'tenant', 'floor_area'] as CompsScope[]).map(s => (
+                <button key={s} onClick={() => { setScope(s); setTenant(null) }}
+                  style={{ ...segBtn, background: scope === s ? 'var(--accent, #466371)' : 'var(--surface)', color: scope === s ? '#fff' : 'var(--text-muted)' }}>
+                  {COMPS_SCOPE_LABEL[s]}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', border: '1px solid var(--border-2)', borderRadius: 6, overflow: 'hidden' }}>
+              {(['internal', 'broker', 'all'] as CompsTier[]).map(t => (
+                <button key={t} onClick={() => setTier(t)} title={t === 'internal' ? 'Our own underwriting' : t === 'broker' ? 'Numbers taken from the broker' : 'Both, not separated'}
+                  style={{ ...segBtn, background: tier === t ? 'var(--accent, #466371)' : 'var(--surface)', color: tier === t ? '#fff' : 'var(--text-muted)' }}>
+                  {t === 'internal' ? 'In-house' : t === 'broker' ? 'Broker' : 'Both'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {err && <div style={{ fontSize: 11, color: '#c0654e' }}>{err}</div>}
+
+          {showTenantList ? (
+            <>
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search a retailer, e.g. Starbucks"
+                style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }} />
+              {tenantsQ.loading ? <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Searching...</div>
+                : tenants.length === 0 ? <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>No tenant comps{market ? ' in ' + market : ''} match that.</div>
+                : (
+                  <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                      <thead><tr>
+                        <th style={th}>Tenant</th><th style={{ ...th, textAlign: 'right' }}>Obs</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Median rent</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Markets</th><th style={th}>Vintage</th>
+                      </tr></thead>
+                      <tbody>
+                        {tenants.map(t => (
+                          <tr key={t.tenant} onClick={() => setTenant(t.tenant)} style={{ cursor: 'pointer' }}>
+                            <td style={td}>
+                              {t.tenant}
+                              {t.inTenantMaster && <span style={{ ...ppill, marginLeft: 6 }} title="Also a tenant in our owned portfolio">owned</span>}
+                            </td>
+                            <td style={tdNum}>{t.obs}</td>
+                            <td style={tdNum}>{formatCompsValue(t.medRentPsf, 'usd_psf')}</td>
+                            <td style={tdNum}>{t.nMarkets}</td>
+                            <td style={td}>{vintage(t.earliest, t.latest)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+            </>
+          ) : (
+            <>
+              {tenant && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button onClick={() => setTenant(null)} style={{ ...segBtn, border: '1px solid var(--border-2)', borderRadius: 6, background: 'var(--surface)', color: 'var(--text-muted)' }}>Back to tenants</button>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{tenant}</div>
+                </div>
+              )}
+              {rollupQ.loading ? <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Loading...</div>
+                : rows.length === 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                    No {tier === 'all' ? '' : tier + ' '}comps for this filter{market ? ' in ' + market : ''}. Try All markets, or the Both tier.
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                    <thead><tr>
+                      <th style={th}>Assumption</th>
+                      <th style={{ ...th, textAlign: 'right' }}>n</th>
+                      <th style={{ ...th, textAlign: 'right' }}>p25</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Median</th>
+                      <th style={{ ...th, textAlign: 'right' }}>p75</th>
+                      <th style={th}>Vintage</th>
+                    </tr></thead>
+                    <tbody>
+                      {rows.map(r => (
+                        <tr key={r.metric + '|' + (r.unit ?? '')}>
+                          <td style={td}>
+                            {r.metricLabel}
+                            {r.unit && COMPS_UNIT_NOTE[r.unit] && <span style={{ color: 'var(--text-faint)', marginLeft: 6, fontSize: 10 }}>{COMPS_UNIT_NOTE[r.unit]}</span>}
+                          </td>
+                          <td style={tdNum} title={r.nProperties + ' properties'}>{r.n}</td>
+                          <td style={tdNum}>{formatCompsValue(r.p25, r.unit)}</td>
+                          <td style={{ ...tdNum, fontWeight: 700, color: 'var(--text)' }}>{formatCompsValue(r.median, r.unit)}</td>
+                          <td style={tdNum}>{formatCompsValue(r.p75, r.unit)}</td>
+                          <td style={td}>{vintage(r.earliest, r.latest)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+            </>
+          )}
+
+          <div style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.5 }}>
+            Reference only, and internal only: drawn from OMs and diligence files received under confidentiality agreements, so it must not be reproduced in LP-facing material. Sets whose tab named a different property are excluded. Two rows for one assumption means the corpus states it in two different units.
+          </div>
+        </div>
+      )}
     </div>
   )
 }
