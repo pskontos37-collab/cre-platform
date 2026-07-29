@@ -62,14 +62,26 @@ function GetTextPages($docId) {
     if ($r.Count -lt 1000) { break }
     $o += 1000
   }
-  return $set
+  # `return $set` would be WRONG: PowerShell ENUMERATES a collection on function output,
+  # so a set of one page came back as a bare [int] and `$have.Contains($i)` threw
+  # "[System.Int32] does not contain a method named 'Contains'". With
+  # $ErrorActionPreference='Continue' that failed per-document and silently skewed the
+  # tally - the first -WhatIf run reported 348 examined but only 167 accounted for.
+  # The unary comma wraps it so the HashSet survives as one object.
+  return ,$set
 }
 
 $examined = 0; $repaired = 0; $filledChunks = 0; $noGap = 0; $skipped = 0; $dead = 0
 foreach ($d in $docs) {
   if ($Limit -gt 0 -and $examined -ge $Limit) { break }
   $have = GetTextPages $d.id
-  if ($have.Count -eq 0) { $skipped++; continue }   # zero text: reindex_text's job, not ours
+  if ($null -eq $have -or $have.Count -eq 0) { $skipped++; continue }   # zero text: reindex_text's job
+  if ($have -isnot [System.Collections.Generic.HashSet[int]]) {
+    # Defensive: never let a non-set through to .Contains() again.
+    $tmp = New-Object System.Collections.Generic.HashSet[int]
+    foreach ($v in @($have)) { [void]$tmp.Add([int]$v) }
+    $have = $tmp
+  }
   $examined++
   $enc = [uri]::EscapeDataString("documents/$($d.storage_path)")
   $uri = "$BASE/functions/v1/pdf-extract?reindexText=1&skipEmbed=1&storagePath=$enc&documentId=$($d.id)&propertyId=$($d.property_id)"
