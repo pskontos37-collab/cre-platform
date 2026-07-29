@@ -110,25 +110,59 @@ for ($idx = 0; $idx -lt $docs.Count; $idx++) {
     # its ranged delete SPLICES, so batches accumulate. The first ranged call also
     # reports the document's true page_count, which is how the loop learns its bound.
     if ($PageBatch -gt 0 -and $msg0 -match 'WORKER_RESOURCE_LIMIT') {
-      $pstart = 1; $total = 0; $sum = 0; $pgFail = $false; $sawOcr = $false
-      while ($true) {
-        $pend = $pstart + $PageBatch - 1
-        $u2 = "$uri&pageStart=$pstart&pageEnd=$pend"
+      # ADAPTIVE: a fixed batch size does not work. Heavy pages cluster, so the same
+      # document can extract fine at 8 pages across most of its span and still OOM on
+      # one dense stretch (observed at pages 9-16, 1-8 and 25-32 on three files of
+      # 41.1 / 20.8 / 19.1 MB). Those three are Krispy Kreme, Results Physiotherapy
+      # and J. Crew, all needed for abstracts, and all extract cleanly at 2 pages with
+      # real text (needs_ocr false) - so they are oversized, NOT scans. Abandoning the
+      # document on one bad range would have wrongly sent them to paid OCR.
+      # On failure, halve the range and retry the halves; only a SINGLE page that still
+      # OOMs is a genuine dead end. Splicing makes this safe: each range clears only
+      # its own pages, so retrying a sub-range cannot disturb what already succeeded.
+      $sum = 0; $sawOcr = $false; $deadPages = @()
+      # One-page probe first: it reports the document's true page_count (MuPDF counts
+      # without loading the file), so the range list can be built even though the
+      # whole-document call just died.
+      $total = 0
+      try {
+        $r0 = Invoke-RestMethod -Method Post -Uri "$uri&pageStart=1&pageEnd=1" -Headers $H -UserAgent $UA -TimeoutSec 280
+        $total = [int]$r0.page_count
+        if ($r0.needs_ocr) { $sawOcr = $true }
+        $sum += [int]$r0.text_chunks
+      } catch { $total = 0 }
+      $queue = New-Object System.Collections.Generic.Queue[object]
+      if ($total -gt 1) {
+        for ($s = 2; $s -le $total; $s += $PageBatch) {
+          $queue.Enqueue(@{ s = $s; e = [Math]::Min($s + $PageBatch - 1, $total) })
+        }
+      }
+      while ($queue.Count -gt 0) {
+        $rg = $queue.Dequeue()
         try {
-          $r2 = Invoke-RestMethod -Method Post -Uri $u2 -Headers $H -UserAgent $UA -TimeoutSec 280
+          $r2 = Invoke-RestMethod -Method Post -Uri ("$uri&pageStart=$($rg.s)&pageEnd=$($rg.e)") -Headers $H -UserAgent $UA -TimeoutSec 280
+          if ($r2.needs_ocr) { $sawOcr = $true }
+          $sum += [int]$r2.text_chunks
         } catch {
-          $pgFail = $true
           $m2 = $_.Exception.Message; $rp2 = $_.Exception.Response
           if ($rp2) { try { $s2 = New-Object IO.StreamReader($rp2.GetResponseStream()); $m2 = $s2.ReadToEnd() } catch {} }
-          Log ("#$idx PAGED-FAIL pages $pstart-$pend :: " + (($m2 -replace '\s+',' ').Substring(0, [Math]::Min(160, $m2.Length))))
-          break
+          if ($m2 -match 'WORKER_RESOURCE_LIMIT' -and $rg.e -gt $rg.s) {
+            $mid = [Math]::Floor(($rg.s + $rg.e) / 2)
+            $queue.Enqueue(@{ s = $rg.s;    e = $mid })
+            $queue.Enqueue(@{ s = $mid + 1; e = $rg.e })
+            Log ("#$idx split pages $($rg.s)-$($rg.e) -> $($rg.s)-$mid + $($mid+1)-$($rg.e)")
+          } else {
+            $deadPages += "$($rg.s)-$($rg.e)"
+            Log ("#$idx PAGED-FAIL pages $($rg.s)-$($rg.e) :: " + (($m2 -replace '\s+',' ').Substring(0, [Math]::Min(140, $m2.Length))))
+          }
         }
-        if ($total -eq 0) { $total = [int]$r2.page_count }
-        if ($r2.needs_ocr) { $sawOcr = $true }
-        $sum += [int]$r2.text_chunks
-        if ($total -le 0 -or $pend -ge $total) { break }
-        $pstart = $pend + 1
         if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+      }
+      # Only a page that OOMs on its own is unrecoverable; partial coverage still counts
+      # as progress because the splice retained everything that did extract.
+      $pgFail = ($sum -eq 0 -and $deadPages.Count -gt 0)
+      if ($deadPages.Count -gt 0 -and $sum -gt 0) {
+        Log ("#$idx PARTIAL - unrecoverable pages: " + ($deadPages -join ','))
       }
       if (-not $pgFail -and $sum -gt 0) {
         $proc++; $okChunks += $sum
