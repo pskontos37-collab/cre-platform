@@ -8,13 +8,17 @@
 #   .\reindex_text.ps1 -Shard 1 -Of 4   ... etc
 #   # one property only:
 #   .\reindex_text.ps1 -PropertyId 00000000-0000-0000-0000-000000000010
+#   # one doc_subtype only (e.g. the lease originals that block re-abstraction):
+#   .\reindex_text.ps1 -DocSubtype lease_original -DelayMs 250
 #
 # Rollback: delete from document_chunks where kind='text';
 param(
   [string]$PropertyId = 'all',          # 'all' = every property (per-doc property_id); else one property id
+  [string]$DocSubtype = '',             # '' = any; else only this doc_subtype (e.g. lease_original)
   [int]$Shard = 0, [int]$Of = 1,        # process docs where index % Of == Shard (parallel workers)
   [int]$Limit = 0,                      # 0 = all; >0 = stop after N (testing)
-  [int]$DelayMs = 0                     # throttle: sleep between docs to protect the live prod DB
+  [int]$DelayMs = 0,                    # throttle: sleep between docs to protect the live prod DB
+  [switch]$NoResume                     # ignore the done-files; retry docs a prior run marked done
 )
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -33,6 +37,7 @@ $off = 0
 while ($true) {
   $sel = "select=id,storage_path,property_id&storage_path=like.p/*&order=id.asc&limit=1000&offset=$off"
   if ($PropertyId -ne 'all') { $sel += "&property_id=eq.$PropertyId" }
+  if ($DocSubtype -ne '')   { $sel += "&doc_subtype=eq.$DocSubtype" }
   $page = Invoke-RestMethod -Uri "$BASE/rest/v1/documents?$sel" -Headers $H -UserAgent $UA -TimeoutSec 90
   if (-not $page -or $page.Count -eq 0) { break }
   foreach ($d in $page) { $docs.Add($d) }
@@ -53,8 +58,16 @@ while ($true) {
 }
 # Load ALL shards' done-files (resume is shard-count-independent: a 2-worker
 # mop-up must still skip everything the original 4 workers finished).
-foreach ($df in (Get-ChildItem "$PSScriptRoot\reindex_text_done_s*.txt" -ErrorAction SilentlyContinue)) {
-  foreach ($id in (Get-Content $df.FullName)) { if ($id) { [void]$skip.Add($id.Trim()) } }
+# -NoResume skips this: a doc that came back needs_ocr or too_large was still
+# written to the done-file, so a retry pass MUST ignore it or those are exactly
+# the docs that get silently skipped. The DB skip-set above still applies, so
+# docs that genuinely HAVE text are never reprocessed.
+if ($NoResume) {
+  Log "NoResume: ignoring done-files; only DB-confirmed text-indexed docs are skipped"
+} else {
+  foreach ($df in (Get-ChildItem "$PSScriptRoot\reindex_text_done_s*.txt" -ErrorAction SilentlyContinue)) {
+    foreach ($id in (Get-Content $df.FullName)) { if ($id) { [void]$skip.Add($id.Trim()) } }
+  }
 }
 Log "skip set (already text-indexed / done): $($skip.Count)"
 
