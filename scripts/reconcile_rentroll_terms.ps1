@@ -46,6 +46,15 @@
 #     day left blank, formula gives 2032-04-28, and MRI rounds it to month-end 2032-04-30.
 #     Applying MRI there would overwrite a document-derived date with a rounding error, so
 #     deltas under 7 days are quarantined out of -Load and reported for a human.
+#  7. A FUTURE-TERM ROW CAN BE AN UNEXERCISED OPTION MRI HAS PRE-LOADED, NOT A COMMITTED TERM.
+#     Elase (Magnolia D03A): MRI shows 2032-05-01 to 2037-04-30, which is exactly the 60-month
+#     First Option Term - unexercised. Rolling it would have written an OPTION END DATE into
+#     leases.expiration_date, overstating the committed term by 5 years. Discriminator: if the
+#     future chain spans exactly term_if_exercised_months of an UNEXERCISED option on that
+#     lease, quarantine it. Checked against the four known cases: Results (24mo chain vs 48mo
+#     options) and CKE (24mo vs 60mo) pass through as real extensions; Elase (60mo vs 60mo) is
+#     held; Salt Grass (60mo vs 60mo) would also be held - correct, since it needed the exercise
+#     notice to prove it, which is a document question, not a rent-roll one.
 param([switch]$Load, [string]$PropertyId = 'all')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -86,7 +95,7 @@ foreach ($s in $snaps) { if (-not $latest.ContainsKey($s.property_id)) { $latest
 $props = Invoke-RestMethod -Uri "$BASE/rest/v1/properties?select=id,name&limit=200" -Headers $H -UserAgent $UA -TimeoutSec 60
 $pname = @{}; foreach ($p in $props) { $pname[$p.id] = $p.name }
 
-$ahead = @(); $behind = @(); $successors = @(); $rounding = @()
+$ahead = @(); $behind = @(); $successors = @(); $rounding = @(); $optionSuspect = @()
 
 foreach ($propId in $latest.Keys) {          # NOT $pid - that is a PS automatic variable (process id)
   $snap = $latest[$propId]
@@ -98,6 +107,19 @@ foreach ($propId in $latest.Keys) {          # NOT $pid - that is a PS automatic
   $unitBySuite = @{}; foreach ($u in $units) { $unitBySuite[[string]$u.unit_number] = $u.id }
   $leases = Invoke-RestMethod -Uri "$BASE/rest/v1/leases?select=id,unit_id,tenant_id,expiration_date,status&property_id=eq.$propId&status=eq.active&limit=2000" -Headers $H -UserAgent $UA -TimeoutSec 90
   $leaseByUnit = @{}; foreach ($lz in $leases) { if ($lz.unit_id) { $leaseByUnit[[string]$lz.unit_id] = $lz } }
+
+  # rule 7: unexercised option term lengths per lease, to spot a pre-loaded option row
+  $optMonths = @{}
+  if (@($leases).Count -gt 0) {
+    $ids = (@($leases) | ForEach-Object { $_.id }) -join ','
+    $opts = Invoke-RestMethod -Uri "$BASE/rest/v1/lease_options?select=lease_id,term_if_exercised_months,is_exercised&lease_id=in.($ids)&is_exercised=is.false&limit=2000" -Headers $H -UserAgent $UA -TimeoutSec 90
+    foreach ($o in $opts) {
+      if ($o.term_if_exercised_months) {
+        if (-not $optMonths.ContainsKey([string]$o.lease_id)) { $optMonths[[string]$o.lease_id] = @() }
+        $optMonths[[string]$o.lease_id] += [int]$o.term_if_exercised_months
+      }
+    }
+  }
 
   foreach ($grp in ($rows | Group-Object suite)) {
     $suite = $grp.Name
@@ -138,11 +160,20 @@ foreach ($propId in $latest.Keys) {          # NOT $pid - that is a PS automatic
     if ($dbEnd -eq $mriEnd) { continue }
 
     $gap = [Math]::Abs((([datetime]$mriEnd) - ([datetime]$dbEnd)).TotalDays)
+    # rule 7: does the future chain span exactly an unexercised option's term?
+    $curEnd = [datetime]$cur.lease_end
+    $chainMonths = [int][Math]::Round((($endDate - $curEnd).TotalDays / 30.4375))
+    $isOption = $false
+    if ($optMonths.ContainsKey([string]$lease.id)) {
+      foreach ($m in $optMonths[[string]$lease.id]) { if ([Math]::Abs($m - $chainMonths) -le 1) { $isOption = $true } }
+    }
     $rec = [pscustomobject]@{ Property = $label; Suite = $suite; Tenant = $cur.tenant_name
-                              LeaseId = $lease.id; DbEnd = $dbEnd; MriEnd = $mriEnd; GapDays = [int]$gap }
-    if ($gap -lt 7)          { $rounding += $rec }    # rule 6
+                              LeaseId = $lease.id; DbEnd = $dbEnd; MriEnd = $mriEnd
+                              GapDays = [int]$gap; ChainMo = $chainMonths }
+    if ($gap -lt 7)             { $rounding += $rec }        # rule 6
+    elseif ($isOption)          { $optionSuspect += $rec }   # rule 7
     elseif ($dbEnd -lt $mriEnd) { $ahead += $rec }
-    else                     { $behind += $rec }
+    else                        { $behind += $rec }
   }
 }
 
@@ -152,6 +183,9 @@ if ($ahead.Count -eq 0) { Write-Output '  none' } else { $ahead | Format-Table P
 
 Write-Output '---- leases AHEAD of MRI (report only - we may hold a documented term MRI lacks) ----'
 if ($behind.Count -eq 0) { Write-Output '  none' } else { $behind | Format-Table Property, Suite, Tenant, DbEnd, MriEnd -AutoSize | Out-String | Write-Output }
+
+Write-Output '---- OPTION-SUSPECT: chain length matches an UNEXERCISED option, NEVER auto-applied (rule 7) ----'
+if ($optionSuspect.Count -eq 0) { Write-Output '  none' } else { $optionSuspect | Format-Table Property, Suite, Tenant, DbEnd, MriEnd, ChainMo -AutoSize | Out-String | Write-Output }
 
 Write-Output '---- SUB-WEEK GAP: rounding-suspect, NEVER auto-applied (see safety rule 6) ----'
 if ($rounding.Count -eq 0) { Write-Output '  none' } else { $rounding | Format-Table Property, Suite, Tenant, DbEnd, MriEnd, GapDays -AutoSize | Out-String | Write-Output }
