@@ -1,0 +1,11 @@
+# Never let the reviewer read secrets
+.env
+.env.*
+*.local
+
+# Noise / not worth review context
+node_modules
+dist
+sample-data
+scripts/logs
+scripts/*.log
