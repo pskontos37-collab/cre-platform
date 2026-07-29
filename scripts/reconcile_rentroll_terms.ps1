@@ -22,11 +22,16 @@
 #   -PropertyId <uuid>   limit to one property.
 #
 # SAFETY RULES (each one is a bug this script would otherwise cause):
-#  1. WALK THE CHAIN ONLY WHILE THE TENANT MATCHES. Suite K5 at KM East chains
-#     Island Nails Spa -> Island Nails Spa -> MY DAY SPA (a different, signed successor).
-#     A naive max(lease_end) per suite hands Island Nails a term 5 years too long - which is
-#     exactly what leases.expiration_date already holds (2033-10-31). Stop at the tenant change
-#     and report the successor separately.
+#  1. WALK THE CHAIN WHILE THE TENANT IDENTITY HOLDS - AND IDENTITY INCLUDES ALIASES.
+#     A genuine successor tenant on the same suite must not extend the incumbent's term, so the
+#     chain stops at a real tenant change. But an MRI name change mid-chain is USUALLY an
+#     ASSIGNMENT of the same lease, not a successor: suite K5 at KM East chains Island Nails Spa
+#     -> Island Nails Spa -> "My Day Spa", and the Fourth Amendment (2023-12-29) Sec 2 shows that
+#     is one continuous lease assigned to MY DAY SPA K INC. and extended to 2033-10-31 - which
+#     leases.expiration_date correctly holds. Comparing bare MRI names called that a successor and
+#     produced a false "leases AHEAD of MRI" flag. Identity is therefore the tenant's name PLUS
+#     trade_name PLUS file_aliases ("My Day Spa" was already an alias on the Island Nails record).
+#     Only a name matching NONE of those stops the chain.
 #  2. REQUIRE CONTIGUITY (next.lease_start = prev.lease_end + 1). Signed-not-yet-open leases
 #     (Jersey Mike's, Naya, IKEA, KidStrong) sit alongside a 'Vacant' row with no occupied row
 #     at all - they are new leases, not extensions, and must not touch an existing lease.
@@ -55,6 +60,11 @@
 #     options) and CKE (24mo vs 60mo) pass through as real extensions; Elase (60mo vs 60mo) is
 #     held; Salt Grass (60mo vs 60mo) would also be held - correct, since it needed the exercise
 #     notice to prove it, which is a document question, not a rent-roll one.
+#
+# STANDING LESSON: every rule above was added because the previous version of this script would
+# have written a WRONG date. Two of them (1 and 7) were caught only by reading the governing
+# document. The rent roll tells you a term exists; it does not tell you what kind of term it is,
+# or whether a new name is a new tenant. Keep this report-only by default.
 param([switch]$Load, [string]$PropertyId = 'all')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -110,6 +120,9 @@ foreach ($propId in $latest.Keys) {          # NOT $pid - that is a PS automatic
 
   # rule 7: unexercised option term lengths per lease, to spot a pre-loaded option row
   $optMonths = @{}
+  # rule 1: every name a lease's tenant is known by (name + trade_name + file_aliases),
+  # so an MRI name change mid-chain can be recognised as an ASSIGNMENT, not a successor.
+  $tenantKeys = @{}
   if (@($leases).Count -gt 0) {
     $ids = (@($leases) | ForEach-Object { $_.id }) -join ','
     $opts = Invoke-RestMethod -Uri "$BASE/rest/v1/lease_options?select=lease_id,term_if_exercised_months,is_exercised&lease_id=in.($ids)&is_exercised=is.false&limit=2000" -Headers $H -UserAgent $UA -TimeoutSec 90
@@ -117,6 +130,16 @@ foreach ($propId in $latest.Keys) {          # NOT $pid - that is a PS automatic
       if ($o.term_if_exercised_months) {
         if (-not $optMonths.ContainsKey([string]$o.lease_id)) { $optMonths[[string]$o.lease_id] = @() }
         $optMonths[[string]$o.lease_id] += [int]$o.term_if_exercised_months
+      }
+    }
+    $tids = (@($leases) | Where-Object { $_.tenant_id } | ForEach-Object { $_.tenant_id }) -join ','
+    if ($tids) {
+      $tens = Invoke-RestMethod -Uri "$BASE/rest/v1/tenants?select=id,name,trade_name,file_aliases&id=in.($tids)&limit=2000" -Headers $H -UserAgent $UA -TimeoutSec 90
+      foreach ($tn in $tens) {
+        $set = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($nm in @($tn.name, $tn.trade_name)) { if ($nm) { [void]$set.Add((TKey $nm)) } }
+        foreach ($al in @($tn.file_aliases)) { if ($al) { [void]$set.Add((TKey $al)) } }
+        $tenantKeys[[string]$tn.id] = $set
       }
     }
   }
@@ -131,14 +154,26 @@ foreach ($propId in $latest.Keys) {          # NOT $pid - that is a PS automatic
     $cur = @($sr | Where-Object { $_.is_occupied }) | Select-Object -First 1
     if (-not $cur) { continue }              # rule 2: no occupied row = signed-not-open, not an extension
 
-    # rule 1 + 2: walk forward while contiguous AND same tenant
+    # resolve the lease FIRST - rule 1 needs its tenant's alias set before walking the chain
+    $uid = $unitBySuite[[string]$suite]
+    $lease = $null; if ($uid) { $lease = $leaseByUnit[[string]$uid] }
+
+    # rule 1: identity set = the MRI current-row name PLUS every name the lease's tenant is
+    # known by. An assigned lease keeps running under a new entity name; the alias is the
+    # evidence that it is the same lease.
+    $idKeys = New-Object System.Collections.Generic.HashSet[string]
+    [void]$idKeys.Add((TKey $cur.tenant_name))
+    if ($lease -and $lease.tenant_id -and $tenantKeys.ContainsKey([string]$lease.tenant_id)) {
+      foreach ($k in $tenantKeys[[string]$lease.tenant_id]) { [void]$idKeys.Add($k) }
+    }
+
+    # rule 1 + 2: walk forward while contiguous AND still the same tenant identity
     $endDate = [datetime]$cur.lease_end
-    $key = TKey $cur.tenant_name
     $steps = 0
     while ($true) {
       $next = @($sr | Where-Object { $_.lease_start -and ([datetime]$_.lease_start) -eq $endDate.AddDays(1) }) | Select-Object -First 1
       if (-not $next) { break }
-      if ((TKey $next.tenant_name) -ne $key) {
+      if (-not $idKeys.Contains((TKey $next.tenant_name))) {
         $successors += [pscustomobject]@{ Property = $label; Suite = $suite; Incumbent = $cur.tenant_name
                                           Successor = $next.tenant_name; Starts = $next.lease_start; Ends = $next.lease_end }
         break
@@ -150,8 +185,6 @@ foreach ($propId in $latest.Keys) {          # NOT $pid - that is a PS automatic
     if ($steps -eq 0) { continue }
 
     $mriEnd = $endDate.ToString('yyyy-MM-dd')
-    $uid = $unitBySuite[[string]$suite]
-    $lease = $null; if ($uid) { $lease = $leaseByUnit[[string]$uid] }
     if (-not $lease) {
       Write-Output ("  suite {0,-6} {1,-32} MRI term -> {2}  (NO ACTIVE LEASE MATCHED on suite)" -f $suite, $cur.tenant_name, $mriEnd)
       continue
