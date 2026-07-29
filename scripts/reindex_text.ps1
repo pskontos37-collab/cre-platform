@@ -19,7 +19,8 @@ param(
   [int]$Shard = 0, [int]$Of = 1,        # process docs where index % Of == Shard (parallel workers)
   [int]$Limit = 0,                      # 0 = all; >0 = stop after N (testing)
   [int]$DelayMs = 0,                    # throttle: sleep between docs to protect the live prod DB
-  [switch]$NoResume                     # ignore the done-files; retry docs a prior run marked done
+  [switch]$NoResume,                    # ignore the done-files; retry docs a prior run marked done
+  [int]$PageBatch = 20                  # on WORKER_RESOURCE_LIMIT, retry in page batches of this size (0 = off)
 )
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -99,8 +100,52 @@ for ($idx = 0; $idx -lt $docs.Count; $idx++) {
     $tag = if ($r.needs_ocr) { 'needs-ocr' } elseif ($r.too_large) { "too-large($($r.page_count)pg)" } else { "$($r.text_chunks) chunks" }
     if (($proc % 25) -eq 0 -or $r.too_large) { Log ("#$idx OK $([math]::Round($sw.Elapsed.TotalSeconds))s $tag (proc=$proc chunks=$okChunks ocr=$ocr big=$big fail=$fail)") }
   } catch {
-    $sw.Stop(); $fail++
-    $msg = $_.Exception.Message
+    $sw.Stop()
+    $msg0 = $_.Exception.Message
+    $resp0 = $_.Exception.Response
+    if ($resp0) { try { $sr0 = New-Object IO.StreamReader($resp0.GetResponseStream()); $msg0 = $sr0.ReadToEnd() } catch {} }
+    # PAGED FALLBACK. A whole-document reindex hands the full file to unpdf, and that
+    # load is what exhausts the worker on big/image-heavy leases (WORKER_RESOURCE_LIMIT,
+    # typically in ~4s). pdf-extract v37 can graft a page range with MuPDF instead, and
+    # its ranged delete SPLICES, so batches accumulate. The first ranged call also
+    # reports the document's true page_count, which is how the loop learns its bound.
+    if ($PageBatch -gt 0 -and $msg0 -match 'WORKER_RESOURCE_LIMIT') {
+      $pstart = 1; $total = 0; $sum = 0; $pgFail = $false; $sawOcr = $false
+      while ($true) {
+        $pend = $pstart + $PageBatch - 1
+        $u2 = "$uri&pageStart=$pstart&pageEnd=$pend"
+        try {
+          $r2 = Invoke-RestMethod -Method Post -Uri $u2 -Headers $H -UserAgent $UA -TimeoutSec 280
+        } catch {
+          $pgFail = $true
+          $m2 = $_.Exception.Message; $rp2 = $_.Exception.Response
+          if ($rp2) { try { $s2 = New-Object IO.StreamReader($rp2.GetResponseStream()); $m2 = $s2.ReadToEnd() } catch {} }
+          Log ("#$idx PAGED-FAIL pages $pstart-$pend :: " + (($m2 -replace '\s+',' ').Substring(0, [Math]::Min(160, $m2.Length))))
+          break
+        }
+        if ($total -eq 0) { $total = [int]$r2.page_count }
+        if ($r2.needs_ocr) { $sawOcr = $true }
+        $sum += [int]$r2.text_chunks
+        if ($total -le 0 -or $pend -ge $total) { break }
+        $pstart = $pend + 1
+        if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+      }
+      if (-not $pgFail -and $sum -gt 0) {
+        $proc++; $okChunks += $sum
+        if ($sawOcr) { $ocr++ }
+        "$($d.id)" | Out-File $done -Append -Encoding utf8
+        Log ("#$idx PAGED-OK $([math]::Round($sw.Elapsed.TotalSeconds))s ${total}pg -> $sum chunks (proc=$proc chunks=$okChunks ocr=$ocr big=$big fail=$fail)")
+        continue
+      }
+      if (-not $pgFail -and $sum -eq 0) {
+        $proc++; $ocr++
+        "$($d.id)" | Out-File $done -Append -Encoding utf8
+        Log ("#$idx PAGED-NOTEXT ${total}pg - every range empty, genuine scan (needs OCR)")
+        continue
+      }
+    }
+    $fail++
+    $msg = $msg0
     $resp = $_.Exception.Response
     if ($resp) { try { $sr = New-Object IO.StreamReader($resp.GetResponseStream()); $msg = $sr.ReadToEnd() } catch {} }
     Log ("#$idx FAIL $([math]::Round($sw.Elapsed.TotalSeconds))s :: $($d.id) :: " + (($msg -replace '\s+', ' ').Substring(0, [Math]::Min(200, $msg.Length))))
