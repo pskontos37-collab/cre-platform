@@ -66,7 +66,7 @@ export function FinancialsReport({ propertyName, stmt, bs, vendors, vendorWindow
       )}
 
       {/* ── Balance sheet ── */}
-      <SectionLabel>Balance Sheet{period ? ` · per GL ${periodLabel(period)}` : ''}</SectionLabel>
+      <SectionLabel>{`Balance Sheet${period ? ` · per GL ${periodLabel(period)}` : ''}`}</SectionLabel>
       {bs ? (
         <View style={{ marginBottom: 16 }}>
           <BsSection label="Assets" lines={bs.assets} total={bs.totalAssets} />

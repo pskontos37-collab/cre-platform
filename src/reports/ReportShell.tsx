@@ -54,10 +54,13 @@ export function ReportShell({ kicker, title, subtitle, metaRight, orientation = 
   )
 }
 
-export function SectionLabel({ children }: { children: string }) {
+// JSX delivers `<SectionLabel>text{expr}</SectionLabel>` as an ARRAY of fragments,
+// so join to one string before uppercasing.
+export function SectionLabel({ children }: { children: string | Array<string | number> }) {
+  const label = Array.isArray(children) ? children.join('') : String(children)
   return (
     <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', letterSpacing: 1.8, color: WILKOW_MIST, marginBottom: 6 }}>
-      {children.toUpperCase()}
+      {label.toUpperCase()}
     </Text>
   )
 }
