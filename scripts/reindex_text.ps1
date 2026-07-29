@@ -15,6 +15,7 @@
 param(
   [string]$PropertyId = 'all',          # 'all' = every property (per-doc property_id); else one property id
   [string]$DocSubtype = '',             # '' = any; else only this doc_subtype (e.g. lease_original)
+  [string]$StoragePrefix = 'p/',        # storage_path prefix to target; 'pipeline/' reaches deal-mirrored docs
   [int]$Shard = 0, [int]$Of = 1,        # process docs where index % Of == Shard (parallel workers)
   [int]$Limit = 0,                      # 0 = all; >0 = stop after N (testing)
   [int]$DelayMs = 0,                    # throttle: sleep between docs to protect the live prod DB
@@ -35,7 +36,10 @@ function Log($m) { $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [s$Shard] 
 $docs = New-Object System.Collections.Generic.List[object]
 $off = 0
 while ($true) {
-  $sel = "select=id,storage_path,property_id&storage_path=like.p/*&order=id.asc&limit=1000&offset=$off"
+  # Default 'p/' is the corpus mirror. Deal documents live under 'pipeline/<deal>/mirror/...',
+  # so the old hardcoded p/ filter silently skipped them - 8 textless lease originals were
+  # invisible to every prior run for that reason alone.
+  $sel = "select=id,storage_path,property_id&storage_path=like.$StoragePrefix*&order=id.asc&limit=1000&offset=$off"
   if ($PropertyId -ne 'all') { $sel += "&property_id=eq.$PropertyId" }
   if ($DocSubtype -ne '')   { $sel += "&doc_subtype=eq.$DocSubtype" }
   $page = Invoke-RestMethod -Uri "$BASE/rest/v1/documents?$sel" -Headers $H -UserAgent $UA -TimeoutSec 90

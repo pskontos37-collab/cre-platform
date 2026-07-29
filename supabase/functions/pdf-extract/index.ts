@@ -453,19 +453,49 @@ serve(async (req) => {
       const embKey = Deno.env.get('VOYAGE_API_KEY') ?? ''
       if (!embKey) throw new Error('VOYAGE_API_KEY secret not set')
 
+      // RANGED REINDEX (?pageStart/?pageEnd): cut the requested pages out with MuPDF
+      // FIRST, then hand only those bytes to unpdf. getDocumentProxy loads the WHOLE
+      // document, and that load is what OOMs the worker on large/image-heavy leases:
+      // on 2026-07-29 all 28 oversized lease originals failed with
+      // WORKER_RESOURCE_LIMIT in ~4s, i.e. during load, before the page-streaming
+      // loop below could help. MuPDF opens low-memory, so it can both count pages
+      // and graft the slice. Page numbers are remapped to the ORIGINAL document so
+      // citations and source deep-links stay correct.
+      const rngReindex = pageStart > 0 || pageEnd > 0
+      let workBytes = bytes
+      let rStart = 1, rEnd = 0, docPages = 0
+      if (rngReindex) {
+        const mu = await loadMupdf()
+        const src = mu.Document.openDocument(bytes, 'application/pdf')
+        docPages = src.countPages()
+        rStart = Math.max(1, Math.min(pageStart > 0 ? pageStart : 1, docPages))
+        rEnd   = Math.max(rStart, Math.min(pageEnd > 0 ? pageEnd : docPages, docPages))
+        const srcPdf = src.asPDF()
+        const dst = new mu.PDFDocument()
+        for (let i = rStart - 1; i < rEnd; i++) dst.graftPage(-1, srcPdf, i)
+        const buf = dst.saveToBuffer('garbage')
+        workBytes = new Uint8Array(buf.asUint8Array())
+        ;(buf as { destroy?: () => void }).destroy?.()
+        ;(dst as { destroy?: () => void }).destroy?.()
+        ;(src as { destroy?: () => void }).destroy?.()
+      }
+
       // unpdf (pure JS pdfjs build) extracts per-page text with no WASM/npm
       // boot cost. mergePages:false gives one string per page for page attribution.
       let nPages = 0
+      const pageOffset = rngReindex ? rStart - 1 : 0
       const pages: { page: number; text: string }[] = []
       try {
-        const pdf = await getDocumentProxy(new Uint8Array(bytes))
+        const pdf = await getDocumentProxy(new Uint8Array(workBytes))
         nPages = pdf.numPages
         // Only truly enormous docs (idle-timeout risk at ~150s) are deferred now
         // that extraction streams page-by-page.
         if (nPages > MAX_REINDEX_PAGES) {
           return new Response(JSON.stringify({
-            success: true, reindex_text: true, document_id: reindexDocId, page_count: nPages,
+            success: true, reindex_text: true, document_id: reindexDocId,
+            page_count: rngReindex ? docPages : nPages,
             too_large: true, text_chunks: 0,
+            hint: 'use ?pageStart=&pageEnd= to reindex a page range',
           }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
         }
         // STREAM page-by-page. extractText() builds/holds the whole document's text
@@ -476,7 +506,7 @@ serve(async (req) => {
           const tc = await page.getTextContent()
           const txt = (tc.items as Array<{ str?: string; hasEOL?: boolean }>)
             .map(it => (it.str ?? '') + (it.hasEOL ? '\n' : '')).join('')
-          pages.push({ page: i, text: txt })
+          pages.push({ page: i + pageOffset, text: txt })
           ;(page as { cleanup?: () => void }).cleanup?.()
         }
       } catch (e) {
@@ -502,29 +532,49 @@ serve(async (req) => {
       const needsOcr = avgSubstantive < MIN_CHARS_PER_PAGE
       if (needsOcr) {
         return new Response(JSON.stringify({
-          success: true, reindex_text: true, document_id: reindexDocId, page_count: nPages,
+          success: true, reindex_text: true, document_id: reindexDocId,
+          page_count: rngReindex ? docPages : nPages,
           avg_chars_per_page: Math.round(avgPerPage), avg_substantive_chars: Math.round(avgSubstantive),
           near_empty_pages: nearEmptyPages, needs_ocr: true, text_chunks: 0,
+          // Ranged: needs_ocr describes THIS RANGE only. A caller must not conclude
+          // the whole document is a scan from one batch.
+          ...(rngReindex ? { ranged: true, page_start: rStart, page_end: rEnd } : {}),
         }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
       }
 
       const chunks = chunkPages(pages)
       if (!chunks.length) {
         return new Response(JSON.stringify({
-          success: true, reindex_text: true, document_id: reindexDocId, page_count: nPages,
+          success: true, reindex_text: true, document_id: reindexDocId,
+          page_count: rngReindex ? docPages : nPages,
           avg_chars_per_page: Math.round(avgPerPage), needs_ocr: false, text_chunks: 0,
+          ...(rngReindex ? { ranged: true, page_start: rStart, page_end: rEnd } : {}),
         }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
       }
 
       const vecs = skipEmbed ? [] : await embedBatch(chunks.map(c => c.content), embKey)
-      // Replace any prior verbatim chunks for this doc (idempotent re-run).
-      const { error: delErr } = await sb.from('document_chunks').delete().eq('document_id', reindexDocId).eq('kind', 'text')
+      // Ranged: SPLICE - clear only this range's prior text chunks so a paged sweep
+      // accumulates instead of each batch wiping the last one. Without the range
+      // predicate a paged reindex silently keeps ONLY the final batch while every
+      // call still returns 200. Full (unranged): replace the whole layer, as before.
+      // Mirrors the ocrText branch, which has always scoped its delete this way.
+      let del = sb.from('document_chunks').delete().eq('document_id', reindexDocId).eq('kind', 'text')
+      if (rngReindex) del = del.gte('page_number', rStart).lte('page_number', rEnd)
+      const { error: delErr } = await del
       if (delErr) throw new Error('clear old text chunks failed: ' + delErr.message)
       // chunk_index offset keeps text chunks clear of the low-index summary chunks.
+      // Ranged batches continue past the current max so they never collide.
+      let idxBase = 1000
+      if (rngReindex) {
+        const { data: mx } = await sb.from('document_chunks').select('chunk_index')
+          .eq('document_id', reindexDocId).eq('kind', 'text')
+          .order('chunk_index', { ascending: false }).limit(1).maybeSingle()
+        idxBase = Math.max(1000, ((mx?.chunk_index as number | undefined) ?? 999) + 1)
+      }
       const rows = chunks.map((c, i) => ({
         document_id: reindexDocId,
         property_id: ownerPropertyId ?? null,   // DB-resolved owner property, not caller-supplied
-        chunk_index: 1000 + i,
+        chunk_index: idxBase + i,
         content: c.content,
         embedding_voyage: skipEmbed ? null : `[${vecs[i].join(',')}]`,
         page_number: c.page,
@@ -549,8 +599,10 @@ serve(async (req) => {
       await sb.from('documents').update({ is_indexed: true }).eq('id', reindexDocId)
 
       return new Response(JSON.stringify({
-        success: true, reindex_text: true, document_id: reindexDocId, page_count: nPages,
+        success: true, reindex_text: true, document_id: reindexDocId,
+        page_count: rngReindex ? docPages : nPages,
         avg_chars_per_page: Math.round(avgPerPage), needs_ocr: false, text_chunks: rows.length,
+        ...(rngReindex ? { ranged: true, page_start: rStart, page_end: rEnd } : {}),
       }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 

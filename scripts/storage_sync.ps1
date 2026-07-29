@@ -6,13 +6,23 @@
 # Requires an on-network machine (V:/K: reachable). Skips: missing files, >48MB, piece-fragment paths (#pages).
 param(
   [int]$MaxNew = 100000,        # cap new uploads per run (0 = unlimited within timeout)
-  [switch]$SkipChanged          # backfill mode: only phase 1
+  [switch]$SkipChanged,         # backfill mode: only phase 1
+  [switch]$RetryMissing         # phase 1 targets storage_path='(missing)' instead of null - see note below
 )
+# WHY -RetryMissing EXISTS: a file that was unreachable at upload time gets stamped
+# storage_path='(missing)' (phase 1, 'missing' branch). But phase 1 only selects
+# storage_path IS NULL and phase 2 only selects like 'p/%', so a '(missing)' row is
+# in NEITHER set and is never retried again. One transient network blip therefore
+# orphans a document permanently. On 2026-07-29 that had stranded 34 lease originals
+# -- including Whole Foods, Kohl's, J. Crew, Ross, Best Buy and Warby Parker -- whose
+# files were all still present on the server. Run with -RetryMissing -SkipChanged to
+# sweep them back in; successful uploads re-stamp to 'p/...' and leave the set, so the
+# loop still self-drains.
 $ErrorActionPreference='Continue'
 $repo = Split-Path $PSScriptRoot -Parent
 $cfg=@{}; foreach($l in (Get-Content "$repo\.env" | Where-Object {$_ -match "="})){ $k,$v=$l -split '=',2; $cfg[$k.Trim()]=$v.Trim() }
 $BASE=$cfg['VITE_SUPABASE_URL']; $KEY=$cfg['SUPABASE_SECRET_KEY']
-# Storage endpoints intermittently reject sb_secret_ keys ("Invalid Compact JWS") —
+# Storage endpoints intermittently reject sb_secret_ keys ("Invalid Compact JWS") -
 # use the classic service-role JWT for storage; PostgREST keeps working on sb_secret.
 $SKEY = if($cfg['SUPABASE_SERVICE_JWT']){ $cfg['SUPABASE_SERVICE_JWT'] } else { $KEY }
 $H=@{ apikey=$KEY; Authorization="Bearer $KEY" }
@@ -47,11 +57,11 @@ function Upload($doc, $disk, $upsert){
   if(-not $fi){ return @{status='missing'} }
   if($fi.Length -gt 48MB){ return @{status='toolarge'; size=$fi.Length} }
   $ext = [IO.Path]::GetExtension($fi.Name); if(-not $ext){ $ext='.bin' }
-  # objKey, NOT $key: PowerShell is case-insensitive and dynamically scoped — a local
+  # objKey, NOT $key: PowerShell is case-insensitive and dynamically scoped - a local
   # named $key would shadow the script-level $KEY (API key) inside callees like SbPatch.
   $objKey = "p/" + $doc.property_id + "/" + $doc.id + $ext.ToLower()
   $ct = ContentType $fi.Name
-  # NOTE: args are inline — never build a curl arg list in a variable named $args
+  # NOTE: args are inline - never build a curl arg list in a variable named $args
   # ($args is PowerShell's automatic parameter array inside functions; assignment is ignored).
   $code = $null
   for($try=1; $try -le 3; $try++){
@@ -65,14 +75,23 @@ function Upload($doc, $disk, $upsert){
   return @{status='ok'; key=$objKey}
 }
 
-# ---- Phase 1: upload NEW (storage_path null) ----
+# ---- Phase 1: upload NEW (storage_path null), or retry '(missing)' with -RetryMissing ----
 $new=0;$missing=0;$big=0;$err=0
 $offset=0
+$phase1Filter = if($RetryMissing){ 'storage_path=eq.(missing)' } else { 'storage_path=is.null' }
+Log ("phase1 target: $phase1Filter")
+# In -RetryMissing mode a still-missing file is re-stamped '(missing)', i.e. the SAME
+# value it was selected on, so it never leaves the result set and the loop would spin
+# forever. Track what this run has already attempted and stop when a batch adds nothing.
+$attempted = New-Object System.Collections.Generic.HashSet[string]
 while($true){
-  $batch = SbGet ("documents?select=id,property_id,file_path,file_name&storage_path=is.null&file_path=like.file:*&order=id&limit=200&offset=0")
+  $batch = SbGet ("documents?select=id,property_id,file_path,file_name&$phase1Filter&file_path=like.file:*&order=id&limit=200&offset=0")
   if(-not $batch -or $batch.Count -eq 0){ break }
+  $fresh = @($batch | Where-Object { -not $attempted.Contains([string]$_.id) })
+  if($fresh.Count -eq 0){ Log "phase1: batch held nothing new - done"; break }
   $progress=$false
-  foreach($d in $batch){
+  foreach($d in $fresh){
+    [void]$attempted.Add([string]$d.id)
     if($MaxNew -gt 0 -and $new -ge $MaxNew){ break }
     $disk = DiskPath $d.file_path
     if(-not $disk){ [void](SbPatch ("documents?id=eq." + $d.id) @{ storage_path='(fragment)' }); continue }
