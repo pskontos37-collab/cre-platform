@@ -22,7 +22,16 @@ param(
   [string]$CsvDir  = 'C:\Users\pskontos\Desktop\Software\acq_inventory',
   [string]$EnvFile = 'C:\Users\pskontos\Desktop\Software\cre-platform\.env',
   [int]$BatchSize  = 500,
-  [int]$Limit      = 0
+  [int]$Limit      = 0,
+  # Which extract to read. 'dryrun4' = ALL model versions (the current canonical extract);
+  # 'dryrun3' = the superseded newest-per-folder extract, kept so an older run is reproducible.
+  [ValidateSet('dryrun3','dryrun4')]
+  [string]$Prefix  = 'dryrun4',
+  # dryrun_argus4 writes incrementally, so a CSV exists long before the extract has finished.
+  # Loading a PARTIAL extract is not merely incomplete: comps.lookup_assumptions defaults to the
+  # LATEST version per property (mig 20240153), so a missing newer version silently promotes an
+  # older model to 'latest' and changes the answer the panel gives. Refuse unless overridden.
+  [switch]$AllowPartial
 )
 $ErrorActionPreference = 'Stop'
 $SP  = $PSScriptRoot
@@ -268,11 +277,33 @@ function ScopeKind([string]$label){
 }
 
 # ---------------------------------------------------------------- load CSVs
-$wb = Import-Csv (Join-Path $CsvDir 'dryrun3_workbooks.csv')
-$as = Import-Csv (Join-Path $CsvDir 'dryrun3_assumptions.csv')
-$gl = Import-Csv (Join-Path $CsvDir 'dryrun3_globals.csv')
+# Refuse a half-written extract before reading anything (see -AllowPartial above). The extractor
+# logs a 'DONE ...' line only after its final flush, so that line is the completeness signal.
+$extractLog = Join-Path $CsvDir ("dryrun_argus" + $Prefix.Substring($Prefix.Length-1) + ".log")
+if(Test-Path $extractLog){
+  $doneLine = @(Select-String -Path $extractLog -Pattern '^\S+\s+DONE ' | Select-Object -Last 1)
+  if($doneLine.Count -eq 0){
+    if(-not $AllowPartial){
+      L "REFUSING TO LOAD - $extractLog has no 'DONE' line, so the extract is still running or died."
+      L "  A partial load would promote an older model to 'latest' for any property whose newer"
+      L "  version has not been extracted yet, silently changing what the panel reports."
+      L "  Re-run once the extract finishes, or pass -AllowPartial if you truly mean to."
+      throw 'extract incomplete'
+    }
+    L 'WARN -AllowPartial: loading an extract with no DONE line'
+  } else {
+    L ("extract complete: " + $doneLine[0].Line.Trim())
+  }
+} else {
+  L "WARN no extract log at $extractLog - cannot confirm completeness"
+  if(-not $AllowPartial){ throw 'extract log missing; pass -AllowPartial to override' }
+}
+
+$wb = Import-Csv (Join-Path $CsvDir ($Prefix + '_workbooks.csv'))
+$as = Import-Csv (Join-Path $CsvDir ($Prefix + '_assumptions.csv'))
+$gl = Import-Csv (Join-Path $CsvDir ($Prefix + '_globals.csv'))
 if($Limit -gt 0){ $wb = $wb | Select-Object -First $Limit }
-L ("csv: workbooks={0}  assumption_cells={1}  global_cells={2}" -f $wb.Count,$as.Count,$gl.Count)
+L ("csv[$Prefix]: workbooks={0}  assumption_cells={1}  global_cells={2}" -f $wb.Count,$as.Count,$gl.Count)
 
 $MATCHY = @('MATCH','MATCH_FUZZY','MATCH_ABBREV')
 $ROOT   = 'K:\ASSTMGMT\ACQUISITIONS'
