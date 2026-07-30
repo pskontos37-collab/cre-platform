@@ -260,6 +260,35 @@ function Corner-Header($ws){
   } catch {}
   return ''
 }
+$LABELS = @(
+  @{k='renewal_probability'; rx='renewal\s*prob'}
+  @{k='downtime_months';     rx='down\s*time|downtime'}
+  @{k='market_rent';         rx='^market\s*rent'}
+  @{k='reimbursement_method';rx='reimburse'}
+  @{k='tenant_improvements'; rx='tenant\s*improve'}
+  @{k='leasing_commissions'; rx='leasing\s*comm'}
+  @{k='rent_abatements';     rx='rent\s*abate|free\s*rent'}
+  @{k='term_length';         rx='term\s*length'}
+  @{k='rental_rate_increase';rx='rental\s*rate\s*incr|rent\s*bump|increases'}
+)
+
+# Does this cell text read as an assumption-row LABEL rather than a value? Driven off
+# $LABELS so a new label is covered automatically, plus the header words that appear on
+# the assumptions block but are not themselves extracted labels.
+$LABEL_TEXT_EXTRA = '(?i)(^rental\s*rate$|annual\s*step|abate|^term\b|term\s*\(|^categor|reimburs|^market\s*rent$)'
+function Looks-Like-LabelText($v){
+  $t = ("" + $v).Trim()
+  if($t.Length -eq 0){ return $false }
+  if($t -notmatch '[A-Za-z]'){ return $false }        # a bare number is a value, never a label
+  foreach($l in $LABELS){ if($t -match ("(?i)" + $l.rx)){ return $true } }
+  if($t -match $LABEL_TEXT_EXTRA){ return $true }
+  # prose sitting where a header belongs: several words and long. 'NNN', '5 Years' and
+  # 'Gross' must NOT trip this, so require both a length and a word-count floor.
+  # NOT reached from Bad-Category - see the note there.
+  if($t.Length -gt 24 -and (@($t -split '\s+' | Where-Object { $_ })).Count -ge 5){ return $true }
+  return $false
+}
+
 # ---------------------------------------------------------------------------
 # COLUMN VALIDATION (added 2026-07-30 after 126 misaligned cells were traced here)
 #
@@ -300,38 +329,23 @@ function Bad-Category($name){
   $t = ("" + $name).Trim()
   if($t -match $DENY_CATEGORY){ return $true }
   # A header that is itself an Excel date serial means the "Category" row was mis-detected
-  # onto a date row (observed once: cat='42947' carrying 43008..43343). Bounded to five
-  # digits inside the 2015-2027 serial band so that real numeric category names survive -
-  # '8888', '9000', '8900' and '36500' are all genuine category labels in this corpus.
+  # onto a date row (observed: cat='42947' carrying 43008..43343).
   if($t -match '^\d{5}$' -and [int]$t -ge 42000 -and [int]$t -le 46800){ return $true }
-  return $false
-}
-
-$LABELS = @(
-  @{k='renewal_probability'; rx='renewal\s*prob'}
-  @{k='downtime_months';     rx='down\s*time|downtime'}
-  @{k='market_rent';         rx='^market\s*rent'}
-  @{k='reimbursement_method';rx='reimburse'}
-  @{k='tenant_improvements'; rx='tenant\s*improve'}
-  @{k='leasing_commissions'; rx='leasing\s*comm'}
-  @{k='rent_abatements';     rx='rent\s*abate|free\s*rent'}
-  @{k='term_length';         rx='term\s*length'}
-  @{k='rental_rate_increase';rx='rental\s*rate\s*incr|rent\s*bump|increases'}
-)
-# Does this cell text read as an assumption-row LABEL rather than a value? Used only to
-# decide whether a value identical to its column header is a leaked header. Driven off
-# $LABELS so a new label is covered automatically, plus the header words that appear on
-# the assumptions block but are not themselves extracted labels.
-$LABEL_TEXT_EXTRA = '(?i)(^rental\s*rate$|annual\s*step|abate|^term\b|term\s*\(|^categor|reimburs|^market\s*rent$)'
-function Looks-Like-LabelText($v){
-  $t = ("" + $v).Trim()
-  if($t.Length -eq 0){ return $false }
-  if($t -notmatch '[A-Za-z]'){ return $false }        # a bare number is a value, never a label
+  # A header NAMED AFTER AN ASSUMPTION ROW ('Tenant \nImprovements', 'Term (Yr.)',
+  # 'Rental Rate', 'Annual Step') means the Category row was mis-detected onto the
+  # assumptions block's own labels. Note these carry embedded newlines from wrapped
+  # Excel cells, so they never matched the structural list above. Reject via the label
+  # vocabulary - but NOT via Looks-Like-LabelText's prose clause, which is deliberately
+  # not applied to headers: a category is legitimately a long multi-line tenant roster.
   foreach($l in $LABELS){ if($t -match ("(?i)" + $l.rx)){ return $true } }
   if($t -match $LABEL_TEXT_EXTRA){ return $true }
-  # prose sitting where a header belongs: several words and long. 'NNN', '5 Years' and
-  # 'Gross' must NOT trip this, so require both a length and a word-count floor.
-  if($t.Length -gt 24 -and (@($t -split '\s+' | Where-Object { $_ })).Count -ge 5){ return $true }
+  # A purely numeric header that is too large to be a suite number is a spilled dollar
+  # total or serial, not a category: '10440000' carried TI -2146826265 (an Int32
+  # underflow sentinel), '36500' carried TI 30436, '7879323.2' carried -0.15.
+  # Suite-numbered and rent-tier categories are 4 digits or fewer ('8888', '9000',
+  # '8900', '48', '36') and must survive, so the floor sits above them.
+  if($t -match '^\d+$' -and $t.Length -le 9 -and [int64]$t -ge 20000){ return $true }
+  if($t -match '^\d+\.\d+$'){ return $true }
   return $false
 }
 
