@@ -94,11 +94,34 @@ if (-not $Load) {
         # Verbatim text chunks that mention "notice" (the Notices article + noise like
         # "option notice period"). We then score toward the ADDRESS block so the real
         # clause survives the length cap rather than being crowded out.
-        $rows = Invoke-RestMethod -Uri "$BASE/rest/v1/document_chunks?select=document_id,chunk_index,content&document_id=in.($inlist)&kind=eq.text&content=ilike.$noticeEsc&order=document_id,chunk_index&limit=120" -Headers $H -UserAgent $UA -TimeoutSec 120
+        # HIGH-PRECISION SEED FIRST. The broad "*notice*" query below is capped at 120
+        # rows ordered by (document_id, chunk_index) - an ARBITRARY window. A tenant
+        # with many documents blows past it: Best Buy has 484 notice-bearing chunks
+        # across estoppels, SNDAs, memoranda and profile sheets, and its actual tenant
+        # notice address ("Best Buy Stores, L.P., Attn: Legal Department - Real Estate,
+        # 7601 Penn Avenue South, Richfield, MN 55423") sits in a 2012 Waiver
+        # Agreement that never entered the window. Scoring cannot rescue a chunk the
+        # query never returned, so the directive phrases are fetched EXPLICITLY.
+        $seedPhrases = @('*addressed to*', '*if to Tenant*', '*if intended for*',
+                         '*notice shall be addressed*', '*notices shall be addressed*',
+                         '*to Tenant:*')
+        $rows = @()
+        foreach ($ph in $seedPhrases) {
+          $phEsc = [uri]::EscapeDataString($ph)
+          try {
+            $seed = Invoke-RestMethod -Uri "$BASE/rest/v1/document_chunks?select=document_id,chunk_index,content&document_id=in.($inlist)&kind=eq.text&content=ilike.$phEsc&order=document_id,chunk_index&limit=25" -Headers $H -UserAgent $UA -TimeoutSec 120
+            if ($seed) { $rows += @($seed) }
+          } catch { }
+        }
+        $broad = Invoke-RestMethod -Uri "$BASE/rest/v1/document_chunks?select=document_id,chunk_index,content&document_id=in.($inlist)&kind=eq.text&content=ilike.$noticeEsc&order=document_id,chunk_index&limit=120" -Headers $H -UserAgent $UA -TimeoutSec 120
+        if ($broad) { $rows += @($broad) }
         # Fall back to any-kind chunks if there is no text layer for these docs.
         if (-not $rows -or @($rows).Count -eq 0) {
           $rows = Invoke-RestMethod -Uri "$BASE/rest/v1/document_chunks?select=document_id,chunk_index,content&document_id=in.($inlist)&content=ilike.$noticeEsc&order=document_id,chunk_index&limit=40" -Headers $H -UserAgent $UA -TimeoutSec 120
         }
+        # De-duplicate: a chunk can satisfy several seed phrases and the broad query.
+        $seen = New-Object System.Collections.Generic.HashSet[string]
+        $rows = @($rows | Where-Object { $seen.Add("$($_.document_id)|$($_.chunk_index)") })
         $strong = @('addressed to','if to tenant','if to landlord','copy to','certified mail','registered mail','postage prepaid','return receipt','overnight courier','shall be in writing','deemed to have been given','deemed given','delivered personally','attn','attention:')
         $scored = @()
         $ord = 0
@@ -138,6 +161,20 @@ changes the notice address SUPERSEDES the original - use the most recent address
 never invent an address. If the excerpts do not actually contain a tenant-notice clause, set found=false.
 
 Do NOT return the LANDLORD's notice address. Call submit_notice with your result.
+
+TWO TRAPS SEEN IN THIS CORPUS, both cost a wrong answer:
+1. A "c/o" line is NOT the street. Blocks are often written
+      c/o The Gap, Inc.
+      2 Folsom Street
+      San Francisco, CA 94105
+   Put the STREET in address_line1 ("2 Folsom Street"), the entity in company
+   ("The Gap, Inc."), and any suite/floor or the c/o qualifier in address_line2.
+   Never leave address_line1 holding "c/o ..." with the street dropped - a contact
+   row without a street number cannot be posted to.
+2. Two-column notice tables collapse when OCR'd, so an "If to Tenant:" label can be
+   followed by the LANDLORD's address block. Check that the party named under the
+   label is actually the tenant before trusting the proximity; if the block names
+   the landlord or its counsel or a lockbox, that is not the tenant's address.
 
 LEASE NOTICE EXCERPTS:
 $body
