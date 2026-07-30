@@ -260,6 +260,53 @@ function Corner-Header($ws){
   } catch {}
   return ''
 }
+# ---------------------------------------------------------------------------
+# COLUMN VALIDATION (added 2026-07-30 after 126 misaligned cells were traced here)
+#
+# The category columns are taken from every non-empty cell on the "Category" row
+# from $lc+1 all the way to $cc - the FULL UsedRange width. When another table sits
+# to the right of the assumptions block, its header row lines up and its headers
+# become "categories". Values then read out of that foreign table.
+#
+# Observed, from dryrun4_assumptions.csv:
+#   Sullivan Center      cat='Suite' val='350A' | cat='Start Date' val='44501'
+#                        (44501 is an Excel date serial = 2021-11-05)
+#                        also Tenant / RSF / Rental Rate / Annual Step / Term (Yr.)
+#   175 West Jackson,    cat='Gateway' val='Liberty Travel' - that workbook's
+#   One East Erie        "Category" row lists TENANTS, not space categories
+#                        cat='Roll to market at rate of $90' - and prose
+#
+# The deny-list is deliberately restricted to STRUCTURAL HEADER LABELS. Two tempting
+# heuristics were tried against the existing 100,588-row extract and BOTH were wrong,
+# rejecting 4,943 rows that hold real values:
+#   - "a header containing '$' is prose"  -> Argus modellers legitimately name a space
+#     category by its rate: '$50 NNN - PH. 2' (135 rows), '$37.50 - State Street' (117),
+#     '$11.75 Gross (Storage)' (65).
+#   - "a header over 40 chars is prose"   -> a category is legitimately a multi-line
+#     tenant roster: "Party City / Five Below / Shoe Carnival / Dollar Tree".
+# So prose headers like 'Roll to market at rate of $90' are NOT filtered here. They are
+# only reachable through the value==header rule below, which is evidence-based rather
+# than shape-based. Header-labels-only rejects 271 rows (0.269%) and, verified against
+# every distinct surviving category, loses nothing legitimate.
+#
+# Do not add a 'rental rate' / 'space' / 'total' / 'step' entry either: those ARE real
+# Argus category names in this corpus. Only the four labels below actually leak.
+#
+# Anything rejected is counted and logged, never silently dropped - a silent filter
+# would hide a layout change in a future workbook.
+$DENY_CATEGORY = '(?i)^\s*(suite|suite\s*#|tenant|tenant\s*name|start\s*date|end\s*date|expir\w*|rsf|sq\.?\s*ft\.?|square\s*feet|lease\s*id|notes?|comments?|subtotal)\s*$'
+function Bad-Category($name){
+  if([string]::IsNullOrWhiteSpace($name)){ return $true }
+  $t = ("" + $name).Trim()
+  if($t -match $DENY_CATEGORY){ return $true }
+  # A header that is itself an Excel date serial means the "Category" row was mis-detected
+  # onto a date row (observed once: cat='42947' carrying 43008..43343). Bounded to five
+  # digits inside the 2015-2027 serial band so that real numeric category names survive -
+  # '8888', '9000', '8900' and '36500' are all genuine category labels in this corpus.
+  if($t -match '^\d{5}$' -and [int]$t -ge 42000 -and [int]$t -le 46800){ return $true }
+  return $false
+}
+
 $LABELS = @(
   @{k='renewal_probability'; rx='renewal\s*prob'}
   @{k='downtime_months';     rx='down\s*time|downtime'}
@@ -271,6 +318,23 @@ $LABELS = @(
   @{k='term_length';         rx='term\s*length'}
   @{k='rental_rate_increase';rx='rental\s*rate\s*incr|rent\s*bump|increases'}
 )
+# Does this cell text read as an assumption-row LABEL rather than a value? Used only to
+# decide whether a value identical to its column header is a leaked header. Driven off
+# $LABELS so a new label is covered automatically, plus the header words that appear on
+# the assumptions block but are not themselves extracted labels.
+$LABEL_TEXT_EXTRA = '(?i)(^rental\s*rate$|annual\s*step|abate|^term\b|term\s*\(|^categor|reimburs|^market\s*rent$)'
+function Looks-Like-LabelText($v){
+  $t = ("" + $v).Trim()
+  if($t.Length -eq 0){ return $false }
+  if($t -notmatch '[A-Za-z]'){ return $false }        # a bare number is a value, never a label
+  foreach($l in $LABELS){ if($t -match ("(?i)" + $l.rx)){ return $true } }
+  if($t -match $LABEL_TEXT_EXTRA){ return $true }
+  # prose sitting where a header belongs: several words and long. 'NNN', '5 Years' and
+  # 'Gross' must NOT trip this, so require both a length and a word-count floor.
+  if($t.Length -gt 24 -and (@($t -split '\s+' | Where-Object { $_ })).Count -ge 5){ return $true }
+  return $false
+}
+
 $GLOBALS = @(
   @{k='inflation_general'; rx='^general$';         anchor='property\s*inflation'}
   @{k='inflation_market';  rx='^market$';          anchor='property\s*inflation'}
@@ -296,6 +360,9 @@ $wbBuf = New-Object System.Collections.Generic.List[object]
 $asBuf = New-Object System.Collections.Generic.List[object]
 $glBuf = New-Object System.Collections.Generic.List[object]
 $nWb=0; $nAs=0; $nGl=0
+# Rejected-cell counters for the column validation. Reported at the end so a filter
+# can never quietly swallow a workbook whose layout changed.
+$script:nRejCol=0; $script:nRejVal=0
 function Append($buf, $file){
   if($buf.Count -eq 0){ return }
   if(Test-Path $file){ $buf | Export-Csv $file -NoTypeInformation -Encoding UTF8 -Append }
@@ -337,7 +404,7 @@ foreach($f in $folders){
       state=$f.state; prop=$f.prop; file=$c.name; model_date=$c.eff.ToString('yyyy-MM-dd')
       date_source=$c.date_source; versions=$f.versions; attempt=$rank; mb=$c.mb; sheets=0
       has_argus=$false; has_tbt=$false
-      argus_header=''; argus_verdict=''; evidence=''; role_hint=''
+      argus_header=''; argus_verdict=''; evidence=''; role_hint=''; rejected_columns=''
       secondary_header=''; secondary_sheet=''; secondary_verdict=''
       tbt_header=''; tbt_verdict=''
       categories=''; category_count=0; labels_found=0; parse_status=''; error=''
@@ -388,18 +455,50 @@ foreach($f in $folders){
         else {
           $lr=$anchor[0]; $lc=$anchor[1]; $catRow=0
           for($i=$lr; $i -ge [Math]::Max(1,$lr-8); $i--){ if((CellS $g $i $lc) -match '(?i)^categor'){ $catRow=$i; break } }
-          $cols=@(); $names=@()
-          if($catRow -gt 0){ for($j=$lc+1;$j -le $cc;$j++){ $h=CellS $g $catRow $j; if($h){ $cols+=$j; $names+=$h } } }
+          $cols=@(); $names=@(); $rejCols=@()
+          if($catRow -gt 0){
+            for($j=$lc+1;$j -le $cc;$j++){
+              $h=CellS $g $catRow $j
+              if(-not $h){ continue }
+              if(Bad-Category $h){ $rejCols += $h; continue }   # foreign table / prose header
+              $cols+=$j; $names+=$h
+            }
+          }
           if($cols.Count -eq 0){ for($j=$lc+1;$j -le $cc;$j++){ if((CellS $g $lr $j)){ $cols+=$j; $names+=("col$j") } } }
+          if($rejCols.Count -gt 0){ $script:nRejCol += $rejCols.Count; $row.rejected_columns = (($rejCols | Select-Object -First 8) -join ' | ') }
           $row.categories = (($names | Select-Object -First 12) -join ' | ')
           $row.category_count = $cols.Count
           $found=0
           foreach($lab in $LABELS){
-            $r2 = Find-InCol $g $rr $lc $("(?i)"+$lab.rx) ([Math]::Max(1,$catRow))
+            # Start BELOW the Category row, never at it. Starting AT $catRow let a
+            # label regex match text inside the header row itself, so $r2 became
+            # $catRow and every value read back was the column header. market_rent's
+            # '^market\s*rent' and rental_rate_increase's 'increases' match header
+            # text readily, so this was not a rare accident.
+            # This is the ROOT-CAUSE fix. 100 rows in the previous extract had
+            # raw_value identical to category, but only 33 of those were this defect -
+            # the other 67 are workbooks that name a space category by its rent tier or
+            # reimbursement type, where value==header is correct. Hence the narrow
+            # Looks-Like-LabelText test below rather than a blanket value==header reject.
+            $searchFrom = if($catRow -gt 0){ $catRow + 1 } else { 1 }
+            $r2 = Find-InCol $g $rr $lc $("(?i)"+$lab.rx) $searchFrom
             if($r2 -eq 0){ continue }
+            if($catRow -gt 0 -and $r2 -eq $catRow){ continue }   # belt and braces
             $any=$false
             for($k=0;$k -lt $cols.Count;$k++){
               $val = CellS $g $r2 $cols[$k]
+              # A value identical to its own column header is SOMETIMES the header echoed
+              # back - but not always, and the difference matters. Rejecting every
+              # value==header match would have discarded 36 real numbers: Conejo Valley
+              # Plaza and Shops at Kildeer name their space categories by rent tier, so
+              # category '48' legitimately carries market_rent 48, and Park North's 'NNN'
+              # category legitimately carries reimbursement_method NNN.
+              # The true defect signature is narrower: the value is an ASSUMPTION LABEL
+              # NAME ('Annual Step', 'Term (Yr.)', 'Tenant Improvements'), i.e. the header
+              # row leaked into a data cell. Only that is refused.
+              if($val -and ($val.Trim() -eq ("" + $names[$k]).Trim()) -and (Looks-Like-LabelText $val)){
+                $script:nRejVal++; continue
+              }
               if($val){
                 $any=$true
                 $asBuf.Add([pscustomobject]@{
@@ -451,4 +550,5 @@ foreach($f in $folders){
 Kill-Excel $xl
 Flush
 L "DONE folders=$($folders.Count) opened=$opened skipped_resume=$skipped rows=$nWb assumption_cells=$nAs global_cells=$nGl argus_tabs=$argusHits"
+L "COLUMN VALIDATION rejected_columns=$($script:nRejCol) rejected_header_values=$($script:nRejVal)  (see rejected_columns in the workbooks CSV for which headers were refused per file)"
 L ("elapsed {0:N1} min" -f ((Get-Date)-$t0).TotalMinutes)
