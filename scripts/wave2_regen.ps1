@@ -4,7 +4,7 @@
 # \Correspondence\ subfolders) so the synthesis is rebuilt from the clean doc
 # set, then re-runs abstract-verify. Sequential; resumable via -Skip.
 # Log: scripts\wave2_regen.log
-param([int]$Skip = 0)
+param([int]$Skip = 0, [string]$TargetsFile = '_wave2_targets.json')
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path $PSScriptRoot -Parent
 $cfg = @{}
@@ -17,9 +17,10 @@ $enc = New-Object System.Text.UTF8Encoding($false)
 
 # NB: PS 5.1 ConvertFrom-Json returns a top-level JSON array as ONE object, so
 # assign first (assignment unrolls it) THEN normalize with @() - never @(pipe).
-$targets = [System.IO.File]::ReadAllText("$PSScriptRoot\_wave2_targets.json", [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+$tf = if ([IO.Path]::IsPathRooted($TargetsFile)) { $TargetsFile } else { "$PSScriptRoot\$TargetsFile" }
+$targets = [System.IO.File]::ReadAllText($tf, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 $targets = @($targets)
-Log ("wave2 start: {0} targets (skip {1})" -f $targets.Count, $Skip)
+Log ("wave2 start: {0} targets from {1} (skip {2})" -f $targets.Count, (Split-Path $tf -Leaf), $Skip)
 $i = 0; $ok = 0; $fail = 0; $verified = 0; $issues = 0; $review = 0
 foreach ($t in $targets) {
   $i++
