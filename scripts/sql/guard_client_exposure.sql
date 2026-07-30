@@ -1,7 +1,12 @@
 -- guard_client_exposure.sql
 -- Asserts the invariants that keep client roles (anon / authenticated) from
--- reading past RLS in schema public. Returns ONE ROW PER VIOLATION; an empty
--- result set is a pass. Safe to run read-only, in CI or as a periodic query.
+-- reading past RLS. Returns ONE ROW PER VIOLATION; an empty result set is a
+-- pass. Safe to run read-only, in CI or as a periodic query.
+--
+-- SCOPE: schemas public AND comps. It covered only `public` until 2026-07-29,
+-- which left a blind spot exactly where the incident it exists to catch actually
+-- happened: check B is modelled on 20240153 stripping security_invoker off FOUR
+-- COMPS VIEWS, and comps was not being inspected. Add any new schema here.
 --
 -- WHY EACH CHECK EXISTS (each corresponds to a defect actually found in this DB):
 --   A  A permissive SELECT policy with no `to` clause applies to PUBLIC, which
@@ -30,7 +35,7 @@ select 'A_anon_readable_always_true_policy' as violation,
 from pg_policy p
 join pg_class c     on c.oid = p.polrelid
 join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public'
+where n.nspname in ('public', 'comps')
   and p.polpermissive
   and p.polcmd in ('r', '*')
   and coalesce(pg_get_expr(p.polqual, p.polrelid), 'true') = 'true'
@@ -47,7 +52,7 @@ select 'B_view_missing_security_invoker',
          || ' reloptions=' || coalesce(array_to_string(c.reloptions, ','), '(none)')
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public'
+where n.nspname in ('public', 'comps')
   and c.relkind = 'v'
   and (has_table_privilege('anon', c.oid, 'SELECT')
     or has_table_privilege('authenticated', c.oid, 'SELECT'))
@@ -75,7 +80,7 @@ select 'C_matview_granted_to_client_role',
          || ' authenticated=' || has_table_privilege('authenticated', c.oid, 'SELECT')::text
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public'
+where n.nspname in ('public', 'comps')
   and c.relkind = 'm'
   and (has_table_privilege('anon', c.oid, 'SELECT')
     or has_table_privilege('authenticated', c.oid, 'SELECT'))
@@ -89,7 +94,7 @@ select 'D_anon_readable_rls_gap',
             else 'RLS on but ZERO policies' end
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public'
+where n.nspname in ('public', 'comps')
   and c.relkind in ('r', 'p')
   and has_table_privilege('anon', c.oid, 'SELECT')
   and (not c.relrowsecurity
