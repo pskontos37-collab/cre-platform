@@ -66,7 +66,162 @@ function Split-Windows([string]$text) {
     if ($end -ge $text.Length) { break }
     $i = [Math]::Max($end - $OVERLAP, $i + 1)
   }
-  return $res
+  # Unary comma required - see ingest_ooxml_text.ps1. Without it a one-element list
+  # returns as a bare string and $pieces[0] yields its first CHARACTER.
+  return ,$res
+}
+
+# ---------------------------------------------------------------------------
+# Minimal CFB (MS-CFB / OLE Compound File) reader, enough to pull MAPI property
+# streams out of a .msg (MS-OXMSG). Streams are named __substg1.0_<TAG><TYPE>;
+# the plain-text body is PR_BODY 0x1000, type 001F (Unicode) or 001E (CP1252).
+#
+# This replaced two failed approaches:
+#   - Outlook COM opened a modal "700 Reminder(s)" window and BLOCKED (242s CPU,
+#     never advanced past file 1). Same class as the documented Word COM hang.
+#   - Scraping printable runs from the bytes returned 46,073 chars of MAPI property
+#     names and Exchange headers, not the body. PR_TRANSPORT_MESSAGE_HEADERS
+#     (007D001F) alone is ~9.8KB of headers, which is what that noise mostly was.
+#
+# Three bugs worth remembering, all hit while writing this:
+#   1. Special sector values (0xFFFFFFFE/FF/FD/FC) must be bounds-checked at EVERY
+#      hop, not just compared against the two commonest - one slipped through and
+#      produced a file offset of 0x20000000000.
+#   2. Some writers leave the DIFAT start sector as 0 rather than ENDOFCHAIN, so
+#      walking it unconditionally reads sector 0 as DIFAT garbage. Gate on nDifat.
+#   3. Do NOT return a scriptblock accessor closed over the FAT tables - invoked
+#      from the caller's scope those names are gone. Pre-extract and return data.
+function Read-CfbProps([string]$path) {
+  $b = [IO.File]::ReadAllBytes($path)
+  if ($b.Length -lt 512) { throw 'file too small to be CFB' }
+  $sig = ($b[0..7] | ForEach-Object { $_.ToString('X2') }) -join ''
+  if ($sig -ne 'D0CF11E0A1B11AE1') { throw "not a compound file (sig=$sig)" }
+
+  $secSize   = 1 -shl [BitConverter]::ToUInt16($b, 30)
+  $miniSize  = 1 -shl [BitConverter]::ToUInt16($b, 32)
+  $nFat      = [BitConverter]::ToUInt32($b, 44)
+  $dirStart  = [BitConverter]::ToUInt32($b, 48)
+  $miniCut   = [BitConverter]::ToUInt32($b, 56)
+  $miniFatSt = [BitConverter]::ToUInt32($b, 60)
+  $nMiniFat  = [BitConverter]::ToUInt32($b, 64)
+  $difatSt   = [BitConverter]::ToUInt32($b, 68)
+  $nDifat    = [BitConverter]::ToUInt32($b, 72)
+  $maxSector = [uint32](([int64]$b.Length / $secSize) + 2)
+
+  function SecOff([uint32]$s) { return ([int64]$s + 1) * [int64]$secSize }
+  function OkSector([uint32]$s) { return ([int64]$s -lt [int64]$maxSector) }
+
+  $fatSectors = New-Object System.Collections.Generic.List[uint32]
+  for ($i = 0; $i -lt 109; $i++) {
+    $v = [BitConverter]::ToUInt32($b, 76 + ($i * 4))
+    if (OkSector $v) { $fatSectors.Add($v) }
+  }
+  if ($nDifat -gt 0) {
+    $ds = $difatSt; $g = 0
+    while ((OkSector $ds) -and $g -lt 1000) {
+      $g++
+      [int64]$off = SecOff $ds
+      if ($off + $secSize -gt $b.Length) { break }
+      for ($i = 0; $i -lt ([int]($secSize / 4) - 1); $i++) {
+        $v = [BitConverter]::ToUInt32($b, $off + ($i * 4))
+        if (OkSector $v) { $fatSectors.Add($v) }
+      }
+      $ds = [BitConverter]::ToUInt32($b, $off + ($secSize - 4))
+    }
+  }
+  $fat = New-Object System.Collections.Generic.List[uint32]
+  foreach ($fs in $fatSectors) {
+    [int64]$off = SecOff $fs
+    if ($off + $secSize -gt $b.Length) { continue }
+    for ($i = 0; $i -lt ($secSize / 4); $i++) { $fat.Add([BitConverter]::ToUInt32($b, $off + ($i * 4))) }
+  }
+
+  function ChainBytes([uint32]$start, [int64]$size) {
+    $ms = New-Object IO.MemoryStream
+    $s = $start; $g = 0
+    while ((OkSector $s) -and $g -lt 200000) {
+      $g++
+      [int64]$off = SecOff $s
+      if ($off -lt 0 -or $off -ge [int64]$b.Length) { break }
+      [int64]$len = [Math]::Min([int64]$secSize, ([int64]$b.Length - $off))
+      if ($len -le 0) { break }
+      $ms.Write($b, [int]$off, [int]$len)
+      if ([int64]$s -ge [int64]$fat.Count) { break }
+      $s = $fat[[int]$s]
+    }
+    $all = $ms.ToArray(); $ms.Dispose()
+    if ($size -gt 0 -and $size -lt $all.Length) { return $all[0..([int]$size - 1)] }
+    return $all
+  }
+
+  $miniFat = New-Object System.Collections.Generic.List[uint32]
+  if ($nMiniFat -gt 0) {
+    $mf = ChainBytes $miniFatSt 0
+    for ($i = 0; $i + 3 -lt $mf.Length; $i += 4) { $miniFat.Add([BitConverter]::ToUInt32($mf, $i)) }
+  }
+
+  $dirBytes = ChainBytes $dirStart 0
+  $entries = @()
+  for ($i = 0; ($i + 128) -le $dirBytes.Length; $i += 128) {
+    $nl = [BitConverter]::ToUInt16($dirBytes, $i + 64)
+    $nm = ''
+    if ($nl -gt 2) { $nm = [Text.Encoding]::Unicode.GetString($dirBytes, $i, $nl - 2) }
+    $entries += [pscustomobject]@{ Name=$nm; Type=$dirBytes[$i+66]
+                                  Start=[BitConverter]::ToUInt32($dirBytes,$i+116)
+                                  Size=[BitConverter]::ToInt64($dirBytes,$i+120) }
+  }
+  # The root entry's chain IS the mini stream that mini sectors index into.
+  $rootE = $entries | Where-Object { $_.Type -eq 5 } | Select-Object -First 1
+  $miniStream = if ($rootE) { ChainBytes $rootE.Start $rootE.Size } else { New-Object byte[] 0 }
+
+  function MiniBytes([uint32]$start, [int64]$size) {
+    $ms = New-Object IO.MemoryStream
+    $s = $start; $g = 0
+    [int64]$miniMax = [int64]($miniStream.Length / $miniSize) + 1
+    while ([int64]$s -lt $miniMax -and $g -lt 200000) {
+      $g++
+      [int64]$off = [int64]$s * [int64]$miniSize
+      if ($off -lt 0 -or ($off + [int64]$miniSize) -gt [int64]$miniStream.Length) { break }
+      $ms.Write($miniStream, [int]$off, [int]$miniSize)
+      if ([int64]$s -ge [int64]$miniFat.Count) { break }
+      $s = $miniFat[[int]$s]
+    }
+    $all = $ms.ToArray(); $ms.Dispose()
+    if ($size -gt 0 -and $size -lt $all.Length) { return $all[0..([int]$size - 1)] }
+    return $all
+  }
+
+  $props = @{}
+  foreach ($e in $entries) {
+    if ($e.Type -ne 2 -or $e.Name -notlike '__substg1.0_*') { continue }
+    if ($e.Name -like '__substg1.0_3701*') { continue }        # attachment payload
+    if ($e.Size -le 0 -or $e.Size -gt 4194304) { continue }
+    $bytes = if ($e.Size -lt $miniCut) { MiniBytes $e.Start $e.Size } else { ChainBytes $e.Start $e.Size }
+    # Flat entry read means an attachment sub-storage can repeat a message tag; largest wins.
+    if (-not $props.ContainsKey($e.Name) -or $props[$e.Name].Length -lt $bytes.Length) { $props[$e.Name] = $bytes }
+  }
+  return $props
+}
+
+function Get-MsgProp($props, [string]$tagHex) {
+  $u = "__substg1.0_${tagHex}001F"
+  if ($props.ContainsKey($u)) { return [Text.Encoding]::Unicode.GetString($props[$u]) }
+  $a = "__substg1.0_${tagHex}001E"
+  if ($props.ContainsKey($a)) { return [Text.Encoding]::GetEncoding(1252).GetString($props[$a]) }
+  return ''
+}
+
+# Outlook rewrites every link through safelinks, turning one URL into 400+ chars of
+# base64 tracking payload. Left in, a short approval email becomes mostly URL noise
+# and retrieval suffers. Unwrap to the real target, then drop any URL still absurd.
+function Strip-Safelinks([string]$t) {
+  if (-not $t) { return '' }
+  $t = [regex]::Replace($t, 'https?://[a-z0-9.\-]*safelinks\.protection\.outlook\.com/\?url=([^&>\s]+)[^>\s]*', {
+    param($m)
+    try { [uri]::UnescapeDataString($m.Groups[1].Value) } catch { '' }
+  })
+  $t = [regex]::Replace($t, '<?https?://\S{160,}>?', '[long-url-removed]')
+  return $t
 }
 
 function Clean-Text([string]$t) {
@@ -185,10 +340,10 @@ try {
     try { $word.AutomationSecurity = 3 } catch {}
     Log 'Word COM started BY THIS SCRIPT (text-only read; no PDF render)'
   }
-  # Outlook COM is NOT started. See the .msg branch: launching it opened a modal
-  # reminders window that blocked automation entirely. Left here as a record so the
-  # next person does not re-try it and lose the same half hour.
-  if ($needOl) { Log ".msg files present ($(@($todo | Where-Object { (($_.file_name, $_.storage_path -ne $null)[0]) -match '\.msg$' }).Count)) - skipping them; Outlook COM blocks on a reminders modal" }
+  # Outlook COM is NEVER started - .msg is parsed directly from the compound file.
+  # Recorded so nobody re-tries COM: launching Outlook opened a modal "700
+  # Reminder(s)" window that blocked automation entirely (242s CPU, no progress).
+  if ($needOl) { Log ".msg files present ($(@($todo | Where-Object { (($_.file_name, $_.storage_path -ne $null)[0]) -match '\.msg$' }).Count)) - reading via CFB parser, no Outlook COM" }
 
   foreach ($d in $todo) {
     if ($Limit -gt 0 -and $n -ge $Limit) { break }
@@ -220,24 +375,38 @@ try {
       }
     }
     elseif ($ext -eq '.msg') {
-      # DELIBERATELY NOT HANDLED. Two routes were tried and both failed, so this
-      # skips rather than producing junk:
-      #  1. Outlook COM. Starting Outlook opened a modal "700 Reminder(s)" window
-      #     that BLOCKED automation - the run spun 242s of CPU and never advanced
-      #     past the first file. Same failure class as the documented Word COM hang,
-      #     and it happened even though Outlook was not previously running, because
-      #     it loads the user's real profile (mail sync, reminders, the lot).
-      #  2. The binary/UTF-16 scrape that works well for .doc. On a .msg it returns
-      #     46,073 chars that are almost entirely MAPI property names and Exchange
-      #     headers (x-ms-exchange-organization-*, EntityExtraction/*), not the body.
-      #     The body lives in a specific compound-file stream (PR_BODY, typically
-      #     __substg1.0_1000001F), so it needs real CFB parsing to isolate.
-      # TO FINISH: either parse the CFB and read the PR_BODY stream, or run Outlook
-      # COM on a machine/profile with reminders disabled and no modal at startup.
-      $skippedMsg++
-      Log "SKIP .msg (needs CFB parsing or a reminder-free Outlook profile) :: $nm"
-      Remove-Item $local -ErrorAction SilentlyContinue
-      continue
+      if ($WhatIf) { Log "WOULD READ (CFB parser) :: $nm"; $ok++; continue }
+      try {
+        $props = Read-CfbProps $local
+        $hdr = @()
+        $subj = Get-MsgProp $props '0037'; if ($subj) { $hdr += "Subject: $subj" }
+        $from = Get-MsgProp $props '0C1A'; if ($from) { $hdr += "From: $from" }
+        $to   = Get-MsgProp $props '0E04'; if ($to)   { $hdr += "To: $to" }
+        $cc   = Get-MsgProp $props '0E03'; if ($cc)   { $hdr += "Cc: $cc" }
+        # Attachment long-filenames (3707) - the payloads themselves are separate docs.
+        $att = @()
+        foreach ($k in $props.Keys) {
+          if ($k -like '__substg1.0_3707001F') { $att += [Text.Encoding]::Unicode.GetString($props[$k]) }
+        }
+        if ($att.Count) { $hdr += "Attachments: " + (($att | Sort-Object -Unique) -join '; ') }
+        $bodyTxt = Get-MsgProp $props '1000'
+        if (-not $bodyTxt) { $bodyTxt = Get-MsgProp $props '1013' }   # HTML body fallback
+        $bodyTxt = Strip-Safelinks $bodyTxt
+        $text = Clean-Text (($hdr -join "`n") + "`n`n" + $bodyTxt)
+        Log "CFB read ($($text.Length) chars, body $($bodyTxt.Length)) :: $nm"
+      } catch {
+        # A .msg that is not a compound file is usually MISLABELLED. One in this
+        # corpus (5.5MB "RE_ Title Company - CCR and REA...msg") is actually a PDF:
+        # signature 255044462D312E36 = "%PDF-1.6". Say so explicitly rather than
+        # reporting a generic parse failure, because the fix is to re-route it to
+        # pdf-extract, not to improve this parser.
+        $msg = $_.Exception.Message
+        if ($msg -match 'sig=25504446') {
+          Log "MISLABELLED :: $nm :: this is a PDF, not a .msg - route it through pdf-extract (reindexText) instead"
+        } else {
+          Log "CFB FAIL :: $nm :: $msg"
+        }
+      }
     }
 
     Remove-Item $local -ErrorAction SilentlyContinue
@@ -250,7 +419,12 @@ try {
       $rows += @{ document_id=$d.id; property_id=$d.property_id; chunk_index=(1000 + $i)
                   content=$pieces[$i]; embedding_voyage=$null; page_number=1; kind='text' }
     }
-    $body2 = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json @{ p_rows = $rows } -Depth 6 -Compress))
+    # MUST force an ARRAY - see ingest_ooxml_text.ps1. PS 5.1 ConvertTo-Json unwraps
+    # a single-element array to a bare object, and insert_text_chunks then stored one
+    # CHARACTER while returning HTTP 200. Silently truncated 5 documents.
+    $arrJson = if ($rows.Count -eq 1) { '[' + (ConvertTo-Json $rows[0] -Depth 6 -Compress) + ']' }
+               else { ConvertTo-Json $rows -Depth 6 -Compress }
+    $body2 = [Text.Encoding]::UTF8.GetBytes('{"p_rows":' + $arrJson + '}')
     try {
       Invoke-RestMethod -Method Post -Uri "$BASE/rest/v1/rpc/insert_text_chunks" -Headers $H -ContentType 'application/json' -Body $body2 -UserAgent $UA -TimeoutSec 180 | Out-Null
       Invoke-RestMethod -Method Patch -Uri "$BASE/rest/v1/documents?id=eq.$($d.id)" -Headers (@{ apikey=$KEY; Authorization="Bearer $KEY"; Prefer='return=minimal' }) -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes('{"is_indexed":true}')) -UserAgent $UA -TimeoutSec 90 | Out-Null

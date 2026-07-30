@@ -108,7 +108,12 @@ function Split-Windows([string]$text) {
     if ($end -ge $text.Length) { break }
     $i = [Math]::Max($end - $OVERLAP, $i + 1)
   }
-  return $res
+  # `return $res` is WRONG: PowerShell ENUMERATES a collection on function output, so
+  # a one-element list arrives as a bare STRING. $pieces[0] then indexes that string
+  # and yields its first CHARACTER - which silently stored 5 documents as a single
+  # letter while every insert returned HTTP 200. The unary comma keeps it a list.
+  # (Same trap as GetTextPages in fill_text_gaps.ps1; it bites once per function.)
+  return ,$res
 }
 
 # ---- target set: OOXML docs mirrored to storage with NO kind='text' chunks ----
@@ -169,7 +174,15 @@ foreach ($d in $todo) {
       kind             = 'text'
     }
   }
-  $body = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json @{ p_rows = $rows } -Depth 6 -Compress))
+  # MUST force an ARRAY. PS 5.1's ConvertTo-Json UNWRAPS a single-element array into
+  # a bare object, so p_rows stopped being an array for any document that produced
+  # exactly one chunk - and insert_text_chunks then stored a single CHARACTER while
+  # still returning HTTP 200. Five documents were silently truncated to 1 char that
+  # way (JLL, NMRK, Grand Prairie, Summary of Century Theatres, and one .msg) before
+  # this was caught. A 200 is not proof the payload was shaped correctly.
+  $arrJson = if ($rows.Count -eq 1) { '[' + (ConvertTo-Json $rows[0] -Depth 6 -Compress) + ']' }
+             else { ConvertTo-Json $rows -Depth 6 -Compress }
+  $body = [Text.Encoding]::UTF8.GetBytes('{"p_rows":' + $arrJson + '}')
   try {
     Invoke-RestMethod -Method Post -Uri "$BASE/rest/v1/rpc/insert_text_chunks" -Headers $H -ContentType 'application/json' -Body $body -UserAgent $UA -TimeoutSec 180 | Out-Null
     Invoke-RestMethod -Method Patch -Uri "$BASE/rest/v1/documents?id=eq.$($d.id)" -Headers (@{ apikey=$KEY; Authorization="Bearer $KEY"; Prefer='return=minimal' }) -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes('{"is_indexed":true}')) -UserAgent $UA -TimeoutSec 90 | Out-Null
