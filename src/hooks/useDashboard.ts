@@ -888,7 +888,11 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 export function useHealthRatio(propertyIds: string[], propertyNames: Record<string, string>) {
   return useQuery<HealthRatioData>(async () => {
-    const empty: HealthRatioData = { rows: [], portfolioRatio: 0, ttmLabel: '' }
+    // insufficientCount is REQUIRED on HealthRatioData and was missing here, so the
+    // no-properties path returned an object that did not satisfy its own contract.
+    // HealthRatioWidget compares `rows.length > insufficientCount`, and `0 > undefined`
+    // is false rather than an error, so it degraded silently instead of throwing.
+    const empty: HealthRatioData = { rows: [], portfolioRatio: 0, ttmLabel: '', insufficientCount: 0 }
     if (!propertyIds.length) return empty
 
     const currentYear = new Date().getFullYear()
