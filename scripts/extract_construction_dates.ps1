@@ -260,10 +260,20 @@ if ($Load) {
 }
 
 # ---------------- REPORT mode ----------------
+# EXCLUDE REA MEMBERS. They ride the rent roll as ZERO-SF suites but are parcel owners
+# under the Reciprocal Easement Agreement, not tenants - there is no lease, so there can
+# be no construction obligation and no lease document to read. Including them cost an AI
+# call each AND, worse, reported them under "DOC GAPS (no text layer): OCR/manual review
+# needed", which reads as a fixable data problem and sends someone chasing documents that
+# do not exist. Measured 2026-07-30: of 12 reported doc gaps, ELEVEN were REA members
+# (Applebee's, Chick-fil-A, Chili's, Diamonds Direct, Home Depot #3663A01, iHop, Kohl's,
+# PH Developers, Plazagreen, Rooms To Go, and the KM East Target) with expirations out to
+# 2065/2073 - REA terms, not lease terms. Only ONE was a genuine gap.
+# batch_abstracts.ps1 already filters this way; this query did not.
 $sel = 'id,property_id,status,commencement_date,expiration_date,tenant_id,tenant:tenants(name,trade_name)'
 $q = [uri]::EscapeDataString($sel)
-$leases = Invoke-RestMethod -Uri "$BASE/rest/v1/leases?select=$q&status=eq.active&limit=1000" -Headers $H -UserAgent $UA -TimeoutSec 120
-Write-Output ("active leases: {0}" -f @($leases).Count)
+$leases = Invoke-RestMethod -Uri "$BASE/rest/v1/leases?select=$q&status=eq.active&is_rea_member=eq.false&limit=1000" -Headers $H -UserAgent $UA -TimeoutSec 120
+Write-Output ("active leases (REA members excluded): {0}" -f @($leases).Count)
 
 $props = Invoke-RestMethod -Uri "$BASE/rest/v1/properties?select=id,name&limit=200" -Headers $H -UserAgent $UA -TimeoutSec 60
 $pname = @{}; foreach ($p in $props) { $pname[$p.id] = $p.name }
