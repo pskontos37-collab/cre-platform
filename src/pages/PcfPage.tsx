@@ -5,10 +5,12 @@ import { useAuth } from '../contexts/AuthContext'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import {
-  usePcfVersions, usePcfGrid, useLineDetail, computeTotals,
+  usePcfVersions, usePcfGrid, usePcfBudget, useLineDetail, computeTotals, computeVariance,
   createPcfVersion, savePcfCell, clearPcfCell, publishPcfVersion, latestClosedMonth,
 } from '../hooks/usePcf'
-import type { PcfRow, PcfSection, CashBasis, PcfTotals } from '../hooks/usePcf'
+import type { CashBasis } from '../hooks/usePcf'
+import { buildDisplayRows, budgetShapedRows } from '../lib/pcfDisplay'
+import { PcfPdfButton } from '../reports/PcfPdfButton'
 
 // /pcf - Projected Cash Flow for OWNED properties. One grid per property-fiscal-
 // year, split by a moving ACTUAL|FORECAST boundary. Replaces the save-a-copy-of-
@@ -19,12 +21,6 @@ import type { PcfRow, PcfSection, CashBasis, PcfTotals } from '../hooks/usePcf'
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-const SUBSECTION_LABEL: Record<string, string> = {
-  utilities: 'Utilities', repairs_maintenance: 'Repairs & Maintenance', cleaning: 'Cleaning',
-  grounds_lot: 'Grounds & Lot', security: 'Security', insurance: 'Insurance',
-  property_taxes: 'Property Taxes', administrative: 'Administrative', management_fee: 'Management Fee',
-}
-
 // Accounting presentation: negatives in parentheses, no cents at this altitude.
 function fmt(v: number | null): string {
   if (v === null) return '—'
@@ -34,66 +30,19 @@ function fmt(v: number | null): string {
   return r < 0 ? `(${s})` : s
 }
 
-type DisplayRow =
-  | { kind: 'section'; label: string }
-  | { kind: 'line'; row: PcfRow }
-  | { kind: 'subtotal'; label: string; values: number[]; strong?: boolean }
-  | { kind: 'spacer' }
-
-function buildDisplayRows(rows: PcfRow[], totals: PcfTotals): DisplayRow[] {
-  const out: DisplayRow[] = []
-  const bySection = (s: PcfSection) => rows.filter(r => r.section === s)
-
-  out.push({ kind: 'section', label: 'Income' })
-  for (const r of bySection('income')) out.push({ kind: 'line', row: r })
-  out.push({ kind: 'subtotal', label: 'Total income', values: totals.totalIncome })
-
-  out.push({ kind: 'spacer' })
-  out.push({ kind: 'section', label: 'Operating expenses' })
-  const opex = bySection('opex')
-  const subs = [...new Set(opex.map(r => r.subsection ?? 'other'))]
-  for (const sub of subs) {
-    const lines = opex.filter(r => (r.subsection ?? 'other') === sub)
-    if (!lines.length) continue
-    out.push({ kind: 'section', label: SUBSECTION_LABEL[sub] ?? sub })
-    for (const r of lines) out.push({ kind: 'line', row: r })
-  }
-  out.push({ kind: 'subtotal', label: 'Total operating expenses', values: totals.totalOpex })
-  out.push({ kind: 'subtotal', label: 'Net operating income', values: totals.noi, strong: true })
-
-  out.push({ kind: 'spacer' })
-  out.push({ kind: 'section', label: 'Non-operating' })
-  for (const r of bySection('non_operating')) out.push({ kind: 'line', row: r })
-  out.push({ kind: 'subtotal', label: 'Net income', values: totals.netIncome, strong: true })
-
-  out.push({ kind: 'spacer' })
-  out.push({ kind: 'section', label: 'Capital expenditures' })
-  for (const r of bySection('capital')) out.push({ kind: 'line', row: r })
-  out.push({ kind: 'subtotal', label: 'Total capital', values: totals.capital })
-
-  out.push({ kind: 'spacer' })
-  out.push({ kind: 'section', label: 'Other balance sheet' })
-  for (const r of bySection('balance_sheet')) out.push({ kind: 'line', row: r })
-  out.push({ kind: 'subtotal', label: 'Total other balance sheet', values: totals.balanceSheet })
-  out.push({ kind: 'subtotal', label: 'Net monthly cash', values: totals.netMonthlyCash, strong: true })
-
-  out.push({ kind: 'spacer' })
-  out.push({ kind: 'section', label: 'Equity' })
-  for (const r of bySection('equity')) out.push({ kind: 'line', row: r })
-  out.push({ kind: 'subtotal', label: 'Net cash', values: totals.netCash, strong: true })
-
-  out.push({ kind: 'spacer' })
-  out.push({ kind: 'section', label: 'Cash recap' })
-  out.push({ kind: 'subtotal', label: 'Beginning cash', values: totals.beginningCash })
-  out.push({ kind: 'subtotal', label: 'Change in cash', values: totals.netCash })
-  out.push({ kind: 'subtotal', label: 'Ending cash', values: totals.endingCash, strong: true })
-
-  return out
-}
+// DisplayRow / buildDisplayRows / budgetShapedRows live in lib/pcfDisplay so the PDF
+// renders the same row list rather than re-deriving its own subtotals.
 
 const cellBase: CSSProperties = {
   padding: '4px 8px', textAlign: 'right', fontSize: 12, whiteSpace: 'nowrap',
   fontVariantNumeric: 'tabular-nums',
+}
+// Because every amount is an effect on cash, a positive variance is favourable in
+// EVERY section - no per-section sign flip. See computeVariance in usePcf.ts.
+const varCell: CSSProperties = { ...cellBase, borderLeft: '1px solid var(--border)' }
+function varColor(v: number): string {
+  if (Math.round(v) === 0) return 'var(--text-muted)'
+  return v > 0 ? 'var(--green, #4e8f60)' : 'var(--red, #b91c1c)'
 }
 const labelCell: CSSProperties = {
   padding: '4px 10px', fontSize: 12, whiteSpace: 'nowrap', position: 'sticky', left: 0,
@@ -114,6 +63,7 @@ export function PcfPage() {
   const [publishing, setPublishing] = useState(false)
   const [pubBasis, setPubBasis] = useState<CashBasis>('cumulative')
   const [pubOpening, setPubOpening] = useState('')
+  const [showVar, setShowVar] = useState(false)
 
   const activeProperty = propertyId ?? properties?.[0]?.id ?? null
   const { data: versions, refetch: refetchVersions } = usePcfVersions(activeProperty)
@@ -125,18 +75,31 @@ export function PcfPage() {
   const { data: grid, loading: gridLoading, error: gridError, refetch: refetchGrid } = usePcfGrid(activeVersionId)
   const { data: detail } = useLineDetail(activeProperty, drillLine, grid?.fiscalYear ?? new Date().getFullYear())
 
+  const { data: budget } = usePcfBudget(activeProperty, grid?.fiscalYear ?? null)
+
   const openingCash = version?.opening_cash ?? 0
   const totals = useMemo(
     () => (grid ? computeTotals(grid.rows, openingCash) : null),
     [grid, openingCash],
   )
+  // Budget subtotals come from the same cascade as the actuals, over budget-shaped
+  // rows. openingCash is passed so the shapes match; only the sections matter here,
+  // the cash recap is never variance-compared.
+  const budgetTotals = useMemo(
+    () => (grid && budget ? computeTotals(budgetShapedRows(grid.rows, budget), openingCash) : null),
+    [grid, budget, openingCash],
+  )
   const displayRows = useMemo(
-    () => (grid && totals ? buildDisplayRows(grid.rows, totals) : []),
-    [grid, totals],
+    () => (grid && totals ? buildDisplayRows(grid.rows, totals, budgetTotals) : []),
+    [grid, totals, budgetTotals],
   )
 
   const isDraft = version?.status === 'draft'
   const asOf = grid?.asOfMonth ?? 0
+  // Variance is only meaningful once a month has closed and a budget exists.
+  const canShowVar = !!budget && budget.byLine.size > 0 && asOf > 0
+  const varOn = showVar && canShowVar
+  const varColCount = varOn ? 5 : 0
 
   async function handleNewVersion() {
     if (!activeProperty) return
@@ -232,6 +195,36 @@ export function PcfPage() {
             Published - frozen
           </span>
         )}
+
+        <label
+          title={
+            !budget || budget.byLine.size === 0
+              ? 'No approved budget is loaded for this property and year'
+              : asOf === 0
+                ? 'No month has closed yet, so there is nothing to compare against budget'
+                : 'Compare closed months and the full-year projection against the approved budget'
+          }
+          style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: canShowVar ? 'var(--text)' : 'var(--text-faint)', cursor: canShowVar ? 'pointer' : 'default' }}
+        >
+          <input type="checkbox" checked={varOn} disabled={!canShowVar} onChange={e => setShowVar(e.target.checked)} />
+          Budget variance
+        </label>
+
+        {grid && totals && (
+          <PcfPdfButton
+            propertyName={properties?.find(p => p.id === activeProperty)?.name ?? 'Property'}
+            fiscalYear={grid.fiscalYear}
+            asOfMonth={asOf}
+            status={version?.status ?? 'draft'}
+            cashBasis={version?.cash_basis ?? null}
+            openingCash={openingCash}
+            rows={grid.rows}
+            totals={totals}
+            budgetTotals={budgetTotals}
+            budget={budget ?? null}
+            includeVariance={varOn}
+          />
+        )}
       </div>
 
       {err && (
@@ -319,28 +312,57 @@ export function PcfPage() {
                     </th>
                   ))}
                   <th style={{ ...cellBase, fontWeight: 500, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>FY</th>
+                  {varOn && (
+                    <>
+                      <th style={{ ...varCell, fontWeight: 500, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                        YTD act
+                        <div style={{ fontSize: 9, fontWeight: 400 }}>thru {MONTH_ABBR[asOf - 1]}</div>
+                      </th>
+                      <th style={{ ...cellBase, fontWeight: 500, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>YTD bud</th>
+                      <th style={{ ...cellBase, fontWeight: 500, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                        YTD var
+                        <div style={{ fontSize: 9, fontWeight: 400 }}>+ = favourable</div>
+                      </th>
+                      <th style={{ ...varCell, fontWeight: 500, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>FY bud</th>
+                      <th style={{ ...cellBase, fontWeight: 500, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>FY var</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {displayRows.map((dr, idx) => {
-                  if (dr.kind === 'spacer') return <tr key={idx}><td colSpan={14} style={{ height: 10 }} /></tr>
+                  if (dr.kind === 'spacer') return <tr key={idx}><td colSpan={14 + varColCount} style={{ height: 10 }} /></tr>
                   if (dr.kind === 'section') return (
                     <tr key={idx}>
                       <td style={{ ...labelCell, fontWeight: 500, color: 'var(--text-muted)', fontSize: 11, letterSpacing: '.03em', paddingTop: 8 }}>
                         {dr.label}
                       </td>
-                      <td colSpan={13} />
+                      <td colSpan={13 + varColCount} />
                     </tr>
                   )
-                  if (dr.kind === 'subtotal') return (
-                    <tr key={idx} style={{ borderTop: '1px solid var(--border)', background: dr.strong ? 'var(--surface-2)' : undefined }}>
-                      <td style={{ ...labelCell, fontWeight: 500, background: dr.strong ? 'var(--surface-2)' : 'var(--surface)' }}>{dr.label}</td>
-                      {dr.values.map((v, i) => (
-                        <td key={i} style={{ ...cellBase, fontWeight: 500, borderRight: i + 1 === asOf ? '2px solid var(--accent)' : undefined }}>{fmt(v)}</td>
-                      ))}
-                      <td style={{ ...cellBase, fontWeight: 500 }}>{fmt(dr.values.reduce((s, v) => s + v, 0))}</td>
-                    </tr>
-                  )
+                  if (dr.kind === 'subtotal') {
+                    const v = varOn
+                      ? computeVariance(dr.values.map(x => ({ amount: x })), dr.budgetValues, asOf)
+                      : null
+                    return (
+                      <tr key={idx} style={{ borderTop: '1px solid var(--border)', background: dr.strong ? 'var(--surface-2)' : undefined }}>
+                        <td style={{ ...labelCell, fontWeight: 500, background: dr.strong ? 'var(--surface-2)' : 'var(--surface)' }}>{dr.label}</td>
+                        {dr.values.map((x, i) => (
+                          <td key={i} style={{ ...cellBase, fontWeight: 500, borderRight: i + 1 === asOf ? '2px solid var(--accent)' : undefined }}>{fmt(x)}</td>
+                        ))}
+                        <td style={{ ...cellBase, fontWeight: 500 }}>{fmt(dr.values.reduce((s, x) => s + x, 0))}</td>
+                        {v && (
+                          <>
+                            <td style={{ ...varCell, fontWeight: 500 }}>{fmt(v.ytdActual)}</td>
+                            <td style={{ ...cellBase, fontWeight: 500, color: 'var(--text-muted)' }}>{v.hasBudget ? fmt(v.ytdBudget) : '—'}</td>
+                            <td style={{ ...cellBase, fontWeight: 500, color: v.hasBudget ? varColor(v.ytdVar) : 'var(--text-faint)' }}>{v.hasBudget ? fmt(v.ytdVar) : '—'}</td>
+                            <td style={{ ...varCell, fontWeight: 500, color: 'var(--text-muted)' }}>{v.hasBudget ? fmt(v.fyBudget) : '—'}</td>
+                            <td style={{ ...cellBase, fontWeight: 500, color: v.hasBudget ? varColor(v.fyVar) : 'var(--text-faint)' }}>{v.hasBudget ? fmt(v.fyVar) : '—'}</td>
+                          </>
+                        )}
+                      </tr>
+                    )
+                  }
 
                   const row = dr.row
                   return (
@@ -412,12 +434,45 @@ export function PcfPage() {
                         )
                       })}
                       <td style={{ ...cellBase, color: 'var(--text-muted)' }}>{fmt(row.fyTotal)}</td>
+                      {varOn && (() => {
+                        const v = computeVariance(row.cells, budget?.byLine.get(row.lineKey), asOf)
+                        const dash = <span style={{ color: 'var(--text-faint)' }}>—</span>
+                        return (
+                          <>
+                            <td style={varCell}>{fmt(v.ytdActual)}</td>
+                            <td style={{ ...cellBase, color: 'var(--text-muted)' }}>{v.hasBudget ? fmt(v.ytdBudget) : dash}</td>
+                            <td
+                              title={v.hasBudget ? undefined : 'No budget line maps to this row, so there is nothing to compare against'}
+                              style={{ ...cellBase, color: v.hasBudget ? varColor(v.ytdVar) : 'var(--text-faint)' }}
+                            >
+                              {v.hasBudget ? fmt(v.ytdVar) : dash}
+                            </td>
+                            <td style={{ ...varCell, color: 'var(--text-muted)' }}>{v.hasBudget ? fmt(v.fyBudget) : dash}</td>
+                            <td style={{ ...cellBase, color: v.hasBudget ? varColor(v.fyVar) : 'var(--text-faint)' }}>{v.hasBudget ? fmt(v.fyVar) : dash}</td>
+                          </>
+                        )
+                      })()}
                     </tr>
                   )
                 })}
               </tbody>
             </table>
           </div>
+          {varOn && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingTop: 10, lineHeight: 1.5 }}>
+              Variance = actual less budget. Every amount in this statement is already its effect on cash, so a
+              positive variance is favourable in every section — income above budget and expenses under budget
+              both read positive, with no sign flip to remember. YTD covers the {asOf} closed{' '}
+              {asOf === 1 ? 'month' : 'months'} through {MONTH_ABBR[asOf - 1]}.
+              {' '}
+              <strong>FY variance will equal YTD variance</strong> on any line whose forward months are still the
+              seeded budget — that is not a bug, it is what an unedited forecast means. The two diverge as soon as
+              a forward month is overridden, and they already differ on balance-sheet lines, which seed from last
+              year's actual shape rather than from budget. A dash means the line has no approved budget to compare
+              against; equity is budgeted nowhere by design, so Net cash and the cash recap carry no budget
+              column at all.
+            </div>
+          )}
         </Widget>
       )}
 

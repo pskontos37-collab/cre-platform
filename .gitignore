@@ -1,5 +1,7 @@
 node_modules
 dist
+# tsc -b incremental state, written by a local typecheck. Build output, not source.
+*.tsbuildinfo
 .env
 .env.local
 *.local

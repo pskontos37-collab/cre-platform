@@ -222,6 +222,85 @@ export function computeTotals(rows: PcfRow[], openingCash: number): PcfTotals {
 }
 
 // ---------------------------------------------------------------------------
+// Budget, for variance. Read straight from v_pcf_budget_lines - the SAME view the
+// version seeder uses - so a variance can never disagree with what was seeded.
+//
+// ⚠️ A line with NO budget row is left OUT of the map rather than defaulted to
+// zero. The difference matters: "budget of 0" and "no budget" produce the same
+// variance arithmetic but mean opposite things, and treating the second as the
+// first reports a line's entire actual as an overspend. Gateway FY2026 budgets
+// 67 lines and the grid carries more than that - equity is budgeted NOWHERE, by
+// design (mig 20240146), so every equity line would otherwise show a fake variance.
+// ---------------------------------------------------------------------------
+export interface PcfBudget {
+  byLine: Map<string, number[]>    // 12 months; key absent => genuinely unbudgeted
+  fiscalYear: number
+}
+
+export function usePcfBudget(propertyId: string | null, fiscalYear: number | null) {
+  return useQuery<PcfBudget | null>(async () => {
+    if (!propertyId || !fiscalYear) return null
+
+    // Paged like the grid: Gateway alone returns 664 rows and db-max-rows caps at
+    // 1,000, so an unpaged read would start silently truncating as budgets grow.
+    const rows = await fetchAllRows<any>((from, to) => supabase
+      .from('v_pcf_budget_lines')
+      .select('line_key, period_month, amount')
+      .eq('property_id', propertyId)
+      .eq('period_year', fiscalYear)
+      .order('line_key').order('period_month')
+      .range(from, to))
+
+    const byLine = new Map<string, number[]>()
+    for (const r of rows) {
+      const m = Number(r.period_month)
+      if (!m || m < 1 || m > MONTHS) continue
+      let arr = byLine.get(r.line_key)
+      if (!arr) { arr = Array.from({ length: MONTHS }, () => 0); byLine.set(r.line_key, arr) }
+      arr[m - 1] += num(r.amount)
+    }
+    return { byLine, fiscalYear }
+  }, [propertyId, fiscalYear])
+}
+
+// Every stored amount is already its EFFECT ON CASH (mig 20240133), which makes the
+// variance sign uniform: actual - budget > 0 is FAVOURABLE in every section. Income
+// above budget is positive; opex is stored negative, so underspending is a smaller
+// negative, i.e. also positive. No per-section sign flip is needed anywhere, and the
+// UI can colour one way throughout. This is the same property that kills the
+// sign-error class in the subtotal cascade above.
+export interface LineVariance {
+  hasBudget: boolean
+  ytdActual: number
+  ytdBudget: number
+  ytdVar: number
+  fyProjected: number
+  fyBudget: number
+  fyVar: number
+}
+
+export function computeVariance(
+  cells: Array<{ amount: number | null }>,
+  budget: number[] | undefined,
+  asOfMonth: number,
+): LineVariance {
+  const hasBudget = budget !== undefined
+  let ytdActual = 0, ytdBudget = 0, fyProjected = 0, fyBudget = 0
+  for (let i = 0; i < MONTHS; i++) {
+    const a = num(cells[i]?.amount)
+    const b = budget ? num(budget[i]) : 0
+    fyProjected += a
+    fyBudget += b
+    if (i + 1 <= asOfMonth) { ytdActual += a; ytdBudget += b }
+  }
+  return {
+    hasBudget,
+    ytdActual, ytdBudget, ytdVar: ytdActual - ytdBudget,
+    fyProjected, fyBudget, fyVar: fyProjected - fyBudget,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Drill-down: what is actually behind a line, so a forward month can be filled
 // from evidence rather than from a label.
 // ---------------------------------------------------------------------------
