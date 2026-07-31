@@ -18,8 +18,15 @@
 # post-run diff is reported rather than assumed.
 #
 # BEFORE/AFTER IS RECORDED, NOT TRUSTED. The script writes _reabstract_before.json
-# (md5 + key fields per tenant) before touching anything, so the effect of the new
-# text can be diffed instead of eyeballed - and so a regression is recoverable.
+# before touching anything, so the effect of the new text can be diffed instead of
+# eyeballed - and so a regression is recoverable.
+#
+# WARNING: THE SNAPSHOT STORES THE FULL ABSTRACT JSON, not just a fingerprint. The
+# first run of this script saved only md5/length/counts, and that was a mistake:
+# lease_abstracts has NO audit trigger (audit_log holds nothing for it), so
+# force=true OVERWRITES the row and the previous abstract is gone for good. A hash
+# proves something changed; it cannot tell you WHAT changed and it cannot restore it.
+# For a destructive overwrite with no audit trail, the snapshot IS the backup.
 #
 # WARNING: POST VIA curl.exe --data-binary WITH A UTF-8 NO-BOM FILE. PS 5.1's
 # Invoke-RestMethod corrupts non-ASCII in the body and returns spurious 401s on some
@@ -77,11 +84,17 @@ foreach ($x in $safe) {
     qa_status = $r.qa_status; len = $json.Length; md5 = $md5
     square_footage = $r.abstract.square_footage; suite = $r.abstract.suite
     open_items = @($r.abstract.open_items).Count; lease_documents = @($r.abstract.lease_documents).Count
+    # THE BACKUP. Without this the overwritten abstract is unrecoverable - there is no
+    # audit trigger on lease_abstracts. Depth 30 because the abstract nests several
+    # levels (base_rent_schedule, options, critical_dates each hold object arrays) and
+    # ConvertTo-Json SILENTLY TRUNCATES past -Depth, which would make the "backup" a
+    # lie exactly where the detail lives.
+    abstract_full = $r.abstract
   })
 }
-$beforePath = "$PSScriptRoot\_reabstract_before.json"
-[IO.File]::WriteAllText($beforePath, ($before | ConvertTo-Json -Depth 6), $enc)
-Log "before-state saved: $beforePath"
+$beforePath = "$PSScriptRoot\_reabstract_before_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+[IO.File]::WriteAllText($beforePath, ($before | ConvertTo-Json -Depth 30), $enc)
+Log "before-state saved (FULL abstracts, restorable): $beforePath"
 $before | ForEach-Object { Log ("  BEFORE {0,-22} len={1,-6} sf={2,-8} open={3,-3} docs={4,-3} qa={5}" -f $_.tenant, $_.len, $_.square_footage, $_.open_items, $_.lease_documents, $_.qa_status) }
 
 if ($WhatIf) { Log '-WhatIf: stopping before any paid call'; return }
