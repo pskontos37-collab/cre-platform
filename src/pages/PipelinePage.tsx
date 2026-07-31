@@ -6,7 +6,7 @@ import {
   useBuyBoxes, createBuyBox, updateBuyBox, deleteBuyBox, type BuyBoxInput,
   useBrokers, createBroker, updateBroker, deleteBroker, type Broker, type BrokerInput,
   createDeal, updateDeal, deleteDeal, closeDeal,
-  addDealLp, updateDealLp, removeDealLp, updateOmRow, extractOm, createDealFromExtraction, uploadOmPdf, generateIcMemo,
+  addDealLp, updateDealLp, removeDealLp, extractOm, createDealFromExtraction, uploadOmPdf, generateIcMemo,
   useDealDocuments, uploadDealDocument, removeDealDocument, DEAL_DOC_ROLES, dealDocRoleLabel, type DealDoc,
   useDealComments, addDealComment, updateDealComment, deleteDealComment,
   useDealTeamMembers, type TeamMember,
@@ -626,7 +626,12 @@ function capitalQuarterRows(deals: Deal[]): BarRow[] {
   return Object.keys(by).sort((a, b) => ord[a] - ord[b]).map(k => ({ l: k, v: by[k] }))
 }
 function irrByProfileRows(deals: Deal[]): BarRow[] {
-  return RISK_ORDER.map(rp => {
+  // The callback is annotated `BarRow | null` on purpose. Without it TS infers the
+  // element as `{l,v,fmt} | null` with fmt REQUIRED, and since BarRow declares fmt
+  // OPTIONAL, BarRow is not assignable to that inferred type - which made the
+  // `r is BarRow` predicate itself illegal (TS2677) and the return type mismatch
+  // (TS2322). Runtime was always correct; only the inference was.
+  return RISK_ORDER.map((rp): BarRow | null => {
     const xs = deals.filter(d => d.riskProfile === rp && d.projIrr != null).map(d => d.projIrr!)
     return xs.length ? { l: RISK_LABEL[rp], v: xs.reduce((a, b) => a + b, 0) / xs.length, fmt: pctBar } : null
   }).filter((r): r is BarRow => r != null)
