@@ -47,9 +47,17 @@
 -- remedy AND Tenant's right to cancel on 60 days' notice. That is a RISK REDUCTION for
 -- the landlord and it must stop showing on the co-tenancy radar for this lease.
 --
--- ⚠️ DOWNSTREAM, NOT DONE HERE: MRI / the rent roll still carry lease_end 2027-01-31 and
--- the `leases` row is unchanged, so WALT and the critical-dates radar still see a 2027
--- expiry. Those need updating separately - this migration only corrects the abstract.
+-- ⚠️ CORRECTED BY 20240171 - an earlier version of this comment (and of the
+-- term.expiration_basis text written below) claimed MRI still showed lease_end 2027-01-31
+-- and needed updating. THAT WAS FALSE. MRI already carries the Second Amendment: the
+-- 2026-07 rent-roll snapshot holds TWO rows for suite D3 (2022-02-01 -> 2027-01-31 at
+-- $23.00, and a future-term row 2027-02-01 -> 2037-01-31), and `leases` already reads
+-- expiration_date 2037-01-31 with has_co_tenancy_clause=false - so WALT and the
+-- critical-dates radar were already correct. I trusted the abstract's own 2026-07-21 note
+-- instead of querying the rent roll, and that note reflected only the CURRENT-term row -
+-- the documented "MRI records an extension as a SECOND future-term row" trap in reverse.
+-- The only real remaining gap is that the MRI future-term row carries NULL base rent, so
+-- the SS3(a) steps ($187,950.00 then $210,504.00) are not yet loaded in MRI.
 
 update lease_abstracts
 set overrides = coalesce(overrides::jsonb, '{}'::jsonb) || jsonb_build_object(
