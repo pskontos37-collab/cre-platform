@@ -1,0 +1,68 @@
+-- 20240167  Remove five MISDIRECTED overrides that put BEV MAX LIQUORS' identity and
+--           term onto the BANK OF AMERICA abstract row.
+--
+-- WHAT WAS WRONG (a live, user-visible defect, not a QA false alarm):
+-- lease_abstracts row 9c4b5c39-ed50-41eb-9f1a-7dcd4aa84bdb (Gateway Port Chester,
+-- tenant_name 'BANK OF AMERICA PNY53240000') carried these override keys:
+--
+--   tenant_legal_name      = 'Hudson Wine and Liquor, Inc. (successor in interest to
+--                             Wine Easy Corp., successor in interest to Liquor Land, LLC)'
+--   trade_name             = 'BEV MAX LIQUORS'
+--   suite                  = '449 Boston Post Road (Unit 022 per MRI); Port Chester
+--                             Shopping Center, Port Chester, NY'
+--   term.expiration        = '2032-04-30'
+--   term.rent_commencement = '2014-03-10 (Relocated Demised Premises opened for business
+--                             per 3/11/2014 landlord letter; per Relocation Agreement,
+--                             Rent Commencement Date = earlier of tenant opening for
+--                             business or 120 days after Commencement Date)'
+--
+-- Every one of those is the BEV MAX LIQUORS lease's value. The RAW abstract on this row
+-- is correct Bank of America: legal name 'Bank of America, National Association,
+-- successor to Fleet National Bank, successor to National Westminster Bank, USA',
+-- trade_name 'Bank of America', suite '016', expiration 2027-08-31 (which MATCHES MRI).
+-- Because the app merges `overrides` over `abstract`, Bank of America's lease was
+-- DISPLAYING as Hudson Wine and Liquor / BEV MAX LIQUORS at Unit 022 expiring
+-- 2032-04-30 - wrong tenant identity and a 5-year error on the expiration.
+--
+-- The corrections were MISDIRECTED, NOT COPIED: the real BEV MAX LIQUORS row
+-- (d1ad853d-92df-494b-93f2-cc45c7a5b5e2) has overrides = NULL, so it never received
+-- them. Almost certainly a write keyed on the wrong row.
+--
+-- KEEPING `options.1.notice_by` = '2022-02-28'. That one IS genuinely Bank of America's
+-- and it is the only key this row's review_note documents: "[AI fix 2026-07-22] 2nd
+-- Renewal notice_by corrected to 2022-02-28 (6 months before 8/31/2022, time of essence
+-- ...)". It corroborates the raw expiration too - 2022-08-31 + 5 years = 2027-08-31.
+-- The five removed keys carry NO note, which is the signature of the bad write.
+--
+-- HOW THIS WAS CAUGHT, and the reusable test: abstract-verify READS THE OVERRIDE-MERGED
+-- VALUE, so its `field_checks[].abstract_value` reflects overrides. Comparing that value
+-- against the RAW abstract flags exactly this class of corruption. I initially concluded
+-- the opposite - that the verifier had compared BEV MAX's abstract against Bank of
+-- America's documents - and that was WRONG. The verifier was right; the data was corrupt.
+--
+-- SCOPE IS CONTAINED AND MEASURED: scanning all 100 abstracts for an override on an
+-- identity field (tenant_legal_name / trade_name / suite) that disagrees with the raw
+-- abstract returns EXACTLY ONE ROW - this one. No other abstract was misdirected.
+--
+-- NOT DOING: writing these values onto the BEV MAX row. Its raw abstract already reads
+-- Hudson Wine and Liquor, Inc. / BEV MAX LIQUORS / 2032-04-30, so those three would be
+-- no-ops; and its own review_note flags 2032-04-30 as suspect ("Year-17 row end date
+-- conflates the 2021 extension tier ... ends ~2031-03"). Propagating a questioned date
+-- is not a fix. Left as an open item.
+
+update lease_abstracts
+set overrides = overrides - 'tenant_legal_name'
+                          - 'trade_name'
+                          - 'suite'
+                          - 'term.expiration'
+                          - 'term.rent_commencement'
+where id = '9c4b5c39-ed50-41eb-9f1a-7dcd4aa84bdb'
+  and tenant_name = 'BANK OF AMERICA PNY53240000';
+
+-- VERIFIED after applying, against a prediction made before writing (6 keys -> 1):
+--   overrides                = {"options.1.notice_by": "2022-02-28"}   (n_keys 6 -> 1)
+--   effective_legal_name     = Bank of America, National Association, successor to Fleet...
+--   effective_trade_name     = Bank of America
+--   effective_suite          = 016
+--   effective_expiration     = 2027-08-31        (matches MRI)
+--   BEV MAX LIQUORS row      = untouched, overrides still NULL, raw values intact

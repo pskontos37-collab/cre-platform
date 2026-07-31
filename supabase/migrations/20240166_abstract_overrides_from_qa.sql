@@ -79,10 +79,15 @@ where tenant_name = 'Woodhouse Day Spa';
 --           (signed, DocuSign) which would extend the term past 2027-01-31 and DELETE
 --           the co-tenancy provisions. Whether that amendment is legally effective is a
 --           legal determination, not a data fix.
---   BANK OF AMERICA PNY53240000 - its QA findings are OBSOLETE. They describe an
---           abstract naming Hudson Wine and Liquor with a BEV MAX trade name and a
---           2032-04-30 expiration; the live abstract correctly reads Bank of America,
---           N.A. with expiration 2027-08-31, matching MRI. Fixed ~7/29 by a direct edit.
---           ⚠️ THAT EDIT DID NOT MOVE generated_at, so `qa_at >= generated_at` is NOT a
---           valid staleness test for this table. Re-run abstract-verify to clear it.
+--   BANK OF AMERICA PNY53240000 - ⚠️ SUPERSEDED. See migration 20240167, which FIXED it.
+--           Earlier versions of this comment were wrong TWICE: first that the findings
+--           were merely obsolete, then that abstract-verify had compared BEV MAX's
+--           abstract against Bank of America's documents. The truth: BoA's `overrides`
+--           column itself held five BEV MAX LIQUORS values, so the app was DISPLAYING
+--           Bank of America's lease as Hudson Wine and Liquor expiring 2032-04-30.
+--           The verifier was RIGHT - it reads the override-merged value. 20240167
+--           removes the five misdirected keys and keeps the one genuine BoA override.
+--           ⚠️ Still true and still important: a direct edit to `abstract` does NOT move
+--           generated_at, so `qa_at >= generated_at` is NOT a valid staleness test for
+--           this table. Check every finding against the live value at its own path.
 -- ---------------------------------------------------------------------------
