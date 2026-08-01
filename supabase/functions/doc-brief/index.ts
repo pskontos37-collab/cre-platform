@@ -2,10 +2,22 @@
 //
 // Reads 100% of one document's corpus text and produces a structured BRIEF:
 // classification (doc_class/chain_role), parties, execution status, dates,
-// rent tables, option/guaranty/assignment effects, clause inventory with
-// verbatim operative language, and critical dates. lease-abstract synthesizes
-// from these briefs instead of truncated raw text — no instrument is ever
-// partially read again.
+// rent tables, allowance/option/guaranty/assignment effects, clause inventory
+// with verbatim operative language, and critical dates. lease-abstract
+// synthesizes from these briefs instead of truncated raw text — no instrument is
+// ever partially read again.
+//
+// WHY allowance_effects IS ITS OWN FIELD (added 2026-07-31). The prompt has always
+// listed "tenant_allowance" as a clauses[] label, but clauses[] is a shared
+// catch-all under a quote budget that terse mode caps at 20 entries — so on a
+// clause-dense instrument an allowance competes with every other clause and can
+// simply lose. Target's brief compressed a 639,503-char lease to 8,946 chars and
+// the word "allowance" never appeared, hiding a $2,842,335 SS6.3 obligation; a
+// portfolio sweep then found three more (Regal $6,844,030, Blue Cross $110,000,
+// Embassy Nails $74,850). A dedicated array extracts independently of that budget.
+// The `direction` discriminator exists because Cheddar's $130,000 "Tenant
+// Contribution" — money flowing TO the landlord — had been recorded as a tenant
+// allowance, an error worth twice its face value.
 //
 // Giant instruments are walked in SEGMENTS (~180K chars each). One invocation
 // processes segments until ~100s elapsed, persists progress to doc_briefs
@@ -99,6 +111,7 @@ const BRIEF_SCHEMA = `{
  "chain": {"amends": str|null, "recites_prior_chain": [str], "position": str|null},
  "term_effects": [{"field": str, "value": str, "quote": str, "section": str}],   // dates/term this instrument SETS or CHANGES (commencement, RCD, expiration, extension)
  "rent_effects": [{"start": "YYYY-MM-DD"|str|null, "end": "YYYY-MM-DD"|str|null, "psf": num|null, "monthly": num|null, "annual": num|null, "quote": str, "section": str, "replaces_prior": bool|null}],
+ "allowance_effects": [{"direction": "landlord_to_tenant"|"tenant_to_landlord", "kind": "tenant_improvement"|"construction"|"moving"|"reimbursement"|"other", "total": num|null, "psf": num|null, "computation": str|null, "conditions": str|null, "payable_when": str|null, "quote": str, "section": str}],
  "option_effects": [{"action": "grants"|"voids"|"exercises"|"modifies"|"confirms", "detail": str, "notice_mechanics": str|null, "notice_by_date": "YYYY-MM-DD"|null, "landlord_reminder_required": bool|null, "quote": str, "section": str}],
  "guaranty_effects": [{"action": "creates"|"reaffirms"|"replaces"|"releases"|"caps"|"references", "guarantor": str|null, "detail": str, "quote": str, "section": str}],
  "assignment_effects": [{"assignor": str|null, "assignee": str|null, "assignor_released": bool|null, "replacement_guaranty": str|null, "detail": str, "section": str}],
@@ -120,6 +133,7 @@ EXTRACTION RULES:
 - QUOTE BUDGET: keep each quote/operative_language value to the most operative sentence(s), max ~600 characters (CAM/exclusive/co-tenancy language may run to ~1,200 where the remedies matter). One clauses[] entry per distinct clause — do not repeat near-identical entries. The brief is an index into the document, not a transcription of it.
 - Classification (doc_class): correspondence, default notices, past-due letters, force-majeure letters, and emails are "notice_correspondence" — even when they discuss lease terms. CAM/RET reconciliations, sales reports, invoices are "financial_operational". Unsigned drafts/redlines are "draft_unexecuted". Executed leases/amendments/CDAs/lease supplements/assignments/terminations and executed option-EXERCISE notices are "operative_instrument". Guaranties, SNDAs, estoppels, MOLs, licenses are "ancillary_executed". REA/OEA/declarations and management agreements are "property_level".
 - CLAUSE DISCIPLINE: distinguish (a) the tenant's PERMITTED USE (what tenant may do), (b) the tenant's OWN EXCLUSIVE (landlord covenant restricting OTHERS for tenant's benefit — include remedies), (c) USE RESTRICTIONS BINDING THE TENANT (other tenants' exclusives / prohibited-use schedules, often in exhibits). Label clause entries exactly: "permitted_use", "tenant_exclusive", "use_restrictions_on_tenant", "prohibited_uses", "co_tenancy", "kickout_termination", "radius", "continuous_operations", "go_dark", "relocation", "recapture", "assignment_subletting", "percentage_rent", "cam", "real_estate_tax", "insurance", "security_deposit", "tenant_allowance", "signage", "parking", "estoppel_obligation", "snda_obligation", "purchase_option_rofr", "default_remedies", "landlord_reminder" or a clear other name.
+- ALLOWANCE DISCIPLINE (dedicated field — never leave this to clauses[]): put EVERY construction/inducement money obligation in allowance_effects, whichever way the money flows. Set direction="landlord_to_tenant" for a TI or construction allowance the LANDLORD funds, and direction="tenant_to_landlord" for a tenant contribution or reimbursement toward Landlord's work. Those are OPPOSITE economics and must never be conflated — a tenant contribution recorded as an allowance misstates the deal by twice the amount. Record total and/or psf exactly as the instrument states them (include BOTH when it states a rate and its computed amount); put any rate x area derivation in computation. If only a rate is stated, leave total null rather than multiplying it yourself. Capture conditions precedent to funding and when it is payable. Note any cap or contingent increase in computation. If the instrument expressly says NO allowance is provided, record that in key_facts rather than adding an empty entry.
 - OPTION MECHANICS: capture notice windows verbatim; when the instrument states or lets you compute a hard notice-by DATE for a specific option, set notice_by_date. If the LANDLORD must remind/notify the tenant about the option window, set landlord_reminder_required=true.
 - GUARANTY/ASSIGNMENT: record every guaranty creation, reaffirmation, replacement, release, or cap, and for assignments whether the assignor remains liable and any replacement guaranty delivered.
 - If the text is illegible/garbled OCR in places, set quality.text_legible=false and say where.
@@ -178,6 +192,12 @@ function mergeBriefs(segs: any[]): any {
     },
     term_effects: unionBy(x => `${x?.field}|${x?.value}`, segs.map(s => s?.term_effects ?? [])),
     rent_effects: unionBy(x => `${x?.start}|${x?.end}|${x?.annual}|${x?.monthly}|${x?.psf}`, segs.map(s => s?.rent_effects ?? [])),
+    // MUST be merged explicitly: this function rebuilds the brief key-by-key, so a
+    // schema field with no line here is silently DROPPED on every multi-segment
+    // document — i.e. exactly the giant leases where a missed allowance costs most.
+    // Keyed on direction too, so a landlord allowance and a tenant contribution of
+    // the same amount never collapse into one entry.
+    allowance_effects: unionBy(x => `${x?.direction}|${x?.kind}|${x?.total}|${x?.psf}|${x?.section}`, segs.map(s => s?.allowance_effects ?? [])),
     option_effects: unionBy(x => `${x?.action}|${x?.detail}`, segs.map(s => s?.option_effects ?? [])),
     guaranty_effects: unionBy(x => `${x?.action}|${x?.guarantor}|${x?.detail}`, segs.map(s => s?.guaranty_effects ?? [])),
     assignment_effects: unionBy(x => `${x?.assignor}|${x?.assignee}|${x?.detail}`, segs.map(s => s?.assignment_effects ?? [])),
@@ -264,7 +284,11 @@ serve(async (req) => {
     // Clause-dense instruments can exceed even the raised output cap; retry
     // once in TERSE mode (shortest operative quotes, material entries only)
     // rather than failing the whole brief.
-    const TERSE_ADDENDUM = `\n\nTERSE MODE (your previous attempt exceeded the output limit): keep every quote to ONE operative sentence (max ~300 chars), cap clauses[] at the 20 most material entries, cap key_facts at 8, and omit rent_effects rows beyond the controlling schedule. Completeness of FIELDS still matters; verbosity does not.`
+    // NOTE the allowance carve-out. Terse mode is the most likely reason a clause
+    // gets dropped from a clause-dense segment, and dropping an allowance is a
+    // money error rather than a verbosity saving — Target's $2,842,335 SS6.3
+    // allowance went missing from a 71:1-compressed brief exactly this way.
+    const TERSE_ADDENDUM = `\n\nTERSE MODE (your previous attempt exceeded the output limit): keep every quote to ONE operative sentence (max ~300 chars), cap clauses[] at the 20 most material entries, cap key_facts at 8, and omit rent_effects rows beyond the controlling schedule. NEVER drop an allowance_effects entry — trim its quote instead; a missing allowance misstates the deal economics and is not verbosity. Completeness of FIELDS still matters; verbosity does not.`
     const isTruncated = (e: unknown) => /truncated at max_tokens/i.test(e instanceof Error ? e.message : String(e))
     const callWithTerseRetry = async (text: string, maxTokens: number) => {
       try {
