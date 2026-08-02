@@ -74,9 +74,17 @@ $wanted = @(Get-Content $targetsFile | ForEach-Object { $_.Trim() } | Where-Obje
 Log ("target list: {0} document id(s) from {1}" -f $wanted.Count, (Split-Path $targetsFile -Leaf))
 # Current state, so an interrupted run can be resumed safely: skip anything already
 # multi-segment (i.e. already re-briefed by an earlier pass of this script).
-$briefs = Invoke-RestMethod -Uri "$BASE/rest/v1/doc_briefs?select=document_id,segments_total,text_chars,status" -Headers $H -UserAgent $UA -TimeoutSec 120
+# WARNING: SCOPE THIS TO THE TARGET IDS. An unfiltered select on doc_briefs returns only
+# PostgREST's default first page (1,000 rows) out of 4,048, so the already-completed
+# documents fell outside it, $segBy came back empty for them, NOTHING was skipped, and
+# the 2026-08-02 resume began force-restarting finished work - wiping 23 segments of
+# progress on the first document before it was killed. Filtering by the 61 ids keeps the
+# response small and makes the lookup exact regardless of table size.
+$idFilter = ($wanted -join ',')
+$briefs = Invoke-RestMethod -Uri "$BASE/rest/v1/doc_briefs?select=document_id,segments_total,status&document_id=in.($idFilter)" -Headers $H -UserAgent $UA -TimeoutSec 120
 $segBy = @{}
 foreach ($b in @($briefs)) { $segBy[[string]$b.document_id] = $b.segments_total }
+Log ("state lookup returned {0} of {1} target rows" -f @($briefs).Count, $wanted.Count)
 $targets = New-Object System.Collections.Generic.List[object]
 foreach ($id in $wanted) {
   $seg = $segBy[[string]$id]
