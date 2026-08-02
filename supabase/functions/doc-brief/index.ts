@@ -76,7 +76,11 @@ async function anthropicJson(key: string, model: string, content: any[], maxToke
     }),
   })
   const d = await r.json()
-  if (!r.ok) throw new Error('Anthropic API error: ' + JSON.stringify(d))
+  // Carry the HTTP STATUS in the message. The caller classifies transient (retry on a
+  // later resume) vs permanent (surface now) off this number, and without it every
+  // failure - including a hard 400 "credit balance is too low" - looked transient and
+  // the function kept answering 200/done:false forever. See the worker catch below.
+  if (!r.ok) throw new Error(`Anthropic API error ${r.status}: ` + JSON.stringify(d))
   if (d.stop_reason === 'max_tokens') throw new Error('Brief truncated at max_tokens — retry')
   const block = (d.content ?? []).find((c: { type: string }) => c.type === 'tool_use')
   if (!block) throw new Error('Model returned no tool_use block')
@@ -328,10 +332,17 @@ serve(async (req) => {
           segs[i] = await callWithTerseRetry(SEGMENT_PROMPT(docMeta, i, segTotal, '', segText), SEGMENT_MAX_TOKENS)
           await persistProgress()
         } catch (e) {
-          // Leave this index for a resume retry; record only a genuinely
-          // non-transient error to surface if NOTHING completes.
+          // Leave this index for a resume retry, but RECORD anything that will fail
+          // identically next time so the caller is not told to resume forever.
+          // ⚠️ This used to treat the bare string "Anthropic API error" as transient,
+          // which swallowed EVERY upstream failure - including HTTP 400 "Your credit
+          // balance is too low". On 2026-08-02 that turned an exhausted account into 53
+          // documents reporting 200/done:false with zero progress and no diagnostic, and
+          // the runner spun 40 no-op rounds each. Only 429/529/5xx and output-truncation
+          // are genuinely worth resuming; a 4xx (bad request, auth, billing) is not.
           const m = e instanceof Error ? e.message : String(e)
-          if (!/truncated at max_tokens|overloaded|rate_limit|\b529\b|Anthropic API error/i.test(m)) segErr = m
+          const transient = /truncated at max_tokens|overloaded|rate_limit|Anthropic API error (?:429|5\d\d)/i.test(m)
+          if (!transient) segErr = m
         }
       }
     }
@@ -341,8 +352,13 @@ serve(async (req) => {
     const doneCount = segs.filter(Boolean).length
     if (doneCount < segTotal) {
       if (doneCount === 0 && segErr) throw new Error('segment briefing failed: ' + segErr)
+      // Report a permanent error even when SOME segments already succeeded. Without
+      // this, a document stuck at 12/13 by a billing or auth failure answers a clean
+      // 200/done:false and a caller loops on it forever - which is exactly what
+      // happened on 2026-08-02. `error` non-null means "do not bother resuming".
       return new Response(JSON.stringify({
         success: true, done: false, segments_done: doneCount, segments_total: segTotal,
+        error: segErr ?? null,
       }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 

@@ -11,11 +11,11 @@
 # Re-briefing with the CURRENT doc-brief (v9) fixes both problems at once: it segments
 # properly AND populates the new allowance_effects slot.
 #
-# ⚠️ SNAPSHOT FIRST. doc_briefs has no audit trigger and force=true overwrites
+# WARNING: SNAPSHOT FIRST. doc_briefs has no audit trigger and force=true overwrites
 # permanently, so the run writes _briefs_before_rebrief_<ts>.json before touching
 # anything. That file IS the backup - a hash would prove change without allowing repair.
 #
-# ⚠️ FORCE ONLY ON THE FIRST CALL PER DOCUMENT. doc-brief resumes from persisted
+# WARNING: FORCE ONLY ON THE FIRST CALL PER DOCUMENT. doc-brief resumes from persisted
 # segments only when force is ABSENT (`resume = ... && !body.force`). Sending force on a
 # resume call restarts the document from zero and it can never finish. First call sends
 # force to invalidate the stale single-segment row; every later call omits it.
@@ -56,7 +56,7 @@ function PostFn($slug, $bodyObj) {
 }
 
 # ---- 1. Targets ----
-# ⚠️ DO NOT filter on doc_briefs.text_chars. That column records how much text existed
+# WARNING: DO NOT filter on doc_briefs.text_chars. That column records how much text existed
 # WHEN THE BRIEF WAS WRITTEN, and for this cohort that predates the OCR pass - so 60 of
 # the 61 under-read docs look <=60,000 chars there and a text_chars filter finds only
 # ONE of them. The real measure is the CURRENT sum of kind='text' chunks, which needs a
@@ -110,7 +110,7 @@ $ok = 0; $fail = 0; $i = 0
 foreach ($t in $targets) {
   $i++
   $sw = [Diagnostics.Stopwatch]::StartNew()
-  $done = $false; $round = 0; $lastErr = ''
+  $done = $false; $round = 0; $lastErr = ''; $stall = 0; $lastSegs = -1
   while (-not $done -and $round -lt $MaxRoundsPerDoc) {
     $round++
     # force ONLY on round 1 - later rounds must omit it or the doc restarts from zero.
@@ -125,7 +125,26 @@ foreach ($t in $targets) {
     try {
       $o = $r.json | ConvertFrom-Json
       $done = ($o.done -eq $true)
-      if (-not $done) { Log ("  [{0}/{1}] {2} segments {3}/{4}" -f $i, $targets.Count, $t.document_id, $o.segments_done, $o.segments_total) }
+      # A CACHED done=true is NOT a re-brief. Round 1 sends force so it cannot be cached;
+      # if round 1 failed and round 2 (which omits force) finds the row still 'complete'
+      # with matching text_chars, doc-brief serves the OLD brief and reports done=true.
+      # That is how 722d42ab was logged OK on 2026-08-02 without being re-briefed at all.
+      if ($done -and $o.cached -eq $true) { $done = $false; $lastErr = 'served from cache - not re-briefed (earlier round must have failed)'; break }
+      # doc-brief now reports a PERMANENT upstream failure here (billing/auth/4xx) even
+      # when some segments already landed. Resuming past it is pointless.
+      if (-not $done -and $o.error) { $lastErr = "$($o.error)"; break }
+      if (-not $done) {
+        Log ("  [{0}/{1}] {2} segments {3}/{4}" -f $i, $targets.Count, $t.document_id, $o.segments_done, $o.segments_total)
+        # STALL GUARD. Every round is a paid attempt; if two consecutive rounds add no
+        # segments the cause is not going to clear by asking again. On 2026-08-02 an
+        # exhausted Anthropic balance made doc-brief answer 200/done:false instantly and
+        # this loop burned 40 no-op rounds per document across 53 documents.
+        if ($o.segments_done -eq $lastSegs) {
+          $stall++
+          if ($stall -ge 2) { $lastErr = "no progress at $($o.segments_done)/$($o.segments_total) - upstream is failing, not slow"; break }
+        } else { $stall = 0 }
+        $lastSegs = $o.segments_done
+      }
     } catch { $lastErr = 'unparseable response'; break }
   }
   $sw.Stop()
