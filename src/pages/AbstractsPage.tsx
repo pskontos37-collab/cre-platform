@@ -93,6 +93,20 @@ function useResolutions(abstractIds: string[], bump: number) {
 
 // Per-tenant count of UNRESOLVED red (discrepancy/confirm) open items for the
 // property, from the portfolio view — powers the tenant-list attention badge.
+// Which properties actually HAVE abstracts. Used only to pick a sensible DEFAULT.
+// The picker used to default to properties[0] — alphabetical — which lands on "Bank
+// Financial Building", a directory-only shell with no leases, documents or abstracts.
+// 22 of the 26 properties are such shells, so /abstracts opened at 0/0 and read as
+// though the whole system were empty. One row per abstract is plenty here: we only
+// need the distinct set of ids, and lease_abstracts is ~100 rows.
+function usePropertiesWithAbstracts() {
+  return useQuery<Set<string>>(async () => {
+    const { data, error } = await supabase.from('lease_abstracts').select('property_id')
+    if (error) throw new Error(error.message)
+    return new Set((data ?? []).map((r: { property_id: string }) => r.property_id))
+  }, [])
+}
+
 function useUnresolvedRed(propertyId: string | null, bump: number) {
   return useQuery<Record<string, number>>(async () => {
     if (!propertyId) return {}
@@ -165,6 +179,8 @@ export function AbstractsPage() {
   // and shows the name as static context — no redundant control.
   const singleScoped = properties.length === 1
   const [propertyId, setPropertyId] = useState<string | null>(null)
+  // Drives the default-property choice below — see usePropertiesWithAbstracts.
+  const populated = usePropertiesWithAbstracts()
 
   const [bump, setBump] = useState(0)
   const tenants = useTenantsForProperty(propertyId)
@@ -205,11 +221,17 @@ export function AbstractsPage() {
       if (propertyId !== null) { setPropertyId(null); setSelected(null) }
       return
     }
-    if (!propertyId || !properties.some(p => p.id === propertyId)) {
-      setPropertyId(properties[0].id)
-      setSelected(null)
-    }
-  }, [properties, propertyId])
+    if (propertyId && properties.some(p => p.id === propertyId)) return
+    // Prefer the first scoped property that actually HAS abstracts, so the page never
+    // opens on a directory-only shell showing 0/0. Wait for that set to load first,
+    // otherwise the alphabetical fallback wins the race and sticks (the guard above
+    // stops us re-picking once a property is set). On error the set stays null and
+    // loading goes false, so we still fall back rather than leaving the page blank.
+    if (populated.loading) return
+    const firstWithData = populated.data ? properties.find(p => populated.data!.has(p.id)) : undefined
+    setPropertyId((firstWithData ?? properties[0]).id)
+    setSelected(null)
+  }, [properties, propertyId, populated.loading, populated.data])
   const [generating, setGenerating] = useState<Set<string>>(new Set())
   // Per-tenant progress detail during the two-stage generate (briefing N/M → synthesizing).
   const [phase, setPhase] = useState<Record<string, string>>({})

@@ -434,8 +434,17 @@ serve(async (req) => {
       .select('manager_name, sub_manager_name, mgmt_fee_pct, term_start, term_end, is_current')
       .eq('property_id', propertyId)
       .eq('is_current', true)
+    // ⚠️ management_agreements.mgmt_fee_pct STORES A PERCENT NUMBER, NOT A DECIMAL:
+    // Gateway = 1.75 meaning 1.75%, KM = 3.1, Magnolia = 2.75. It is the exception to
+    // CLAUDE.md's "percentages are decimals" convention (the column name's _pct says so).
+    // This line used to multiply by 100 and wrote "175.00%" into 29 of 100 abstracts —
+    // baked into stored abstract JSON at rea_pma.pma_manager, so it reached the UI and
+    // the exported PDFs. One abstract even self-flagged it: "mgmt fee 310.00% per PMA
+    // line - CONFIRM this fee figure, appears anomalous". Do NOT reintroduce the x100:
+    // this was the ONLY x100 on mgmt_fee_pct in the repo, and both UI consumers already
+    // render it raw (PropertyDetailPage as `${v}%`, ManagementPage into a number input).
     const pmaLine = ((pmas ?? []) as any[]).map((m: any) =>
-      `${m.manager_name}${m.sub_manager_name ? ` / ${m.sub_manager_name}` : ''} — mgmt fee ${m.mgmt_fee_pct != null ? (m.mgmt_fee_pct * 100).toFixed(2) + '%' : '?'}${m.term_start ? `, term ${m.term_start}→${m.term_end ?? 'evergreen'}` : ''}`
+      `${m.manager_name}${m.sub_manager_name ? ` / ${m.sub_manager_name}` : ''} — mgmt fee ${m.mgmt_fee_pct != null ? Number(m.mgmt_fee_pct).toFixed(2) + '%' : '?'}${m.term_start ? `, term ${m.term_start}→${m.term_end ?? 'evergreen'}` : ''}`
     ).join('; ')
 
     // ── 4. Synthesis prompt (distilled from docs/abstraction-standard.md) ──
