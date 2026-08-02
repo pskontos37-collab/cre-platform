@@ -72,6 +72,24 @@ foreach ($a in $abstracts) {
   $hit = $docs | Where-Object { $_.property_id -eq $a.property_id -and (("$($_.title) $($_.file_path) $($_.file_name)") -match [regex]::Escape($needle)) } | Select-Object -First 1
   if (-not $hit) { continue }
 
+  # ROSTER GUARD: a document that merely LISTS tenants is not a document ABOUT one.
+  # The match above is a substring hit on title/path, so a property-level report that
+  # enumerates its occupants triggers a regeneration for EVERY tenant it names. That is
+  # exactly what happened on 2026-07-22: a Phase I Environmental Site Assessment titled
+  # "...11 tenant spaces including TJ Maxx, Best Buy, PetSma..." fired a TJ Maxx regen,
+  # which then failed and left a permanent banner entry. Measured against the real data:
+  # every genuine tenant document here matches EXACTLY ONE tenant at its property, while
+  # that ESA matches two - so 2+ is the roster threshold, not 3.
+  $rosterHits = @($abstracts | Where-Object {
+    $n = ($_.tenant_name -replace "[#\d]+$", '').Trim()
+    $_.property_id -eq $hit.property_id -and $n.Length -ge 3 -and
+      (("$($hit.title) $($hit.file_path) $($hit.file_name)") -match [regex]::Escape($n))
+  }).Count
+  if ($rosterHits -ge 2) {
+    Log ("SKIP roster doc (names {0} tenants, not about one) :: {1} :: would have regenerated {2}" -f $rosterHits, $hit.file_name, $a.tenant_name)
+    continue
+  }
+
   if ($a.locked) {
     RestPost 'abstract_refresh_log' @{ property_id = $a.property_id; tenant_name = $a.tenant_name; document_id = $hit.id; doc_title = ("$($hit.title)").Substring(0, [Math]::Min(200, ("$($hit.title)").Length)); action = 'locked_needs_review'; material = $true }
     Log ("LOCKED needs review :: {0} (new doc: {1})" -f $a.tenant_name, $hit.file_name)
@@ -89,10 +107,28 @@ foreach ($a in $abstracts) {
     if ($b.code -ne '200') { Log ("  brief FAIL http={0} (non-fatal, raw-text fallback) :: {1}" -f $b.code, $hit.file_name); break }
     try { $bDone = (($b.json | ConvertFrom-Json).done -ne $false) } catch { $bDone = $true }
   }
-  $g = PostFn 'lease-abstract' @{ property_id = $a.property_id; tenant = $a.tenant_name }
+  # RETRY TRANSIENT FAILURES. This used to treat ANY non-200 as terminal: one blip wrote
+  # a 'regen_failed' row that sat unseen forever as a scary banner, and the row recorded
+  # no HTTP code, so it could not even be diagnosed. On 2026-07-22 three tenants failed
+  # inside FIVE SECONDS (08:43:18/21/23) - unmistakably one transient burst, not three
+  # problems - and all three abstracts were already fine. Retry the transient classes and
+  # record why on the row that survives.
+  $g = $null; $attempt = 0
+  while ($attempt -lt 3) {
+    $attempt++
+    $g = PostFn 'lease-abstract' @{ property_id = $a.property_id; tenant = $a.tenant_name }
+    if ($g.code -eq '200') { break }
+    # 000 = curl could not complete (timeout/reset). 408/409/429/5xx are retryable.
+    # Anything else (400/401/403/404) is a real defect - fail fast, do not burn retries.
+    if ($g.code -notmatch '^(000|408|409|429|5\d\d)$') { break }
+    if ($attempt -lt 3) {
+      Log ("  regen transient http={0}, retry {1}/3 :: {2}" -f $g.code, $attempt, $a.tenant_name)
+      Start-Sleep -Seconds (10 * $attempt)
+    }
+  }
   if ($g.code -ne '200') {
-    RestPost 'abstract_refresh_log' @{ property_id = $a.property_id; tenant_name = $a.tenant_name; document_id = $hit.id; doc_title = "$($hit.title)"; action = 'regen_failed' }
-    Log ("REGEN FAIL http={0} :: {1}" -f $g.code, $a.tenant_name); continue
+    RestPost 'abstract_refresh_log' @{ property_id = $a.property_id; tenant_name = $a.tenant_name; document_id = $hit.id; doc_title = "$($hit.title)"; action = 'regen_failed'; changes = @{ http = "$($g.code)"; attempts = $attempt } }
+    Log ("REGEN FAIL http={0} after {1} attempt(s) :: {2}" -f $g.code, $attempt, $a.tenant_name); continue
   }
   $v = PostFn 'abstract-verify' @{ property_id = $a.property_id; tenant = $a.tenant_name }
   $qs = ''; try { $qs = ($v.json | ConvertFrom-Json).qa_status } catch {}
