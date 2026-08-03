@@ -215,9 +215,36 @@ serve(async (req) => {
       return nameRe.test(n)
     })
     for (const alias of (leaseRowFull?.tenants?.file_aliases ?? []) as string[]) addVariants(cands, alias)
-    // strip file_aliases + internal id from the cross-check payload the model sees
+    // ── MRI TENANT-RIGHT FLAGS — ASYMMETRIC EVIDENCE, handled explicitly. ──
+    // leases.has_radius_restriction / has_exclusives / has_co_tenancy_clause /
+    // has_percentage_rent are NOT NULL columns with a false default. Measured
+    // 2026-08-02: 92 of 112 leases read has_radius_restriction=false and ZERO are
+    // null, so "false" is indistinguishable from "nobody ever populated this row".
+    //
+    // Handed the raw boolean inside the cross-check JSON, the abstractor treated it
+    // as an assertion. 36 abstracts cite an MRI flag as the REASON a right does or
+    // does not exist. Krispy Kreme's radius_clause reads "MRI cross-check confirms
+    // has_radius_restriction=false; no radius covenant located in file" — its lease
+    // carries a 3-mile radius. In the other direction The Good Feet Store reads
+    // exists=true on the flag alone, with the language admittedly "not located".
+    // Both directions are the same bug: a default is not a finding.
+    //
+    // Fix: keep the four flags OUT of the JSON blob entirely (a bare
+    // `"has_radius_restriction": false` is exactly what invites the pattern-match)
+    // and present them below as a labeled block whose evidentiary weight is stated.
+    // The numeric companions (percentage_rent_rate, breakpoints) stay in the blob —
+    // a populated NUMBER is real evidence in a way a default boolean is not.
+    const RIGHT_FLAGS = ['has_radius_restriction', 'has_exclusives', 'has_co_tenancy_clause', 'has_percentage_rent'] as const
+    const flagsTrue = RIGHT_FLAGS.filter(f => (leaseRowFull as any)?.[f] === true)
+    const flagsFalse = RIGHT_FLAGS.filter(f => leaseRowFull != null && (leaseRowFull as any)[f] !== true)
+    // strip file_aliases + internal id + the right-flags from the payload the model sees
+    // (JSON.stringify drops undefined-valued keys, the same idiom used for `id`)
     const leaseRow = leaseRowFull
-      ? { ...leaseRowFull, id: undefined, tenants: { name: leaseRowFull.tenants?.name, trade_name: leaseRowFull.tenants?.trade_name } }
+      ? {
+          ...leaseRowFull, id: undefined,
+          tenants: { name: leaseRowFull.tenants?.name, trade_name: leaseRowFull.tenants?.trade_name },
+          ...Object.fromEntries(RIGHT_FLAGS.map(f => [f, undefined] as [string, undefined])),
+        }
       : null
 
     // ── MRI option data (system of record for option notice dates — durable
@@ -472,6 +499,8 @@ ABSTRACTION METHOD (firm standard — binding):
 8. REA/PMA: fill rea_pma from the property-level inventory — is the premises subject to an REA (subject_to_rea; the center's REA obligations affect co-tenancy math and CAM denominators)? tenant_impact = how it touches THIS tenant (anchor operating covenants, REA-driven restrictions, CAM contribution structure). pma_manager from the PMA line. If the property has no REA, subject_to_rea=false.
 9. CRITICAL DATES: every date creating a future duty or right — option notice_by dates, expiration, kickout windows, co-tenancy cure deadlines, landlord-reminder dates — also goes in critical_dates with its source.
 10. base_rent_schedule — CURRENT CONTROLLING SCHEDULE ONLY, from the latest instrument that sets or resets rent. Never carry superseded rows; never invent/interpolate/pad. If the current term's rent isn't stated anywhere in the file, list substantiated rows only + "CONFIRM: current-term rent" in open_items.
+   THE LEASE'S DEFINITIONS GOVERN, NOT A TABLE'S VISUAL LAYOUT. Rent tables arrive as OCR'd grids whose rows carry no knowledge of where the term ends, and a table almost always prints the OPTION-period tiers in the same grid as the initial-term tiers. Before writing any row: read the term the lease DEFINES (Lease Year / Initial Term / Expiration Date definitions, plus any amendment that reset them), then keep ONLY the tiers falling inside the CURRENT term. Tiers for renewal/option periods go in options[] with their psf/monthly/annual — NEVER in base_rent_schedule.
+   SELF-CHECK BEFORE SUBMITTING: the row months must ADD UP TO THE CURRENT TERM. Sum base_rent_schedule[].months and compare to current_term_start -> expiration. A 10-year term with 4 rows of 60 months is wrong by two tiers (this is a real, repeated defect - Burlington ran Year 1 through Year 20 against a 10-year term). If the sum overruns, you have absorbed option tiers; if it falls short, tiers are missing. Fix it, or state the shortfall as a CONFIRM item - do not submit a schedule that silently disagrees with its own term.
 11. Before submitting run consistency checks and flag failures as "DISCREPANCY:" items: commencement + term vs expiration; monthly × 12 vs annual; annual vs PSF × SF; option windows sequential and after the current term; breakpoint arithmetic (natural = annual fixed rent ÷ rate).
 
 GROUNDING — NO FABRICATION: every concrete value must be traceable to a brief (whose quotes came from the document), the raw text, or an attached PDF. Values the documents do not state are null + open item. MRI-sourced values are labeled as such in the *_basis fields.
@@ -488,7 +517,17 @@ ${SCHEMA}
 - "section" fields cite the instrument + section (e.g. "§6.1.3(j)" or "3rd Amd §5").
 - Where the template asks for exact language (CAM, exclusives, co-tenancy, permitted/prohibited use), QUOTE the operative language verbatim from the briefs/PDFs (trim boilerplate; keep remedies).
 - MULTIPLE SEQUENTIAL TENANCIES: if the file holds a PRIOR tenant's superseded chain for the same space, abstract the CURRENT tenancy (use the MRI cross-check to identify it), note the prior tenancy briefly in additional_rights_notes.
-${leaseRow ? `\nMRI SYSTEM-OF-RECORD CROSS-CHECK (current-term window; governs current-term dates/SF/suite/current rent/pct-rent flag; documents govern deposits/TI/clauses/options-language/guarantor/legal name): ${JSON.stringify(leaseRow)}` : ''}
+${leaseRow ? `\nMRI SYSTEM-OF-RECORD CROSS-CHECK (current-term window; governs current-term dates/SF/suite/current rent; documents govern deposits/TI/clauses/options-language/guarantor/legal name): ${JSON.stringify(leaseRow)}` : ''}
+${leaseRowFull ? `
+MRI TENANT-RIGHT FLAGS — ASYMMETRIC EVIDENCE, READ THIS BEFORE USING THEM:
+These four booleans are NOT-NULL columns with a FALSE DEFAULT. Across this portfolio 92 of 112 leases read has_radius_restriction=false and NOT ONE is null — so false means "never populated", NOT "verified absent". They are data-entry state, not a finding.
+  Flags currently TRUE: ${flagsTrue.length ? flagsTrue.join(', ') : '(none)'} — a POSITIVE HINT: someone recorded this right. It still requires quoted document language to report exists=true.
+  Flags currently FALSE/UNPOPULATED: ${flagsFalse.length ? flagsFalse.join(', ') : '(none)'} — ZERO EVIDENTIARY WEIGHT. Search the documents as if these were blank.
+HARD RULES:
+ (a) NEVER cite an MRI flag in any details / exact_language / notes / *_basis field. Do not write "MRI confirms has_radius_restriction=false", "MRI cross-check has_exclusives=false", or any variant. Such a sentence is itself the defect.
+ (b) NEVER set a right's exists=false because a flag is false. Absence rests ONLY on having searched the documents: say "no radius covenant located in the reviewed instruments" (a statement about the FILE), or raise "CONFIRM: ..." if coverage is incomplete.
+ (c) NEVER set exists=true on a flag alone. If a TRUE flag has no locatable covenant, exists=false plus "CONFIRM: [field] MRI records this right but no operative covenant located in the file - obtain the granting instrument".
+ (d) A right the documents establish is TRUE even when its flag is false, and reporting it is REQUIRED. This is the single most common way this abstract goes confidently wrong.` : ''}
 ${mriOptions.length ? `\nMRI OPTION DATA (RETAILRR-verified system of record for option notice dates & exercise state): ${JSON.stringify(mriOptions)}` : ''}
 ${mriRentRoll ? `\nMRI RENT ROLL (latest load — current term start/end, rent): ${JSON.stringify(mriRentRoll)}` : ''}
 
@@ -552,6 +591,80 @@ ${rawParts.length ? `\nRAW TEXT OF UNBRIEFED DOCUMENTS (bounded — flag truncat
       const lang = String(ex.exact_language ?? '')
       if (lang.length < 60 || !/landlord|lessor/i.test(lang)) {
         flags.push('DISCREPANCY: exclusives.exists=true but exact_language does not quote a landlord-restricting covenant (paraphrase/flag-only assertion) — per the abstraction standard this must be exists=false + CONFIRM unless the granting covenant is quoted')
+      }
+    }
+
+    // An MRI right-flag must never be the SOLE basis for a right's presence or
+    // absence. Scoped deliberately narrowly: merely MENTIONING MRI alongside real
+    // document analysis is good practice, not a defect. Measured over the 100
+    // stored abstracts, 70 fields cite a flag but only 10 do so as their only
+    // support - flagging all 70 would bury the 10 under 60 false positives and
+    // train the reviewer to ignore the item (the deny-list failure mode that
+    // rejected 4,943 real comps rows). So both arms below require the ABSENCE of
+    // document-side reasoning:
+    //   (a) exists=true while the text admits the language was never located
+    //       => the flag manufactured a right (Good Feet radius, 100 Chiro co-tenancy)
+    //   (b) exists=false with no statement that the documents were searched at all
+    //       => absence rests on a default-false column (Starbuck's radius, Verizon exclusives)
+    // NOTE what this deliberately does NOT catch: Krispy Kreme's radius_clause reads
+    // "MRI cross-check confirms has_radius_restriction=false; no radius covenant
+    // located in file" - a well-formed sentence whose error was a MISSED 3-mile
+    // clause. No text pattern can detect a missed clause; the prompt rules above
+    // plus keeping the flags out of the JSON are what prevent that one.
+    const MRI_FLAG_CITE = /has_(?:radius_restriction|exclusives|co_tenancy_clause|percentage_rent)\b|\bMRI\b[^.]{0,40}\bflag/i
+    const SEARCH_STATED = /\b(?:not|no|none|nothing|never|absent|silent)\b[^.]{0,60}(?:locat|found|identified|stated|appear|exist|contain)|(?:locat|identif)\w*[^.]{0,25}\b(?:not|no|none)\b/i
+    const RIGHT_FIELDS: Array<[string, string[]]> = [
+      ['radius_clause', ['details']],
+      ['co_tenancy', ['exact_language_and_remedies', 'replacement_tenants_permitted']],
+      ['exclusives', ['exact_language', 'conditions', 'remedies']],
+      ['termination_kickout', ['details']],
+      ['continuous_operations', ['details']],
+      ['recapture_rights', ['details']],
+      ['option_to_purchase', ['details']],
+      ['relocation_rights', ['notes']],
+    ]
+    for (const [field, textKeys] of RIGHT_FIELDS) {
+      const node = (abstract as any)?.[field]
+      if (!node || typeof node !== 'object') continue
+      const txt = [...textKeys.map(k => node[k]), node.section]
+        .filter((v): v is string => typeof v === 'string').join(' | ')
+      if (!MRI_FLAG_CITE.test(txt)) continue
+      const searched = SEARCH_STATED.test(txt)
+      if (node.exists === true && searched) {
+        flags.push(`DISCREPANCY: [${field}] exists=true rests on an MRI right-flag while this field itself records that the covenant was never located. Those columns are NOT NULL with a false default and are data-entry state, not evidence - set exists=false plus "CONFIRM: [${field}] MRI records this right but no operative covenant located in the file - obtain the granting instrument"`)
+      } else if (node.exists === false && !searched) {
+        flags.push(`DISCREPANCY: [${field}] exists=false cites an MRI right-flag with no statement that the documents were searched. A false flag means "never populated" (92 of 112 leases read has_radius_restriction=false, none null) and can never establish absence - state what was searched in the file, or raise a CONFIRM item`)
+      }
+    }
+
+    // base_rent_schedule must span the CURRENT TERM, and no more. An OCR'd rent
+    // table's visual rows do not know where the term ends, so tiers belonging to
+    // OPTION periods get carried into the base schedule: Burlington (KM West)
+    // listed Year 1 through Year 20 (4 rows x 60 months = 240) against a
+    // 2024-10-17 -> 2035-02-28 term of ~124 months - two option tiers too many.
+    // Portfolio-wide, 12 of 100 abstracts overrun their term by >12 months and 11
+    // fall short by >12. The term the lease DEFINES governs, never the layout.
+    const toDate = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(v + 'T00:00:00Z') : null)
+    const termStart = toDate(term.current_term_start) ?? toDate(term.rent_commencement) ?? toDate(term.original_commencement)
+    const termEnd = toDate(term.expiration)
+    if (termStart && termEnd && termEnd.getTime() > termStart.getTime()) {
+      const termMonths = (termEnd.getTime() - termStart.getTime()) / 86_400_000 / 30.4375
+      const span = `${term.current_term_start ?? term.rent_commencement ?? term.original_commencement} -> ${term.expiration} (~${termMonths.toFixed(0)} months)`
+      if (!sched.length) {
+        flags.push(`DISCREPANCY: [base_rent_schedule] is empty while the current term runs ${span} - state the controlling schedule or add "CONFIRM: current-term rent not stated in the file"`)
+      } else {
+        // Only trust the months arithmetic when EVERY row carries a numeric term;
+        // schedules keyed purely by "Year 1"/"Year 5" labels are not measurable
+        // this way and a partial sum would fire false positives.
+        const monthly = sched.map((r: any) => Number(r?.months))
+        if (monthly.every((m: number) => Number.isFinite(m) && m > 0)) {
+          const schedMonths = monthly.reduce((a: number, b: number) => a + b, 0)
+          if (schedMonths > termMonths + 12) {
+            flags.push(`DISCREPANCY: [base_rent_schedule] covers ${schedMonths} months but the current term is only ${span} - ${sched.length} rows overrun the term by ~${(schedMonths - termMonths).toFixed(0)} months, which is what happens when OPTION-period tiers are read off the rent table and carried into the base schedule. Option rent belongs in options[], not here`)
+          } else if (schedMonths < termMonths - 12) {
+            flags.push(`DISCREPANCY: [base_rent_schedule] covers only ${schedMonths} months of a ${span} term - ~${(termMonths - schedMonths).toFixed(0)} months of the current term have no stated rent; add the missing tiers or a "CONFIRM: current-term rent" item`)
+          }
+        }
       }
     }
 

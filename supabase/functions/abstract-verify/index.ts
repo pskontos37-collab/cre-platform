@@ -359,6 +359,8 @@ Method:
 - MRI DATE SEMANTICS. MRI's commencement_date and expiration_date reflect the CURRENT ACTIVE TERM — the start/end of the current option, renewal, or rent-schedule window — NOT the original lease commencement. This is expected and correct. Do NOT log a reconciliation entry merely because the abstract reports the ORIGINAL lease commencement (or original expiration) while MRI shows the current-term dates; that is two different fields, not a conflict. Log a date entry ONLY when the CURRENT-term commencement/expiration genuinely disagree with what the documents establish for that same current term.
 - MRI DOES NOT GOVERN these — never put them in mri_reconciliation: security deposit, TI/tenant allowance, natural/artificial breakpoint, guarantor, and tenant legal-name vs trade-name/DBA formatting. The documents are the source of truth for those; a difference from MRI there is not an MRI error.
 - source_quote MUST be verbatim text copied from the documents — never paraphrase, never invent a citation. If you cannot find supporting text, source_quote = "" and verdict is unsupported or needs_source.
+- EVERY source_quote IS MACHINE-CHECKED. After you answer, each quote is searched for in the exact text you were given, normalized for OCR spacing/hyphenation/punctuation. A quote that cannot be located is recorded as "citation not confirmed" and DOWNGRADES this abstract's status — a verdict of "confirmed" carrying an unlocatable quote is treated as a high-severity failure, worse than an honest "needs_source". So: COPY, do not retype from memory; do not reconstruct a clause you believe you saw; do not stitch together fragments from different places into one quote; do not normalize archaic spelling, fix OCR garble, or complete an ellipsis. If the only text you can find is garbled, quote it garbled. If the passage you want is not in this request, say so with needs_source and an empty quote — that is a clean, correct answer and costs you nothing.
+- Prefer a SHORT exact quote (one clause, 8-25 words) over a long approximate one. Quotes under ~4 words cannot be verified and count against you.
 - Only list a field in field_checks if you actually examined the source for it. Do not pad with trivially-confirmed fields; prioritise money, dates, and the amendment chain.
 - ABSTRACTION-STANDARD CHECKS (v2 abstracts; skip any the abstract's shape predates):
     DATE HYGIENE — term.* and options[].notice_by and critical_dates[].date must be bare ISO dates (YYYY-MM-DD) or null; a date field containing prose/parentheticals/formulas is a discrepancy (severity medium).
@@ -409,10 +411,17 @@ ${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs — each extracted 
     // field_check's verbatim source_quote actually appears in the assembled source
     // text, tolerant of OCR spacing / hyphenation / punctuation (_shared/citation).
     // An unlocatable quote is labeled 'not_found' → the UI shows "citation not
-    // confirmed" so it never reads as sourced. ANNOTATE ONLY (no verdict change):
-    // a quote from a PDF that was attached-but-not-text-extracted can legitimately
-    // be absent from this text corpus, so a not_found is a review signal for a
-    // human, not grounds to auto-fail the field.
+    // confirmed" so it never reads as sourced.
+    //
+    // This was ANNOTATE-ONLY until 2026-08-02, reasoning that a quote from a PDF
+    // attached-but-not-text-extracted could legitimately sit outside this corpus,
+    // so a not_found was a human signal rather than grounds to fail the field.
+    // Measured over all 69 QA'd abstracts, that reasoning does not hold: the
+    // not-found rate is 20.5% where the ENTIRE source text fit the 350K window and
+    // 20.7% where it was truncated, i.e. the unsearched tail explains none of it.
+    // deriveStatus now acts on it (see _shared/verifyStatus.ts). corpus_complete is
+    // recorded per run so that premise stays measurable instead of assumed — if a
+    // future corpus DOES start explaining not_founds, this field will show it.
     if (qa && typeof qa === 'object' && Array.isArray(qa.field_checks)) {
       const sourceCorpus = parts.join('\n') + '\n' + briefParts.join('\n')
       let located = 0, notLocated = 0, tooShort = 0
@@ -425,7 +434,15 @@ ${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs — each extracted 
         else if (res.status === 'not_found') notLocated++
         else tooShort++
       }
-      qa.citation_summary = { located, not_located: notLocated, too_short: tooShort }
+      // A source doc is "searchable" only if 100% of its text reached the corpus:
+      // full raw text, or a brief standing in for it. Partially-truncated docs are
+      // the ones whose unsearched tail could host a genuine quote.
+      const unsearchable = docs.filter(d => !fullTextIds.has(d.id) && !briefIncluded.has(d.id))
+      qa.citation_summary = {
+        located, not_located: notLocated, too_short: tooShort,
+        corpus_complete: unsearchable.length === 0,
+        unsearchable_docs: unsearchable.length,
+      }
     }
 
     const qaStatus = deriveStatus(qa)

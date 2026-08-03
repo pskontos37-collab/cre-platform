@@ -93,8 +93,62 @@ describe('deriveStatus — REVIEW (softer flags worth a look)', () => {
   })
 })
 
+// citation_check is stamped by the deterministic citation validator in
+// abstract-verify. Measured 2026-08-02: 210 field_checks read verdict='confirmed'
+// while their "verbatim" quote could not be located in the sources (94 high
+// severity), and the single abstract that reached 'verified' carried 11 such
+// quotes. The rate is the same (20.5% vs 20.7%) whether or not the full source
+// text fit the verifier's window, so truncation does not explain it.
+describe('deriveStatus — CITATION INTEGRITY (a quote that cannot be found is not evidence)', () => {
+  it('a HIGH-severity confirmation with an unlocatable quote is issues', () => {
+    expect(deriveStatus({ ...clean, field_checks: [
+      { field: 'term.expiration', verdict: 'confirmed', severity: 'high', source_quote: 'the Term shall expire', citation_check: 'not_found' },
+    ] })).toBe('issues')
+  })
+  it('a medium/low confirmation with an unlocatable quote is review, not issues', () => {
+    expect(deriveStatus({ ...clean, field_checks: [
+      { field: 'suite', verdict: 'confirmed', severity: 'medium', citation_check: 'not_found' },
+    ] })).toBe('review')
+  })
+  it('an unverifiably short quote holds the abstract in review', () => {
+    expect(deriveStatus({ ...clean, field_checks: [
+      { field: 'suite', verdict: 'confirmed', severity: 'low', citation_check: 'quote_too_short' },
+    ] })).toBe('review')
+  })
+  it('never reaches verified while ANY cited quote is unlocatable, even at low severity', () => {
+    expect(deriveStatus({ ...clean, field_checks: [
+      { field: 'expiration', verdict: 'confirmed', severity: 'high', citation_check: 'confirmed' },
+      { field: 'parking', verdict: 'confirmed', severity: 'low', citation_check: 'not_found' },
+    ] })).toBe('review')
+  })
+  it('the real-world regression: the one abstract that went green on 11 unlocatable quotes', () => {
+    // Every field confirmed, nothing else wrong — previously 'verified'.
+    const eleven = Array.from({ length: 11 }, (_, i) => ({
+      field: `f${i}`, verdict: 'confirmed', severity: i < 3 ? 'high' : 'medium',
+      source_quote: 'text that is not in the document', citation_check: 'not_found',
+    }))
+    expect(deriveStatus({ ...clean, field_checks: eleven })).toBe('issues')  // high-severity ones dominate
+  })
+  it('located citations do not degrade anything', () => {
+    expect(deriveStatus({ ...clean, field_checks: [
+      { field: 'expiration', verdict: 'confirmed', severity: 'high', citation_check: 'confirmed' },
+    ] })).toBe('verified')
+  })
+  it('off_cited_page (found in the doc, wrong page) is not a fabrication and stays clean', () => {
+    expect(deriveStatus({ ...clean, field_checks: [
+      { field: 'expiration', verdict: 'confirmed', severity: 'high', citation_check: 'off_cited_page' },
+    ] })).toBe('verified')
+  })
+})
+
 describe('deriveStatus — VERIFIED (clean AND backed by evidence)', () => {
   it('a clean verdict with real field evidence is verified', () => {
     expect(deriveStatus(clean)).toBe('verified')
+  })
+  it('verdicts predating citation_check are unaffected (backward compatible)', () => {
+    // 69 stored verdicts have no citation_check on some rows; absence must be inert.
+    expect(deriveStatus({ ...clean, field_checks: [
+      { field: 'expiration', verdict: 'confirmed', severity: 'high', source_quote: '...' },
+    ] })).toBe('verified')
   })
 })

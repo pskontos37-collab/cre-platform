@@ -11,6 +11,27 @@
 // malformed run, never as clean.
 const KNOWN_VERDICTS = new Set(['confirmed', 'discrepancy', 'unsupported', 'needs_source'])
 
+// `citation_check` is stamped onto each field_check by the deterministic citation
+// validator in abstract-verify (see _shared/citation.ts): it confirms the model's
+// "verbatim" source_quote actually appears in the assembled source text, tolerant
+// of OCR spacing, hyphenation and punctuation. Values: 'confirmed' | 'not_found'
+// | 'quote_too_short' | 'off_cited_page'. Absent on verdicts produced before
+// 2026-08-02, so every rule below is a no-op on old rows.
+//
+// This used to be ANNOTATE-ONLY: the UI showed an amber "citations not confirmed"
+// chip but the STATUS ignored it, on the theory that a quote taken from an
+// attached PDF whose text was never extracted could be legitimately absent from
+// the searched corpus. Measured across all 69 QA'd abstracts on 2026-08-02, that
+// theory does not survive: unlocatable quotes run 20.5% on abstracts whose ENTIRE
+// source text fit the verifier's 350K window and 20.7% where it was truncated —
+// statistically identical, so the unsearched tail explains none of it. The result
+// was 210 field_checks reading verdict='confirmed' while their quote could not be
+// found anywhere in the sources (94 of them severity='high'), and the ONE abstract
+// that reached 'verified' did so on the strength of 11 unlocatable quotes.
+//
+// A confirmation whose evidence cannot be located is not a confirmation.
+const UNVERIFIABLE_CITATION = new Set(['not_found', 'quote_too_short'])
+
 // A verdict is only trustworthy if the verifier came back as an object with at
 // least one field_check that carries a RECOGNIZED verdict — i.e. it actually
 // rendered a judgment. An empty {}, null, a non-object, a malformed parse, a run
@@ -46,13 +67,23 @@ export function deriveStatus(qa: any): string {
   const highIssue = checks.some((c: any) => badVerdict(c?.verdict) && c?.severity === 'high')
   const arithFail = arith.some((a: any) => a?.ok === false)
   const stale = qa?.amendment_currency?.current === false
-  if (highIssue || arithFail || stale) return 'issues'
+  // A HIGH-severity field the verifier called 'confirmed' while quoting text that
+  // does not exist in the sources is the worst failure mode this layer can see:
+  // it reads as sourced money/dates and is not. Treat it exactly like a
+  // high-severity discrepancy — a human must resolve it.
+  const unsourcedConfirmation = checks.some((c: any) =>
+    c?.verdict === 'confirmed' && c?.citation_check === 'not_found' && c?.severity === 'high')
+  if (highIssue || arithFail || stale || unsourcedConfirmation) return 'issues'
   // REVIEW = softer flags worth a look: medium/low discrepancies, needs-source,
   // or derived-value disclosures. fabrication_risk is NOT an issues trigger — post
   // grounding-fix it mostly holds "computed, not quoted verbatim" notes, and a
   // genuinely invented fact also surfaces as a HIGH 'unsupported' field_check above.
   const softFlag = checks.some((c: any) => badVerdict(c?.verdict) || c?.verdict === 'needs_source')
   const fabrication = Array.isArray(qa.fabrication_risk) && qa.fabrication_risk.length > 0
-  if (softFlag || fabrication) return 'review'
+  // 'verified' means every quote the verifier relied on was programmatically
+  // located in the source. Any unlocatable quote — or one too short to verify
+  // meaningfully — holds the abstract in review regardless of severity.
+  const unverifiableCite = checks.some((c: any) => UNVERIFIABLE_CITATION.has(c?.citation_check))
+  if (softFlag || fabrication || unverifiableCite) return 'review'
   return 'verified'
 }
