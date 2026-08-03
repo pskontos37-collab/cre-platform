@@ -83,14 +83,22 @@ export function DataQualityWidget({ propertyId }: { propertyId: string | null })
   const worst = rows.some(r => r.severity === 'discrepancy') ? 'discrepancy'
     : rows.some(r => r.severity === 'confirm') ? 'confirm' : 'info'
 
+  // FAIL LOUD, never falsely green. On error `data` is null, so openCount is 0 —
+  // the chip used to read "all checks clean" over a failed query, which is exactly
+  // the false-green this whole day's work was about removing from the verifier.
+  // A check that cannot run must say so.
+  const chip = loading ? 'checking…'
+    : error ? 'CHECKS DID NOT RUN'
+    : openCount === 0 ? 'all checks clean'
+    : `${openCount} open`
+
   return (
-    <Widget
-      title="DATA QUALITY"
-      chip={loading ? 'checking…' : openCount === 0 ? 'all checks clean' : `${openCount} open`}
-      fullWidth
-    >
+    <Widget title="DATA QUALITY" chip={chip} fullWidth>
       {loading ? <WidgetSkeleton rows={3} /> : error ? (
-        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>{error}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--amber)', lineHeight: 1.6 }}>
+          <strong>The standing checks could not run — this is NOT a clean result.</strong>
+          <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>{error}</div>
+        </div>
       ) : (data ?? []).length === 0 ? (
         <div style={{ fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
           Every standing check passes for this property. These run on stored data and cost nothing,

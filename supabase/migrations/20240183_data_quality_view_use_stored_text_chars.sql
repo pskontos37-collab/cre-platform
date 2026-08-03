@@ -1,25 +1,18 @@
--- 20240181 — Standing per-property data-quality checks.
+-- 20240183 - v_property_data_quality: read doc_briefs.text_chars instead of
+-- aggregating document_chunks.
 --
--- The 8/01-8/02 sweeps found real defects by hand-running SQL: allowance
--- direction, third-party exclusive schedules, compression outliers, inflated
--- management fees, MRI-flag-only rights, rent schedules that disagree with
--- their own term. Every one of those is deterministic SQL over data we already
--- store, so it costs nothing to run and should not depend on someone
--- remembering to run it. This view turns them into a standing check: a new
--- property surfaces its defects on day one instead of months later.
+-- 20240181's brief_under_read CTE summed length(document_chunks.content) per
+-- complete brief. Direct SQL handled it, but through PostgREST the whole view
+-- exceeded the statement timeout and the property page rendered
+--   "canceling statement due to statement timeout"
+-- inside the panel. doc_briefs.text_chars is populated on all 4,045 complete
+-- briefs and yields the IDENTICAL 9 findings; Gateway now plans at 551 ms for 49
+-- rows with the property_id predicate pushed into every UNION branch.
 --
--- Keyed to the EXISTING resolution model on purpose. item_key uses the same
--- 'field:<dotted path>' convention as v_abstract_open_items, so a finding here
--- and the generator's own open item about the same field share one key and ONE
--- human resolution clears both (abstract_item_resolutions). No parallel
--- worklist, no second inbox.
+-- security_invoker is restated inline because CREATE OR REPLACE VIEW silently
+-- strips it (verified present in pg_class.reloptions after applying).
 --
--- severity vocabulary matches the Review Center: discrepancy | confirm | info.
---
--- NOTE ON THE MGMT-FEE REGEX: it is anchored with (^|[^0-9.]). Unanchored,
--- '([2-9][0-9]|[0-9]{3,})(\.[0-9]+)?%' matches the "75%" inside a perfectly
--- correct "1.75%", which reported 22 phantom findings during development. A
--- standing check that cries wolf is worse than no check.
+-- Body is 20240181's verbatim, with ONLY the doc_chars CTE changed.
 
 create or replace view v_property_data_quality
 with (security_invoker = true) as
@@ -74,7 +67,7 @@ rr as (
 -- cohort. Re-briefing moved large-doc compression from 20.4:1 to 6.5:1, so a
 -- ratio above 15:1 on a substantial document means the brief under-read it.
 --
--- ⚠️ SUPERSEDED BY 20240183: aggregating document_chunks here made the whole view
+-- Uses the stored per-document text length (see header).
 -- exceed PostgREST's statement timeout, so the property page rendered "canceling
 -- statement due to statement timeout" while direct SQL was fine. Left as-applied
 -- so this file replays the history prod actually saw; 20240183 swaps it for the
@@ -82,11 +75,10 @@ rr as (
 doc_chars as (
   select db.document_id, d.property_id, d.title, d.file_name,
          length(db.brief::text) as brief_chars,
-         (select coalesce(sum(length(c.content)), 0)
-            from document_chunks c where c.document_id = db.document_id) as doc_chars
+         db.text_chars          as doc_chars
   from doc_briefs db
   join documents d on d.id = db.document_id
-  where db.status = 'complete' and db.brief is not null
+  where db.status = 'complete' and db.brief is not null and db.text_chars is not null
 ),
 
 findings as (
