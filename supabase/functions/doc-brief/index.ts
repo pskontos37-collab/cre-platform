@@ -340,8 +340,14 @@ serve(async (req) => {
           // documents reporting 200/done:false with zero progress and no diagnostic, and
           // the runner spun 40 no-op rounds each. Only 429/529/5xx and output-truncation
           // are genuinely worth resuming; a 4xx (bad request, auth, billing) is not.
+          // ⚠️ The MODEL-SHAPE failures below are transient too - they are this function's
+          // own guards firing on a bad generation, and a re-roll usually succeeds. The
+          // first cut of this list omitted them and 5 of 52 documents failed hard on
+          // "malformed brief envelope" (a message that literally ends in "retry").
+          // Keep the rule: retry anything a re-roll can fix; surface anything it cannot
+          // (4xx auth/billing/bad-request), which is what the credit outage needed.
           const m = e instanceof Error ? e.message : String(e)
-          const transient = /truncated at max_tokens|overloaded|rate_limit|Anthropic API error (?:429|5\d\d)/i.test(m)
+          const transient = /truncated at max_tokens|overloaded|rate_limit|Anthropic API error (?:429|5\d\d)|malformed brief envelope|no tool_use block/i.test(m)
           if (!transient) segErr = m
         }
       }

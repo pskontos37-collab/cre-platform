@@ -82,20 +82,30 @@ Log ("target list: {0} document id(s) from {1}" -f $wanted.Count, (Split-Path $t
 # response small and makes the lookup exact regardless of table size.
 $idFilter = ($wanted -join ',')
 $briefs = Invoke-RestMethod -Uri "$BASE/rest/v1/doc_briefs?select=document_id,segments_total,status&document_id=in.($idFilter)" -Headers $H -UserAgent $UA -TimeoutSec 120
-$segBy = @{}
-foreach ($b in @($briefs)) { $segBy[[string]$b.document_id] = $b.segments_total }
+$segBy = @{}; $statBy = @{}
+foreach ($b in @($briefs)) { $segBy[[string]$b.document_id] = $b.segments_total; $statBy[[string]$b.document_id] = "$($b.status)" }
 Log ("state lookup returned {0} of {1} target rows" -f @($briefs).Count, $wanted.Count)
 $targets = New-Object System.Collections.Generic.List[object]
 foreach ($id in $wanted) {
-  $seg = $segBy[[string]$id]
-  if ($null -ne $seg -and $seg -gt 1) { Log ("  SKIP already re-briefed ({0} segments): {1}" -f $seg, $id); continue }
+  # Skip ONLY a finished multi-segment brief. segments_total alone is not enough: a doc
+  # that was force-restarted and then failed also carries a multi-segment total while
+  # sitting at status='in_progress' with a partial - skipping those would silently strand
+  # the 6 that failed on 2026-08-02, which is the opposite of what a resume should do.
+  $seg = $segBy[[string]$id]; $st = $statBy[[string]$id]
+  if ($null -ne $seg -and $seg -gt 1 -and $st -eq 'complete') { Log ("  SKIP already re-briefed ({0} segments): {1}" -f $seg, $id); continue }
+  if ($st -and $st -ne 'complete') { Log ("  RETRY incomplete ({0}, {1} segments): {2}" -f $st, $seg, $id) }
   $chars = 0
   try {
     $cs = Invoke-RestMethod -Uri "$BASE/rest/v1/document_chunks?select=content&document_id=eq.$id&kind=eq.text" -Headers $H -UserAgent $UA -TimeoutSec 300
     foreach ($c in @($cs)) { $chars += ("" + $c.content).Length }
   } catch { Log ("  WARN could not size {0}: {1}" -f $id, $_.Exception.Message) }
   $exp = if ($chars -gt 0) { [Math]::Ceiling($chars / 60000.0) } else { 1 }
-  $targets.Add([pscustomobject]@{ document_id = $id; text_chars = $chars; expected = $exp })
+  # A doc already mid-flight must NOT be forced: force restarts it from zero and throws
+  # away segments that were already paid for (one sat at 6/7). Force exists only to
+  # invalidate a STALE single-segment row; an in_progress row is already the new shape and
+  # doc-brief will resume it as long as force is absent.
+  $needsForce = -not ($st -and $st -ne 'complete' -and $seg -gt 1)
+  $targets.Add([pscustomobject]@{ document_id = $id; text_chars = $chars; expected = $exp; force = $needsForce })
 }
 $targets = @($targets | Sort-Object -Property text_chars -Descending)
 if ($Limit -gt 0 -and $targets.Count -gt $Limit) { $targets = @($targets[0..($Limit-1)]) }
@@ -121,8 +131,9 @@ foreach ($t in $targets) {
   $done = $false; $round = 0; $lastErr = ''; $stall = 0; $lastSegs = -1
   while (-not $done -and $round -lt $MaxRoundsPerDoc) {
     $round++
-    # force ONLY on round 1 - later rounds must omit it or the doc restarts from zero.
-    $body = if ($round -eq 1) { @{ document_id = $t.document_id; force = $true } } else { @{ document_id = $t.document_id } }
+    # force ONLY on round 1, and only when this doc still carries a STALE single-segment
+    # row ($t.force). A doc already mid-flight resumes instead, keeping its paid segments.
+    $body = if ($round -eq 1 -and $t.force) { @{ document_id = $t.document_id; force = $true } } else { @{ document_id = $t.document_id } }
     $r = PostFn 'doc-brief' $body
     if ($r.code -ne '200') {
       $lastErr = "http=$($r.code)"
@@ -147,9 +158,14 @@ foreach ($t in $targets) {
         # segments the cause is not going to clear by asking again. On 2026-08-02 an
         # exhausted Anthropic balance made doc-brief answer 200/done:false instantly and
         # this loop burned 40 no-op rounds per document across 53 documents.
+        # 4, not 2: doc-brief now RETRIES model-shape failures (malformed envelope, no
+        # tool_use block) on a later call, and a re-roll costs a round that shows no new
+        # segments. Two was too tight - it would abandon a document that just needed
+        # another attempt. Permanent failures no longer rely on this guard at all; they
+        # come back in `error` and are caught above.
         if ($o.segments_done -eq $lastSegs) {
           $stall++
-          if ($stall -ge 2) { $lastErr = "no progress at $($o.segments_done)/$($o.segments_total) - upstream is failing, not slow"; break }
+          if ($stall -ge 4) { $lastErr = "no progress at $($o.segments_done)/$($o.segments_total) after 4 rounds - a segment is failing repeatedly"; break }
         } else { $stall = 0 }
         $lastSegs = $o.segments_done
       }
