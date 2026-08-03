@@ -1,22 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { viewHref, resolvePage } from '../lib/viewer'
+import { CHECK_LABEL } from '../hooks/useDataQuality'
 
 // ── Review Center (audit Phase 2) ─────────────────────────────────────────────
 // One screen for working verification flags portfolio-wide: queue of unresolved
 // items (left) | the finding with its evidence and decision verbs (middle) |
 // the cited source document embedded at the cited page (right).
 //
-// Slice 2: the queue now merges THREE detection layers, keyed identically to the
+// Slice 2: the queue now merges FOUR detection layers, keyed identically to the
 // per-tenant Abstracts worklist so one resolution clears an item everywhere:
 //   · generator open items + verifier field checks (v_abstract_open_items)
 //   · clause-specialist findings (lease_abstracts.clause_findings, revise /
 //     cannot_verify; enrich shown under "All severities")
 //   · cross-check disagreements (lease_abstracts.field_confidence)
+//   · standing deterministic checks (v_property_data_quality, migration 20240181)
 // Plus bulk Accept/Waive over a checkbox selection and a group-by-tenant view.
 // Human decisions carry resolved_by.
+//
+// The standing checks are the only layer that costs nothing to run, so they are
+// also the only one that is always current. They deliberately reuse the same
+// 'field:<path>' item_key as the generator's own open items, which means the
+// existing `seen` de-dupe drops a standing finding when the verifier already
+// raised that exact field — the verifier's wording is richer, and one row per
+// (abstract, field) is the whole point of the shared key.
 
-type Source = 'worklist' | 'clause' | 'crosscheck'
+type Source = 'worklist' | 'clause' | 'crosscheck' | 'dataquality'
 
 interface QueueItem {
   abstract_id: string
@@ -58,7 +67,13 @@ const SEV_COLOR: Record<string, string> = {
 const SEV_ICON: Record<string, string> = {
   discrepancy: '✗', confirm: '⚑', revise: '✗', cannot_verify: '?', missing: '◌', enrich: '＋', info: 'ℹ',
 }
-const SOURCE_LABEL: Record<Source, string> = { worklist: 'Verifier', clause: 'Clause specialist', crosscheck: 'Cross-check' }
+const SOURCE_LABEL: Record<Source, string> = {
+  worklist: 'Verifier', clause: 'Clause specialist', crosscheck: 'Cross-check', dataquality: 'Standing check',
+}
+// kind values permitted by abstract_item_resolutions_kind_check (20240184).
+const SOURCE_KIND: Record<Source, string> = {
+  worklist: 'open_item', clause: 'clause_finding', crosscheck: 'cross_check', dataquality: 'data_quality',
+}
 const RED = new Set(['discrepancy', 'confirm', 'revise'])
 
 // Dotted-path getter (array indices work: "options.0.notice_by"); mirrors the
@@ -187,6 +202,37 @@ export function ReviewCenterPage() {
         }
       }
 
+      // 4. standing deterministic checks (v_property_data_quality). The view already
+      // reports `resolved` by joining abstract_item_resolutions on the shared
+      // item_key, so no extra resolution lookup is needed. Only abstract-scoped rows
+      // can be worked here: property-scoped ones (stale rent roll, under-read brief)
+      // have no abstract_id, so there is nothing for a resolution to hang off — they
+      // stay on the property page's Data Quality panel.
+      const { data: dq, error: dqErr } = await supabase
+        .from('v_property_data_quality')
+        .select('property_id, abstract_id, tenant_name, check_code, severity, item_key, detail, resolved')
+        .eq('scope', 'abstract')
+        .eq('resolved', false)
+        .limit(2000)
+      if (dqErr) throw new Error(dqErr.message)
+
+      let dqOrd = 20_000
+      for (const d of ((dq ?? []) as any[])) {
+        if (!d.abstract_id) continue
+        const full = `${d.abstract_id}|${d.item_key}`
+        if (resolvedSet.has(full) || seen.has(full)) continue
+        seen.add(full)
+        items.push({
+          abstract_id: d.abstract_id, property_id: d.property_id, tenant_name: d.tenant_name ?? '(unnamed)',
+          ord: dqOrd++, txt: d.detail,
+          severity: d.severity, item_key: d.item_key, source: 'dataquality',
+          // Only a 'field:<path>' key carries a correctable path; 'text:' keys are
+          // abstract-level findings with nothing to override.
+          field: d.item_key?.startsWith('field:') ? d.item_key.slice(6) : null,
+          evidence: { check_code: d.check_code },
+        })
+      }
+
       items.sort((a, b) => a.tenant_name.localeCompare(b.tenant_name) || a.ord - b.ord)
       setQueue(items)
       setChecked(new Set())
@@ -252,6 +298,12 @@ export function ReviewCenterPage() {
   const check = useMemo(() => checkFor(row?.qa, selected?.field ?? null), [row, selected])
   const clause = selected?.source === 'clause' ? selected.evidence : null
   const xcheck = selected?.source === 'crosscheck' ? selected.evidence : null
+  // Standing-check findings carry only a check_code; the human-readable title and
+  // the why-it-matters come from CHECK_LABEL, shared with the property-page panel
+  // so the two surfaces cannot describe the same check differently.
+  const dqMeta = selected?.source === 'dataquality'
+    ? CHECK_LABEL[selected.evidence?.check_code] ?? { title: selected.evidence?.check_code ?? 'Standing check', why: '' }
+    : null
   const bestQuote: string | null = (check?.source_quote as string) ?? (clause?.quote as string) ?? null
   const bestCitation: string | null = (check?.citation as string) ?? (clause?.citation as string) ?? (xcheck?.citation as string) ?? null
 
@@ -281,7 +333,7 @@ export function ReviewCenterPage() {
     const rows = targets.map(t => ({
       abstract_id: t.abstract_id,
       item_key: t.item_key,
-      kind: t.source === 'worklist' ? 'open_item' : t.source === 'clause' ? 'clause_finding' : 'cross_check',
+      kind: SOURCE_KIND[t.source],
       status,
       note: noteText || null,
       resolved_by: reviewerId,
@@ -434,6 +486,7 @@ export function ReviewCenterPage() {
               <option value="worklist">Verifier</option>
               <option value="clause">Clause specialist</option>
               <option value="crosscheck">Cross-check</option>
+              <option value="dataquality">Standing check</option>
             </select>
           </div>
           {checked.size > 0 && (
@@ -517,6 +570,21 @@ export function ReviewCenterPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
                 <div><span style={{ color: 'var(--text-faint)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.05em' }}>Cross-check</span> — independent lenses disagree with the stored value</div>
                 {(xcheck.value ?? xcheck.competing_value) != null && <div>Lens value: <b>{String(xcheck.value ?? xcheck.competing_value)}</b></div>}
+              </div>
+            )}
+
+            {dqMeta && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+                <div>
+                  <span style={{ color: 'var(--text-faint)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.05em' }}>Standing check</span>
+                  {' — '}<b>{dqMeta.title}</b>
+                  <span style={{ color: 'var(--text-faint)' }}> · {selected.evidence?.check_code}</span>
+                </div>
+                {dqMeta.why && <div style={{ color: 'var(--text-muted)', lineHeight: 1.55 }}>{dqMeta.why}</div>}
+                <div style={{ color: 'var(--text-faint)', fontSize: 11 }}>
+                  Deterministic SQL over stored data — no AI involved, so this finding is current as of right now
+                  and will reappear if the underlying value is not actually fixed.
+                </div>
               </div>
             )}
 
