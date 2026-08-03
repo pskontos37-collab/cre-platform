@@ -21,6 +21,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { AuthError, canWriteProperty, corsHeaders, requireUser } from '../_shared/auth.ts'
 import { deriveStatus, hasFieldEvidence } from '../_shared/verifyStatus.ts'
 import { verifyCitation } from '../_shared/citation.ts'
+import { applyRequotes, selectForRequote } from '../_shared/requote.ts'
 
 // Verification is a reasoning task, not a formatting one — use the strongest
 // model available. Override with QA_MODEL if needed.
@@ -112,6 +113,38 @@ function isOverloaded(e: unknown): boolean {
 }
 async function verifyJson(aKey: string, oKey: string, model: string, content: any[], maxTokens: number): Promise<any> {
   try { return await anthropicJson(aKey, model, content, maxTokens) }
+  catch (e) {
+    if (oKey && isOverloaded(e)) return await openaiVerifyJson(oKey, content, maxTokens)
+    throw e
+  }
+}
+
+// The re-quote round's transport. Same providers and fallback as the verdict call, but a
+// different forced tool and a much smaller output budget — it answers "where is that
+// passage, or withdraw" for a handful of fields, not a whole verification.
+async function requoteJson(aKey: string, oKey: string, model: string, content: any[], maxTokens: number): Promise<any> {
+  const call = async () => {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': aKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model, max_tokens: maxTokens,
+        tools: [{
+          name: 'submit_requotes',
+          description: 'Supply an exact locatable quote for each challenged field, or withdraw the confirmation.',
+          input_schema: { type: 'object', additionalProperties: true },
+        }],
+        tool_choice: { type: 'tool', name: 'submit_requotes' },
+        messages: [{ role: 'user', content }],
+      }),
+    })
+    const d = await r.json()
+    if (!r.ok) throw new Error('Anthropic API error: ' + JSON.stringify(d))
+    const block = (d.content ?? []).find((c: { type: string }) => c.type === 'tool_use')
+    if (!block) throw new Error('Model returned no tool_use block for re-quote')
+    return block.input
+  }
+  try { return await call() }
   catch (e) {
     if (oKey && isOverloaded(e)) return await openaiVerifyJson(oKey, content, maxTokens)
     throw e
@@ -422,26 +455,70 @@ ${briefParts.length ? `\nSOURCE DOCUMENTS (structured briefs — each extracted 
     // deriveStatus now acts on it (see _shared/verifyStatus.ts). corpus_complete is
     // recorded per run so that premise stays measurable instead of assumed — if a
     // future corpus DOES start explaining not_founds, this field will show it.
-    if (qa && typeof qa === 'object' && Array.isArray(qa.field_checks)) {
-      const sourceCorpus = parts.join('\n') + '\n' + briefParts.join('\n')
+    // A source doc is "searchable" only if 100% of its text reached the corpus: full raw
+    // text, or a brief standing in for it. Partially-truncated docs are the ones whose
+    // unsearched tail could host a genuine quote.
+    const sourceCorpus = parts.join('\n') + '\n' + briefParts.join('\n')
+    const unsearchable = docs.filter(d => !fullTextIds.has(d.id) && !briefIncluded.has(d.id))
+    const locate = (quote: string) => verifyCitation({ quote, docText: sourceCorpus }).status === 'confirmed'
+    // Re-runnable so the same rules re-score the verdict after the re-quote round.
+    const scoreCitations = () => {
+      if (!qa || typeof qa !== 'object' || !Array.isArray(qa.field_checks)) return
       let located = 0, notLocated = 0, tooShort = 0
       for (const c of qa.field_checks) {
         const quote = typeof c?.source_quote === 'string' ? c.source_quote : ''
-        if (!quote.trim()) continue
+        if (!quote.trim()) { if (c && c.citation_check === undefined) c.citation_check = undefined; continue }
         const res = verifyCitation({ quote, docText: sourceCorpus })
         c.citation_check = res.status                 // confirmed | not_found | quote_too_short
         if (res.status === 'confirmed') located++
         else if (res.status === 'not_found') notLocated++
         else tooShort++
       }
-      // A source doc is "searchable" only if 100% of its text reached the corpus:
-      // full raw text, or a brief standing in for it. Partially-truncated docs are
-      // the ones whose unsearched tail could host a genuine quote.
-      const unsearchable = docs.filter(d => !fullTextIds.has(d.id) && !briefIncluded.has(d.id))
       qa.citation_summary = {
         located, not_located: notLocated, too_short: tooShort,
         corpus_complete: unsearchable.length === 0,
         unsearchable_docs: unsearchable.length,
+      }
+    }
+    scoreCitations()
+
+    // ── 4c. REJECT-AND-RE-QUOTE. Annotation alone was never enough: a field could read
+    // verdict='confirmed' while its "verbatim" quote existed nowhere, and the only
+    // consequence was an amber chip. Challenge those confirmations once, then FAIL CLOSED —
+    // anything that still cannot be located is downgraded to needs_source with its quote
+    // cleared, so an unsupported claim can no longer masquerade as sourced.
+    //
+    // ⚠️ Only fires when corpus_complete (enforced in selectForRequote). On an incomplete
+    // corpus, "your quote could not be found, supply one that can" is an instruction to
+    // invent something findable — it would manufacture precision out of a gap in OUR data.
+    const requests = selectForRequote(qa)
+    if (requests.length) {
+      const challenge = `Your verification above marked ${requests.length} field(s) "confirmed", but the quote you supplied for each could NOT be located in the source text you were given. The search is whitespace-, hyphenation- and punctuation-tolerant, and the FULL text of every source document was searched, so the quote is not there.
+
+For each item below choose ONE:
+  "re_quote"  - you can point to the real passage. Supply source_quote copied EXACTLY from the source text above (a short exact clause, 8-25 words, beats a long approximate one) plus its citation.
+  "withdraw"  - you cannot point to a passage that supports the value. This is the correct and expected answer whenever the support is not actually in these documents; withdrawing costs you nothing and is far better than another unlocatable quote.
+
+Do NOT reconstruct from memory, stitch fragments from different places, tidy OCR garble, or complete an ellipsis. If the only matching text is garbled, quote it garbled.
+
+ITEMS:
+${requests.map(r => `- index ${r.index} | field ${r.field} | severity ${r.severity} | your unlocatable quote: "${String(r.failed_quote).slice(0, 240)}" | your citation: ${r.citation}`).join('\n')}
+
+Call submit_requotes with {"requotes":[{"index":<number>,"field":"<field>","action":"re_quote"|"withdraw","source_quote":"<exact text or empty>","citation":"<doc + section>","note":"<optional>"}]} covering every item.`
+
+      try {
+        const rq = await requoteJson(anthropicKey, openaiKey, MODEL,
+          [...attachments, { type: 'text', text: textPrompt }, { type: 'text', text: challenge }], 8000)
+        const answers = Array.isArray(rq?.requotes) ? rq.requotes : Array.isArray(rq) ? rq : []
+        const outcome = applyRequotes(qa, requests, answers, locate)
+        scoreCitations()                       // re-score with the corrected verdicts
+        qa.citation_requote = outcome
+      } catch (e) {
+        // A failed challenge must not silently leave bogus confirmations standing. Fail
+        // closed exactly as if every item had failed to re-quote.
+        const outcome = applyRequotes(qa, requests, [], locate)
+        scoreCitations()
+        qa.citation_requote = { ...outcome, error: e instanceof Error ? e.message : String(e) }
       }
     }
 
