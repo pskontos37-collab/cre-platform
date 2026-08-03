@@ -111,11 +111,35 @@ function isOverloaded(e: unknown): boolean {
   const m = e instanceof Error ? e.message : String(e)
   return /overloaded_error|"Overloaded"|\b529\b|rate_limit|too many requests|credit balance|Plans & Billing|insufficient|billing/i.test(m)
 }
+// ⚠️⚠️ THE OPENAI FALLBACK IS ONLY VIABLE FOR SMALL PAYLOADS, and taking it blindly is
+// WORSE THAN NOT HAVING IT. Measured 2026-08-03: on Anthropic rate-limit this fell through
+// to gpt-4.1, whose 30,000 TPM ceiling cannot accept a ~90,000-token verification, so it
+// returned "Request too large" in ~3 seconds — converting a RETRYABLE Anthropic
+// rate-limit into a hard 500. That is how a batch went 3 ok / 7 failed.
+// So: retry Anthropic with backoff first, and only cross over to OpenAI when the payload
+// could actually fit there.
+const OPENAI_MAX_CHARS = 90_000        // ~22K tokens, inside the 30K TPM ceiling
+const payloadChars = (content: any[]) =>
+  content.reduce((n: number, c: any) => n + (typeof c?.text === 'string' ? c.text.length : 0), 0)
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+// Bounded retry on the transient signals only; anything else propagates immediately.
+async function retryOverload<T>(fn: () => Promise<T>): Promise<T> {
+  let last: unknown
+  for (const wait of [0, 15_000, 45_000]) {
+    if (wait) await sleep(wait)
+    try { return await fn() } catch (e) { last = e; if (!isOverloaded(e)) throw e }
+  }
+  throw last
+}
+
 async function verifyJson(aKey: string, oKey: string, model: string, content: any[], maxTokens: number): Promise<any> {
-  try { return await anthropicJson(aKey, model, content, maxTokens) }
+  try { return await retryOverload(() => anthropicJson(aKey, model, content, maxTokens)) }
   catch (e) {
-    if (oKey && isOverloaded(e)) return await openaiVerifyJson(oKey, content, maxTokens)
-    throw e
+    if (oKey && isOverloaded(e) && payloadChars(content) <= OPENAI_MAX_CHARS) {
+      return await openaiVerifyJson(oKey, content, maxTokens)
+    }
+    throw e   // let the caller's own backoff retry a genuine rate-limit
   }
 }
 
@@ -144,9 +168,13 @@ async function requoteJson(aKey: string, oKey: string, model: string, content: a
     if (!block) throw new Error('Model returned no tool_use block for re-quote')
     return block.input
   }
-  try { return await call() }
+  // Same discipline as verifyJson: retry Anthropic on the transient signals, and only
+  // cross to OpenAI when the payload could actually fit its TPM ceiling.
+  try { return await retryOverload(call) }
   catch (e) {
-    if (oKey && isOverloaded(e)) return await openaiVerifyJson(oKey, content, maxTokens)
+    if (oKey && isOverloaded(e) && payloadChars(content) <= OPENAI_MAX_CHARS) {
+      return await openaiVerifyJson(oKey, content, maxTokens)
+    }
     throw e
   }
 }
