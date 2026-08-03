@@ -573,6 +573,21 @@ function Wizard({ draft, onClose, onSaved }: {
               : 'No routing keywords — certificates and folders will not auto-route'} />
           </div>
 
+          {/* The standing checks (v_property_data_quality, migration 20240181) run on
+              stored data, so they have nothing to read until the property exists.
+              Name them here so the day-one review is part of the process rather than
+              something someone has to remember to go looking for. */}
+          <div style={{ borderTop: '1px solid var(--border-2)', paddingTop: 12, fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.7 }}>
+            <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}>After go-live:</span> the
+            property page runs a standing <span style={{ fontWeight: 650 }}>Data Quality</span> panel
+            over whatever lands — rent-roll recency, rent schedules that disagree with their own term,
+            rights asserted from an unpopulated MRI flag, allowances sitting in a brief but missing
+            from the abstract, verifier quotes that cannot be found in the source, and no-op reviewer
+            overrides. Those checks are plain SQL over stored data, so they cost nothing and are
+            always current. Work them from the Review Center; a resolution there settles them
+            everywhere.
+          </div>
+
           <div style={{ borderTop: '1px solid var(--border-2)', paddingTop: 12 }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
               Creating the property is not reversible from here — documents and financials will hang

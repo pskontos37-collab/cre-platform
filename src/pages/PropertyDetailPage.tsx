@@ -18,6 +18,7 @@ import { PropertyOnePagerButton } from '../reports/PropertyOnePagerButton'
 import { RentRollPdfButton } from '../reports/RentRollPdfButton'
 import { RightsRadar } from '../components/RightsRadar'
 import { InvestorReturnsWidget } from '../components/InvestorReturnsWidget'
+import { DataQualityWidget } from '../components/DataQualityWidget'
 
 const usd  = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const pct  = (n: number, dp = 1) => `${(n * 100).toFixed(dp)}%`
@@ -282,6 +283,13 @@ export function PropertyDetailPage() {
           ))}
         </div>
       )}
+
+      {/* Standing data-quality checks (migration 20240181). Deterministic SQL over
+          stored data, so it costs nothing and is always current — a property shows
+          its defects here on day one rather than when someone finally reads the PDF. */}
+      <div style={{ marginTop: 16 }}>
+        <DataQualityWidget propertyId={property.id} />
+      </div>
 
       {/* Management agreement + other bottom widgets */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, marginTop: 16 }}>
