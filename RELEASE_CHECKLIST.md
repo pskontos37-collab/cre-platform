@@ -74,7 +74,7 @@ Updated: 2026-08-05 02:15 (release-hardening branch, worktree `cre-platform-rh`)
 | CI dependency audit | Passed | Blocking at critical for prod deps; full audit printed (`8ddce3a`); gate exits 0 today |
 | Deployment documented | Passed | docs/OPERATIONS.md (verified commands) |
 | Rollback documented | Passed | docs/OPERATIONS.md — Vercel instant rollback + git revert + total-loss recipe |
-| Backup/restore documented | Partially passed | Procedure documented; **backup tier/PITR needs owner dashboard check** (marked, not invented) |
+| Backup/restore documented | Passed | VERIFIED 8/05 in dashboard: Pro plan, daily physical backups, 7-day retention. PITR off (accepted). ⚠️ Storage objects NOT in backups — bounded by V:\/K:\ re-ingest (docs/OPERATIONS.md) |
 | Monitoring / error tracking | Failed (documented) | None exists — KI-5, owner decision |
 | Health checks | Not applicable | Static SPA + managed backend |
 | Environment separation | Failed (documented) | Single prod environment; staging project recommended (docs/OPERATIONS.md) |

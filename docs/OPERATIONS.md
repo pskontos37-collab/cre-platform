@@ -75,15 +75,25 @@ treat restore-from-backup as the primary DR path.
 
 ## Backup / restore
 
-- Supabase managed backups apply (project `vsqcykdpilfaockyfhuk`). **Tier,
-  retention window and PITR status are NOT verified from here** — confirm in
-  Supabase dashboard → Database → Backups, and record the answer in this file.
-- Restore: Supabase dashboard restore-to-point / restore-backup flow. Storage
-  (`documents` bucket) is included in Supabase's infrastructure but large-object
-  restore behavior should be confirmed with the same dashboard check.
-- Local source-of-truth copies: original documents also live on `V:\`/`K:\`
+**VERIFIED 2026-08-05 in the dashboard** (Database → Backups, org is on the
+**Pro plan**):
+
+- **Daily physical backups run and are retained 7 days** (observed: Jul 30 →
+  Aug 5, one per day ~08:25–08:30 UTC ≈ midnight us-west-2). Each row has a
+  one-click Restore.
+- **PITR is NOT enabled** (available as a paid add-on). Acceptable gap for an
+  internal tool: worst-case data loss is one day, recoverable from MRI +
+  ingest sources. Enable later if tolerance shrinks.
+- ⚠️ **Database backups DO NOT include Storage objects** (stated on the
+  backups page): the `documents` bucket (16.4k files) is NOT in these backups —
+  the database keeps only the metadata rows. Restoring a backup does not bring
+  back deleted files.
+- Storage exposure is bounded because originals also live on `V:\`/`K:\`
   network shares (ingest source), so Storage loss is recoverable by re-ingest —
   EXCEPT the 252 temp-path documents whose source bytes are gone (known issue).
+- Restore procedure: dashboard → Database → Backups → Restore on the chosen
+  daily row (project-wide, in-place). "Restore to new project" (beta) exists
+  for non-destructive rehearsal.
 
 ## Scheduled / background jobs
 
