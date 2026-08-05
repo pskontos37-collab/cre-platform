@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
 import { useFilter } from '../contexts/FilterContext'
 import { useFilteredPropertyIds } from '../hooks/useFilteredPropertyIds'
+import { usePropertyDataStatus } from '../hooks/usePropertyDataStatus'
 import { Widget, WidgetSkeleton, ChipSelect, ExpandToggle } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { viewHref } from '../lib/viewer'
@@ -55,14 +56,25 @@ export function FinancialsPage() {
   const filteredIds = useFilteredPropertyIds(properties ?? null)
   const headerIsSingle = filter.scope === 'property' && !!filter.id
 
+  // Only 4 of 26 properties carry data; the other 22 are name-only shells awaiting
+  // onboarding. Listing them here offers a choice that can only produce an empty income
+  // statement, and landing on one made the page read as broken rather than unloaded.
+  // So the picker offers ONLY properties with data, and defaults to the first of them.
+  // Same convention as the header: while dataStatus is still loading, assume loaded, so
+  // the list never flickers empty. Falls back to the unfiltered set if NOTHING is loaded
+  // (a fresh install) — an empty picker would be worse than a useless one.
+  const { data: dataStatus } = usePropertyDataStatus()
+  const loadedIds = filteredIds.filter(id => (dataStatus ? (dataStatus[id]?.data_loaded ?? false) : true))
+  const pickIds = loadedIds.length ? loadedIds : filteredIds
+
   // Local pick used only in multi-property header modes.
   const [localPropertyId, setLocalPropertyId] = useState<string | null>(null)
 
   const propertyId: string | null = headerIsSingle
     ? filter.id
-    : (localPropertyId && filteredIds.includes(localPropertyId))
+    : (localPropertyId && pickIds.includes(localPropertyId))
       ? localPropertyId
-      : (filteredIds[0] ?? null)
+      : (pickIds[0] ?? null)
 
   const [vendorWindow, setVendorWindow] = useState<SpendWindow>('90d')
   const [vendorsExpanded, setVendorsExpanded] = useState(false)
@@ -137,7 +149,7 @@ export function FinancialsPage() {
                 color: 'var(--text)', fontSize: 13, padding: '7px 10px', cursor: 'pointer', outline: 'none',
               }}
             >
-              {filteredIds.map(id => <option key={id} value={id}>{propertyNames[id] ?? id}</option>)}
+              {pickIds.map(id => <option key={id} value={id}>{propertyNames[id] ?? id}</option>)}
             </select>
           )}
         </div>

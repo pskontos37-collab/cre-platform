@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { usePropertyListKpis } from '../hooks/usePropertyHub'
+import { usePropertyDataStatus } from '../hooks/usePropertyDataStatus'
 import { useCan } from '../lib/useActions'
 
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -10,6 +12,8 @@ const ASSET_ICON: Record<string, string> = { retail: '🛍️', office: '🏢', 
 
 export function PropertiesPage() {
   const { data: properties, loading } = useProperties()
+  const { data: dataStatus } = usePropertyDataStatus()
+  const [showPending, setShowPending] = useState(false)
   const canOnboard = useCan('properties.onboard')   // action gate (Phase 3b)
   const ids = (properties ?? []).map(p => p.id)
   const totalSfById = Object.fromEntries((properties ?? []).map(p => [p.id, p.total_sf]))
@@ -24,6 +28,18 @@ export function PropertiesPage() {
     if (bn !== null) return 1
     return a.name.localeCompare(b.name)
   })
+
+  // Only 4 of 26 properties carry data; the other 22 are name-only shells awaiting
+  // onboarding. Rendering all 26 as equal cards made a working 4-asset portfolio read as
+  // a mostly-empty one. The pending assets are COLLAPSED, not removed — they are real
+  // assets and still need to be reachable to onboard them, so the count stays visible and
+  // one click expands. Uses the same data_loaded signal as the header and the Financials
+  // picker; while it loads, treat as loaded so nothing flickers out of view.
+  const isLoaded = (id: string) => (dataStatus ? (dataStatus[id]?.data_loaded ?? false) : true)
+  const live = sorted.filter(p => isLoaded(p.id))
+  const pending = sorted.filter(p => !isLoaded(p.id))
+  // Never hide everything: on a fresh install with nothing loaded, show all.
+  const shown = showPending || live.length === 0 ? sorted : live
 
   return (
     <div>
@@ -44,6 +60,21 @@ export function PropertiesPage() {
 
       {loading && <div style={{ color: 'var(--text-faint)', fontSize: 13 }}>Loading…</div>}
 
+      {pending.length > 0 && live.length > 0 && (
+        <button
+          onClick={() => setShowPending(v => !v)}
+          style={{
+            marginBottom: 12, fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+            color: 'var(--text-muted)', background: 'var(--surface-2)',
+            border: '1px solid var(--border-2)', borderRadius: 7, padding: '5px 11px', outline: 'none',
+          }}
+        >
+          {showPending
+            ? `Hide ${pending.length} pending onboarding ▴`
+            : `${live.length} with data · ${pending.length} pending onboarding ▾`}
+        </button>
+      )}
+
       <div
         style={{
           display:             'grid',
@@ -51,7 +82,7 @@ export function PropertiesPage() {
           gap:                 12,
         }}
       >
-        {sorted.map(p => {
+        {shown.map(p => {
           const k = kpis?.[p.id]
           const hasData = k && (k.t12Noi !== null || k.annualRent !== null)
           return (
