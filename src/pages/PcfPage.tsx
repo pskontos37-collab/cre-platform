@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useProperties } from '../hooks/useProperties'
+import { usePropertyDataStatus } from '../hooks/usePropertyDataStatus'
 import { useAuth } from '../contexts/AuthContext'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -52,6 +53,7 @@ const labelCell: CSSProperties = {
 export function PcfPage() {
   const { user } = useAuth()
   const { data: properties, loading: propsLoading } = useProperties()
+  const { data: dataStatus } = usePropertyDataStatus()
   const [propertyId, setPropertyId] = useState<string | null>(null)
   const [versionId, setVersionId] = useState<string | null>(null)
   const [drillLine, setDrillLine] = useState<string | null>(null)
@@ -65,7 +67,18 @@ export function PcfPage() {
   const [pubOpening, setPubOpening] = useState('')
   const [showVar, setShowVar] = useState(false)
 
-  const activeProperty = propertyId ?? properties?.[0]?.id ?? null
+  // Offer only properties that carry data, and default to the first of them. Before this the
+  // picker listed all 20 and opened on whichever sorted first alphabetically — "Bank Financial
+  // Building", a name-only onboarding shell — so the page loaded showing "No projected cash
+  // flow yet". That is the CORRECT empty state for a shell, which is exactly the problem: it
+  // is indistinguishable from a broken page, and it briefly fooled me while verifying a
+  // migration. Same data_loaded signal as /financials, /properties and the header.
+  const isLoaded = (id: string) => (dataStatus ? (dataStatus[id]?.data_loaded ?? false) : true)
+  const loadedProps = (properties ?? []).filter(p => isLoaded(p.id))
+  // Never present an empty picker: on a fresh install with nothing loaded, show everything.
+  const pickProps = loadedProps.length ? loadedProps : (properties ?? [])
+  const activeProperty =
+    (propertyId && pickProps.some(p => p.id === propertyId)) ? propertyId : (pickProps[0]?.id ?? null)
   const { data: versions, refetch: refetchVersions } = usePcfVersions(activeProperty)
   const activeVersionId = versionId ?? versions?.[0]?.id ?? null
   const version = versions?.find(v => v.id === activeVersionId) ?? null
@@ -164,7 +177,7 @@ export function PcfPage() {
           onChange={e => { setPropertyId(e.target.value); setVersionId(null); setDrillLine(null) }}
           style={{ fontSize: 13, padding: '5px 8px' }}
         >
-          {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {pickProps.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <select
           value={activeVersionId ?? ''}
