@@ -62,7 +62,7 @@ export function ManagementPage() {
     const terms: Record<string, unknown> = {}
     for (const a of agreements ?? []) {
       for (const k of [...NUM_FIELDS, ...TEXT_FIELDS]) {
-        const v = (a as Record<string, unknown>)[k.key as string]
+        const v = (a as unknown as Record<string, unknown>)[k.key as string]
         if (v !== null && v !== undefined && v !== '') fields[k.key as string] = v
       }
       for (const [k, v] of Object.entries(a.terms ?? {})) if (v) terms[k] = v
@@ -153,7 +153,7 @@ function AgreementEditor({ agreement, effective, onSaved }: {
 
   useEffect(() => {
     const f: Record<string, unknown> = {}
-    for (const k of [...NUM_FIELDS, ...TEXT_FIELDS]) f[k.key as string] = (agreement as Record<string, unknown>)[k.key as string] ?? ''
+    for (const k of [...NUM_FIELDS, ...TEXT_FIELDS]) f[k.key as string] = (agreement as unknown as Record<string, unknown>)[k.key as string] ?? ''
     f.notes = agreement.notes ?? ''
     setForm(f)
     setTerms({ ...(agreement.terms ?? {}) })

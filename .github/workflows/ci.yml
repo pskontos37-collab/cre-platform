@@ -53,11 +53,11 @@ jobs:
         with:
           node-version: 20
       - run: npm install
-      # Type-check is REPORT-ONLY until the pre-existing tsc backlog is burned down.
-      # Flip to blocking (drop continue-on-error) once `npm run typecheck` is clean.
-      - name: Type-check (report-only)
+      # BLOCKING as of 2026-08-04: the pre-existing backlog (17 errors) is burned down to
+      # zero, so this now holds the line. Neither Vercel nor `vite build` typechecks, so
+      # before today a type error shipped to production silently — this is the only gate.
+      - name: Type-check (blocking)
         run: npm run typecheck
-        continue-on-error: true
       # Unit tests BLOCK the deploy. The suite was reconciled to the current
       # engines on 2026-07-16 (waterfall/irrWaterfall/acqPromote) and all 82
       # pass; a red suite should now fail the build rather than ship.

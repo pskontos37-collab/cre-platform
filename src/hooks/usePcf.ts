@@ -106,7 +106,10 @@ export function usePcfGrid(versionId: string | null) {
       .rpc('pcf_grid', { p_version_id: versionId })
       .select('property_id, fiscal_year, line_key, section, subsection, label, sort_order, is_non_cash, period_month, is_actual, amount, method, note, derived_from_year, has_budget_seed')
       .order('sort_order').order('line_key').order('period_month')
-      .range(from, to))
+      // An .rpc() builder's result type is `row | row[]`, so it does not structurally match
+      // fetchAllRows' PageResult<T> the way a .from() builder does. Cast: pcf_grid RETURNS
+      // SETOF, so the runtime shape is always the array.
+      .range(from, to) as any)
 
     if (!rows.length) return null
 

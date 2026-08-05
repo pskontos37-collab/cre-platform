@@ -22,7 +22,10 @@ export interface MeetingDeckInput {
   /** Embedded assets gathered by the caller (site-plan images pre-rendered to
    *  data-URIs, OM-extracted tenant rosters + occupancy). All optional. */
   extras?: {
-    sitePlanImgs?: Record<string, { data: string; w: number; h: number }>
+    // `title` renders as a caption under the site plan. PipelinePage does not set it
+    // today, so that caption never appears — declared here so the read below typechecks
+    // and so a caller CAN pass one.
+    sitePlanImgs?: Record<string, { data: string; w: number; h: number; title?: string }>
     tenants?: Record<string, DeckTenant[]>
     occupancy?: Record<string, number | null>
     fit?: Record<string, string>   // buy-box fit + top LP matches, per deal (Phase 4)
@@ -104,7 +107,10 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
   pptx.layout = 'WILKOW_LTR'
   pptx.author = 'M&J Wilkow'
   pptx.title = `Acquisitions Pipeline Review — ${input.meetingDate}`
-  pptx.compression = true
+  // NOTE: `pptx.compression = true` used to sit here and did nothing (no such class
+  // property — that was the tsc error). Not relocated to write() either: see the long
+  // comment in InvestmentSummaryPpt.ts — an explicit `outputType` makes pptxgenjs 3.12
+  // drop the compression option, so this deck exports uncompressed either way.
 
   // Section the pipeline. Detailed slides cover the board deals (everything that
   // isn't watchlist/terminal); watchlist gets a summary appendix.
@@ -137,7 +143,8 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
   function bodySlide(title: string, eyebrow?: string) {
     pageNo++
     const s = pptx.addSlide()
-    s.addText(title, { x: 0.45, y: 0.28, w: 8.2, h: 0.55, fontFace: SERIF, fontSize: 26, bold: true, color: STEEL, underline: true })
+    // underline is an object as of pptxgenjs 3.5; `true` is normalised to exactly this.
+    s.addText(title, { x: 0.45, y: 0.28, w: 8.2, h: 0.55, fontFace: SERIF, fontSize: 26, bold: true, color: STEEL, underline: { style: 'sng' } })
     if (eyebrow) s.addText(eyebrow.toUpperCase(), { x: 0.47, y: 0.12, w: 8.2, h: 0.2, fontFace: SANS, fontSize: 8.5, bold: true, color: MUTED, charSpacing: 3 })
     footer(s)
     return s
@@ -434,9 +441,9 @@ export async function buildPipelineMeetingDeck(input: MeetingDeckInput): Promise
   }
 
   try {
-    const blob = await pptx.write({ outputType: 'blob' })
+    const blob = await pptx.write({ outputType: 'blob' }) as Blob
     console.log(`[meeting-deck generated] ${(blob.size / 1024 / 1024).toFixed(2)} MB, ${pageNo + 1} slides`)
-    return blob as Blob
+    return blob
   } catch (e) {
     console.error('[meeting-deck generation error]', e)
     throw new Error(`PowerPoint generation failed: ${e instanceof Error ? e.message : 'unknown error'}`)

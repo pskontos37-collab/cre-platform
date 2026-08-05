@@ -99,16 +99,18 @@ function Card({ children }: { children: any }) {
 }
 
 function Para({ text }: { text?: string | null }) {
-  if (!str(text)) return null
-  return <Text style={{ fontSize: 7.5, color: TEXT_MUTED, lineHeight: 1.55 }}>{pdfSafe(text)}</Text>
+  const s = str(text)              // use the narrowed value, not the still-nullable `text`
+  if (!s) return null
+  return <Text style={{ fontSize: 7.5, color: TEXT_MUTED, lineHeight: 1.55 }}>{pdfSafe(s)}</Text>
 }
 
 function Callout({ label, text }: { label: string; text?: string | null }) {
-  if (!str(text)) return null
+  const s = str(text)
+  if (!s) return null
   return (
     <View style={{ marginTop: 8, backgroundColor: '#eef1f3', borderWidth: 0.75, borderColor: RULE, borderRadius: 3, paddingVertical: 5, paddingHorizontal: 8 }}>
       <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', letterSpacing: 1.2, color: WILKOW, marginBottom: 2 }}>{label.toUpperCase()}</Text>
-      <Text style={{ fontSize: 7.5, color: TEXT, lineHeight: 1.55 }}>{pdfSafe(text)}</Text>
+      <Text style={{ fontSize: 7.5, color: TEXT, lineHeight: 1.55 }}>{pdfSafe(s)}</Text>
     </View>
   )
 }

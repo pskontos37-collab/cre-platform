@@ -107,7 +107,11 @@ export async function buildWaterfallXlsx(input: WaterfallXlsxInput): Promise<Blo
   wb.title = `${input.propertyName} — Waterfall (Sold Today)`
 
   // ── date parsing (no timezone drift) ──
-  const toDate = (iso: string): Date => {
+  // DatedFlow.date is `string | Date`. Accept both: passing a Date used to reach
+  // `iso.split` and throw at runtime — it never fired only because capital_flows
+  // always arrives from PostgREST as an ISO string.
+  const toDate = (iso: string | Date): Date => {
+    if (iso instanceof Date) return iso
     const [y, m, d] = iso.split('-').map(Number)
     return new Date(y, (m ?? 1) - 1, d ?? 1)
   }

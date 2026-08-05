@@ -78,7 +78,9 @@ export async function buildAbstractsPackPdf(input: AbstractsReportInput): Promis
   })
 
   const bytes = await merged.save()
-  return new Blob([bytes], { type: 'application/pdf' })
+  // pdf-lib returns Uint8Array<ArrayBufferLike>; BlobPart wants ArrayBufferView<ArrayBuffer>.
+  // Cast rather than copy through `new Uint8Array(bytes)` — these packs run to many MB.
+  return new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' })
 }
 
 // Fallback page when one tenant's abstract can't be rendered — keeps the pack

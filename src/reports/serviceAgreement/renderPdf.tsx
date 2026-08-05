@@ -146,5 +146,6 @@ export async function buildAgreementPdf(input: AgreementInput, exhibitA?: ArrayB
   await append(exhibitBBytes, 'Exhibit B')
 
   const bytes = await out.save()
-  return new Blob([bytes], { type: 'application/pdf' })
+  // See AbstractReport: pdf-lib's Uint8Array<ArrayBufferLike> vs BlobPart's ArrayBuffer view.
+  return new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' })
 }

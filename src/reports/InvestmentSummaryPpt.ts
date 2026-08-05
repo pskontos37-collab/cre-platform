@@ -47,7 +47,15 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
   pptx.layout = 'WILKOW_LTR'
   pptx.author = 'M&J Wilkow'
   pptx.title = `${deal.name} — Investment Summary`
-  pptx.compression = true
+  // NOTE: `pptx.compression = true` used to sit here and did nothing — there is no such
+  // property on the class (it is a write() option), which is what tsc was reporting.
+  // Removed rather than relocated: in pptxgenjs 3.12 the export path routes ANY explicit
+  // `outputType` to `generateAsync({type})` with the compression option dropped, so
+  // write({outputType:'blob', compression:true}) is equally a no-op (verified: byte-
+  // identical packages). Compression only applies when outputType is omitted (defaults to
+  // blob) or is 'STREAM'. So these decks export UNCOMPRESSED, and always have. Enabling it
+  // means dropping `outputType`, which is browser-only behaviour we cannot cover in Node
+  // tests — not worth risking deck generation for ~30% of file size.
 
   const profile = `${RISK_LABEL[deal.riskProfile] ?? deal.riskProfile} ${ASSET_LABEL[deal.assetType] ?? deal.assetType}`
   const loc = [deal.city, deal.state].filter(Boolean).join(', ')
@@ -60,7 +68,9 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
   function bodySlide(title: string) {
     pageNo++
     const s = pptx.addSlide()
-    s.addText(title, { x: 0.45, y: 0.28, w: 8.5, h: 0.55, fontFace: SERIF, fontSize: 26, bold: true, color: STEEL, underline: true })
+    // underline is an object as of pptxgenjs 3.5; the lib normalises `true` to exactly
+    // this, so the rendered slide is unchanged.
+    s.addText(title, { x: 0.45, y: 0.28, w: 8.5, h: 0.55, fontFace: SERIF, fontSize: 26, bold: true, color: STEEL, underline: { style: 'sng' } })
     // footer color blocks + wordmark + page number (mirrors the deck)
     s.addShape(pptx.ShapeType.rect, { x: 0, y: 8.06, w: 2.9, h: 0.44, fill: { color: CYAN } })
     s.addShape(pptx.ShapeType.rect, { x: 2.9, y: 8.06, w: 2.9, h: 0.44, fill: { color: CYAN_LIGHT } })
@@ -248,9 +258,9 @@ export async function buildInvestmentSummaryPptx(input: InvSummaryInput): Promis
   }
 
   try {
-    const blob = await pptx.write({ outputType: 'blob' })
+    const blob = await pptx.write({ outputType: 'blob' }) as Blob
     console.log(`[PPT generated] ${(blob.size / 1024 / 1024).toFixed(2)} MB`)
-    return blob as Blob
+    return blob
   } catch (e) {
     console.error('[PPT generation error]', e)
     throw new Error(`PowerPoint generation failed: ${e instanceof Error ? e.message : 'unknown error'}`)
