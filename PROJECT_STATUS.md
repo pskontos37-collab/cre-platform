@@ -84,9 +84,14 @@ See `KNOWN_ISSUES.md` for the full ledger. Headlines:
 7. Credential rotation pending (sb_secret, jwt_secret) — owner action.
 8. 3 abstract locks (Best Buy, Starbucks, Yard House), KM expirations source-of-truth, `7031-00` mapping — owner calls.
 
-## Most recent verified state (2026-08-04 23:20–23:30)
+## Most recent verified state (2026-08-05 02:20)
 
-- `vitest run`: **169/169 pass** (13 files) — exit 0
-- `tsc -b`: **17 errors** across 9 files (baseline; none in files touched by the 8/04 commit)
-- Working tree deltas beyond master preserved on this branch as `2fddd02` (lockfile + OCR/reindex ledgers)
+- `tsc -b --force`: **0 errors** (was 17 — burned down on this branch, commit `0f55821`)
+- `vitest run`: **200/200 pass** (16 files; +31 hand-verified money-engine tests, `29318e8`)
+- `vite build`: exit 0; `vite preview` serves HTTP 200
+- `npm ci`: exit 0 from committed lockfile (fresh worktree)
+- Edge functions: 37/37 esbuild-parse clean
+- Security: **no Critical/High** (advisors + read-only SQL verification, docs/SECURITY.md)
+- Ledger: reconciled; 14 prod-only migration bodies recovered into `supabase/migrations/recovered_from_prod/`
+- Branch `release-hardening`: 6 commits ahead of master @ `6c26d4b`, **not pushed** (push = prod deploy = owner's call)
 - Production: `https://cre-platform-mjw2.vercel.app` — live; last deploy = CI from `6c26d4b` push (sibling session, ~23:20 8/04)

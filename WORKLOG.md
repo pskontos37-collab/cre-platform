@@ -4,6 +4,47 @@ Newest entries at the top. Times local (America/Chicago).
 
 ---
 
+## 2026-08-04 23:40 – 2026-08-05 02:20 — Typecheck burn-down, CI hardening, money-engine tests, security/DB review, docs
+
+**Work performed + results (exact commands in RELEASE_CHECKLIST evidence column)**
+1. **tsc 17 → 0** (`0f55821`): all 9 files fixed properly — two latent BUGS found and fixed
+   (pptxgenjs `compression` was an ignored instance property → moved into `write()` where it
+   actually compresses; meeting-deck site-plan captions were never passed by the caller → wired
+   through). No suppressions, no unsafe casts. `tsc -b --force` exit 0; vitest still green.
+2. **CI hardened** (`8ddce3a`): typecheck now BLOCKING; `npm ci` + node cache; new blocking gate
+   on critical prod-dep advisories (`npm audit --omit=dev --audit-level=critical`, exits 0 today).
+3. **31 new unit tests** (`29318e8`) for the three untested money engines (acqUnderwriting,
+   tenantUnderwriting, distributionLedger) — every expectation hand-derived (par-bond IRRs,
+   closed-form annuity 65,051.435/969,144.56, hand-solved quadratic IRR 0.1104701). Suite 200/200.
+4. **Security review** (`0a95eb2`): secret sweep clean; npm audit analyzed (9 advisories, none
+   reachable in bundle); Supabase advisors run; EVERY claim verified read-only against live SQL —
+   verdict **no Critical/High**. The two advisor ERRORs (definer P&L views) are the deliberate
+   matview-guard pattern: inline `can_access_property()` + zero API grants on the matviews.
+   Destructive RPCs verified gated (`_purge_guard`, `can_do_action`).
+5. **Ledger reconciliation** (`0a95eb2`): 206 disk files vs 195 DB rows → **14 applied migrations
+   had no source in the repo**; all 14 bodies recovered VERBATIM from
+   `schema_migrations.statements` (base64 round-trip) into `supabase/migrations/recovered_from_prod/`
+   + README. 25 foundation files documented as pre-ledger. KI-12/13 added.
+6. **Edge-fn parse gate**: esbuild `--loader=ts` over all 37 files — 0 failures.
+7. **Phase 4 verified live**: `npm ci` exit 0 (422 pkgs); dev server with/without `.env` (banner
+   verified in browser); `vite build` exit 0; `vite preview` HTTP 200.
+8. **Docs**: README.md, docs/OPERATIONS.md (deploy/rollback/backup/jobs/single-env warning),
+   docs/ENVIRONMENT.md (exhaustive env catalogue), docs/FEATURE_INVENTORY.md (42 routes,
+   honest statuses, 3 named gaps), docs/SECURITY.md (per-claim evidence).
+
+**Problems encountered**
+- vitest float assertion on refi math (IEEE754 …99994) → assertion precision corrected, not code.
+- Windows /tmp vs node path resolution; last-line-no-newline dropped the 14th recovered file —
+  both caught by count checks and fixed.
+
+**Decisions made**
+- react-router v6→v7 and vite 8/vitest 4 major bumps deliberately DEFERRED (advisories not
+  exploitable as used / dev-only; mid-hardening major bumps = churn risk). Documented.
+- Recovered migrations live in a subfolder so nothing can ever re-apply them.
+- No new linter/formatter/monitoring invented mid-pass — documented as gaps instead.
+
+**Next action**: final full-gate re-run on the finished tree, commit tracking files, final report.
+
 ## 2026-08-04 23:05–23:40 — Session start: inspect, isolate, checkpoint
 
 **Work performed**
