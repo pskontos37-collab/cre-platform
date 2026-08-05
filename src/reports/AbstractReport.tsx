@@ -143,11 +143,15 @@ function AbstractBody({ d }: { d: AbstractDoc }) {
     <View>
       {/* title + provenance */}
       <View style={{ borderBottomWidth: 1, borderBottomColor: WILKOW, paddingBottom: 6, marginBottom: 8 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-          <Text style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 14, color: TEXT }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+          {/* Fixed percentage columns: both sides wrap INSIDE their column, so a
+              long tenant name or suite description can never push the row past
+              the page edge (yoga under-measures text, so shrink-based layouts
+              still overflowed). */}
+          <Text style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 14, color: TEXT, width: a.suite ? '60%' : '100%', paddingRight: 10 }}>
             {P(a.trade_name) || P(d.tenantName)}
           </Text>
-          {a.suite ? <Text style={{ fontSize: 8, color: TEXT_MUTED }}>Suite {P(a.suite)}</Text> : null}
+          {a.suite ? <Text style={{ fontSize: 8, color: TEXT_MUTED, width: '40%', textAlign: 'right' }}>Suite {P(a.suite)}</Text> : null}
         </View>
         <Text style={{ fontSize: 7, color: TEXT_FAINT, marginTop: 3 }}>
           {[a.tenant_legal_name ? P(a.tenant_legal_name) : null,

@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useProperties } from '../hooks/useProperties'
 import { usePropertyDataStatus } from '../hooks/usePropertyDataStatus'
+import { useHeaderProperty } from '../hooks/useHeaderProperty'
 import { useAuth } from '../contexts/AuthContext'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -54,7 +55,6 @@ export function PcfPage() {
   const { user } = useAuth()
   const { data: properties, loading: propsLoading } = useProperties()
   const { data: dataStatus } = usePropertyDataStatus()
-  const [propertyId, setPropertyId] = useState<string | null>(null)
   const [versionId, setVersionId] = useState<string | null>(null)
   const [drillLine, setDrillLine] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ lineKey: string; month: number } | null>(null)
@@ -77,8 +77,12 @@ export function PcfPage() {
   const loadedProps = (properties ?? []).filter(p => isLoaded(p.id))
   // Never present an empty picker: on a fresh install with nothing loaded, show everything.
   const pickProps = loadedProps.length ? loadedProps : (properties ?? [])
-  const activeProperty =
-    (propertyId && pickProps.some(p => p.id === propertyId)) ? propertyId : (pickProps[0]?.id ?? null)
+  // The header "View:" filter governs which property this page shows (picker
+  // only appears when the header is on a multi-property scope).
+  const headerProp = useHeaderProperty(pickProps)
+  const activeProperty = headerProp.activeId
+  // Property changed (via picker OR header) — drop the version/drill state.
+  useEffect(() => { setVersionId(null); setDrillLine(null) }, [activeProperty])
   const { data: versions, refetch: refetchVersions } = usePcfVersions(activeProperty)
   const activeVersionId = versionId ?? versions?.[0]?.id ?? null
   const version = versions?.find(v => v.id === activeVersionId) ?? null
@@ -172,13 +176,23 @@ export function PcfPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Projected cash flow</h1>
-        <select
-          value={activeProperty ?? ''}
-          onChange={e => { setPropertyId(e.target.value); setVersionId(null); setDrillLine(null) }}
-          style={{ fontSize: 13, padding: '5px 8px' }}
-        >
-          {pickProps.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        {headerProp.showPicker ? (
+          <select
+            value={activeProperty ?? ''}
+            onChange={e => headerProp.pick(e.target.value)}
+            title="The header view covers multiple properties — pick one for its cash flow"
+            style={{ fontSize: 13, padding: '5px 8px' }}
+          >
+            {headerProp.options.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        ) : (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{headerProp.activeName}</span>
+        )}
+        {headerProp.headerMismatchName && (
+          <span style={{ fontSize: 11, color: 'var(--amber, #d97706)' }}>
+            {headerProp.headerMismatchName} has no cash-flow data yet — showing properties that do.
+          </span>
+        )}
         <select
           value={activeVersionId ?? ''}
           onChange={e => { setVersionId(e.target.value); setDrillLine(null) }}

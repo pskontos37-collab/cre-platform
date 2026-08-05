@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { viewHref } from '../lib/viewer'
 import { openPdf, type LoadedPdf } from '../lib/pdfRender'
+import { useHeaderProperty } from '../hooks/useHeaderProperty'
 import {
   useSitePlanProperties, useSitePlans, useSitePlanMap,
   type SuiteRegion, type SuiteStatus,
@@ -44,11 +45,17 @@ export function SitePlansPage() {
   const [params, setParams] = useSearchParams()
   const { data: spProps } = useSitePlanProperties()
 
-  const [propertyId, setPropertyId] = useState<string | null>(params.get('property'))
-  // Default to the first property once the list loads.
+  // The header "View:" filter governs the property (picker appears only on
+  // multi-property header scopes). A ?property= deep link seeds the local pick —
+  // on a fresh load the header is "All Properties", so the link still lands on
+  // the property it names.
+  const headerProp = useHeaderProperty(spProps ?? [])
+  const urlSeed = params.get('property')
   useEffect(() => {
-    if (!propertyId && spProps && spProps.length) setPropertyId(spProps[0].id)
-  }, [spProps, propertyId])
+    if (urlSeed && (spProps ?? []).some(p => p.id === urlSeed)) headerProp.pick(urlSeed)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSeed, spProps])
+  const propertyId = headerProp.activeId
 
   const { data: plans } = useSitePlans(propertyId)
   const [planId, setPlanId] = useState<string | null>(null)
@@ -172,8 +179,17 @@ export function SitePlansPage() {
 
       {/* Controls */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 14 }}>
-        <Select label="Property" value={propertyId ?? ''} onChange={v => { setPropertyId(v); setPlanId(null) }}
-                options={(spProps ?? []).map(p => ({ value: p.id, label: p.name }))} />
+        {headerProp.showPicker ? (
+          <Select label="Property" value={propertyId ?? ''} onChange={v => { headerProp.pick(v); setPlanId(null) }}
+                  options={headerProp.options.map(p => ({ value: p.id, label: p.name }))} />
+        ) : (
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{headerProp.activeName}</span>
+        )}
+        {headerProp.headerMismatchName && (
+          <span style={{ fontSize: 11, color: 'var(--amber, #d97706)' }}>
+            {headerProp.headerMismatchName} has no site plan on file — showing properties that do.
+          </span>
+        )}
         {plans && plans.length > 1 && (
           <Select label="Plan" value={planId ?? ''} onChange={setPlanId}
                   options={plans.map(p => ({ value: p.id, label: (p.isPrimary ? '★ ' : '') + (p.fileName ?? p.title ?? p.id).replace(/\.pdf$/i, '') }))} />

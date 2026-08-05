@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, type CSSProperties, type ReactNode } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
+import { useHeaderProperty } from '../hooks/useHeaderProperty'
 import { useManagementAgreements, type MgmtAgreement, type MgmtDeadline } from '../hooks/useManagementAgreements'
 import { supabase } from '../lib/supabase'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
@@ -45,8 +46,10 @@ const TERM_SECTIONS: { key: string; label: string }[] = [
 export function ManagementPage() {
   const { appUser } = useAuth()
   const { data: properties } = useProperties()
-  const [propertyId, setPropertyId] = useState<string | null>(null)
-  useEffect(() => { if (!propertyId && properties?.length) setPropertyId(properties[0].id) }, [properties, propertyId])
+  // The header "View:" filter governs the property; the page picker only
+  // appears when the header is on a multi-property scope.
+  const headerProp = useHeaderProperty(properties ?? [])
+  const propertyId = headerProp.activeId
 
   const { data: agreements, loading, error, refetch } = useManagementAgreements(propertyId)
   const [agreementId, setAgreementId] = useState<string | null>(null)
@@ -100,12 +103,19 @@ export function ManagementPage() {
       </div>
 
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 18 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 260 }}>
-          <span style={lbl}>Property</span>
-          <select value={propertyId ?? ''} onChange={e => setPropertyId(e.target.value)} style={ctl}>
-            {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
+        {headerProp.showPicker ? (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 260 }}>
+            <span style={lbl}>Property</span>
+            <select value={propertyId ?? ''} onChange={e => headerProp.pick(e.target.value)} style={ctl}>
+              {headerProp.options.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
+        ) : (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={lbl}>Property</span>
+            <span style={{ fontSize: 13.5, color: 'var(--text)', padding: '7px 0' }}>{headerProp.activeName}</span>
+          </label>
+        )}
         {agreements && agreements.length > 0 && (
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 300 }}>
             <span style={lbl}>Agreement</span>

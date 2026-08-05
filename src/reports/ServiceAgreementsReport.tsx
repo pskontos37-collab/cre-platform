@@ -151,10 +151,14 @@ function Row({ g, accent }: { g: SaReportGroup; accent: string }) {
   return (
     <View wrap={false} style={{ flexDirection: 'row', alignItems: 'flex-start', borderBottomWidth: 0.5, borderBottomColor: RULE, borderLeftWidth: 2, borderLeftColor: accent, paddingVertical: 3.5, paddingHorizontal: 4 }}>
       <View style={{ flex: 1, paddingRight: 8 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold' }}>{pdfSafe(g.vendor)}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Yoga under-measures bold text (~10%), so a badge placed snug after
+              the name lands ON the rendered glyphs. space-between pins the badge
+              to the cell's right edge with the name wrapping in its own column
+              — overlap-proof. */}
+          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', maxWidth: g.isForm ? '100%' : '78%', paddingRight: 6 }}>{pdfSafe(g.vendor)}</Text>
           {!g.isForm ? (
-            <Text style={{ fontSize: 5.5, fontFamily: 'Helvetica-Bold', color: TEXT_FAINT, borderWidth: 0.5, borderColor: RULE, borderRadius: 3, paddingVertical: 0.5, paddingHorizontal: 3, marginLeft: 5 }}>OFF-FORM</Text>
+            <Text style={{ fontSize: 5.5, fontFamily: 'Helvetica-Bold', color: TEXT_FAINT, borderWidth: 0.5, borderColor: RULE, borderRadius: 3, paddingVertical: 0.5, paddingHorizontal: 3 }}>OFF-FORM</Text>
           ) : null}
         </View>
         {g.description ? <Text style={{ fontSize: 6.5, color: TEXT_FAINT, marginTop: 1.5, lineHeight: 1.4 }}>{pdfSafe(g.description)}</Text> : null}

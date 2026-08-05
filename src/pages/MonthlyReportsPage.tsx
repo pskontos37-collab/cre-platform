@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useQuery } from '../hooks/useQuery'
+import { useHeaderScope } from '../hooks/useHeaderProperty'
 import { supabase } from '../lib/supabase'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -274,6 +275,17 @@ export function MonthlyReportsPage() {
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const rows = reports.data ?? []
+
+  // The header "View:" filter seeds the property selection (empty = all).
+  // The page dropdown still narrows further without touching the header.
+  const scope = useHeaderScope()
+  const scopeNames = useMemo(
+    () => scope.isAll ? null : new Set((scope.properties ?? []).filter(p => scope.idSet.has(p.id)).map(p => p.name)),
+    [scope.isAll, scope.idSet, scope.properties],
+  )
+  useEffect(() => {
+    setSelected(scopeNames ? new Set([...scopeNames]) : new Set())
+  }, [scopeNames])
 
   // All property names present in the library — the dropdown's options.
   const allProps = useMemo(

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, type CSSProperties, type ReactNode } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { useHeaderProperty } from '../hooks/useHeaderProperty'
 import { useDeals, regenerateJvAbstract, type DealRow, type SellTodayConfig } from '../hooks/useDeals'
 import { getWaterfallDefaults, useGlNca } from '../hooks/useWaterfallDefaults'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
@@ -180,10 +181,12 @@ export function WaterfallPage() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [deals])
 
-  const [propId, setPropId] = useState<string | null>(null)
-  useEffect(() => {
-    if (!propId && groups.length > 0) setPropId(groups[0].propertyId)
-  }, [groups, propId])
+  // The header "View:" filter governs the property; the tab row only renders
+  // when the header is on a multi-property scope.
+  const headerProp = useHeaderProperty(
+    useMemo(() => groups.map(g => ({ id: g.propertyId, name: g.name })), [groups]),
+  )
+  const propId = headerProp.activeId
   const sel = useMemo(() => groups.find(g => g.propertyId === propId) ?? null, [groups, propId])
 
   const { data: glNca } = useGlNca(propId)
@@ -347,18 +350,25 @@ export function WaterfallPage() {
 
       {sel && inputs && (
         <>
-          {/* Property tabs */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
-            {groups.map(g => (
-              <button key={g.propertyId} onClick={() => setPropId(g.propertyId)} style={{
+          {/* Property tabs — only when the header view spans several properties */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            {headerProp.showPicker ? headerProp.options.map(o => (
+              <button key={o.id} onClick={() => headerProp.pick(o.id)} style={{
                 padding: '7px 14px', fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: 'pointer',
-                border: '1px solid ' + (g.propertyId === propId ? 'var(--accent)' : 'var(--border)'),
-                background: g.propertyId === propId ? 'var(--accent-soft, rgba(59,130,246,0.12))' : 'var(--surface)',
-                color: g.propertyId === propId ? 'var(--accent)' : 'var(--text-muted)',
+                border: '1px solid ' + (o.id === propId ? 'var(--accent)' : 'var(--border)'),
+                background: o.id === propId ? 'var(--accent-soft, rgba(59,130,246,0.12))' : 'var(--surface)',
+                color: o.id === propId ? 'var(--accent)' : 'var(--text-muted)',
               }}>
-                {g.name}
+                {o.name}
               </button>
-            ))}
+            )) : (
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sel.name}</span>
+            )}
+            {headerProp.headerMismatchName && (
+              <span style={{ fontSize: 11, color: 'var(--amber, #d97706)' }}>
+                {headerProp.headerMismatchName} has no modeled waterfall — showing the deals that exist.
+              </span>
+            )}
             <span style={{ flex: 1 }} />
             {(sel.l1.abstract || sel.l2?.abstract) && (
               <button

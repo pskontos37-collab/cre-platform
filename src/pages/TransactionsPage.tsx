@@ -7,6 +7,7 @@ import { TransactionCard } from '../components/transactions/TransactionPieces'
 import { WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DocAbstractsButton, type AbstractDocRef } from '../components/DocAbstractsButton'
+import { useHeaderScope } from '../hooks/useHeaderProperty'
 
 // /transactions — the portfolio-wide record of closed deals (acquisitions,
 // refinancings, recaps, dispositions). Institutional memory: every row anchors
@@ -41,8 +42,12 @@ export function TransactionsPage() {
 
   const [typeFilter, setTypeFilter] = useState<TxnType | ''>('')
   const [yearFilter, setYearFilter] = useState('')
-  const [propFilter, setPropFilter] = useState('')
+  const [localPropFilter, setLocalPropFilter] = useState('')
   const [verifiedOnly, setVerifiedOnly] = useState(false)
+
+  // The header "View:" filter scopes the list; the page dropdown only narrows
+  // within that scope, and disappears when the header already names one property.
+  const scope = useHeaderScope()
 
   const years = useMemo(
     () => Array.from(new Set(txns.map(t => yearOf(t.closeDate)))).sort((a, b) => b.localeCompare(a)),
@@ -51,10 +56,17 @@ export function TransactionsPage() {
   const properties = useMemo(() => {
     const m = new Map<string, string>()
     for (const t of txns) for (const p of t.properties) m.set(p.id, p.name)
-    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
-  }, [txns])
+    return Array.from(m, ([id, name]) => ({ id, name }))
+      .filter(p => scope.isAll || scope.idSet.has(p.id))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [txns, scope.isAll, scope.idSet])
+
+  const propFilter = scope.isSingle
+    ? (scope.ids[0] ?? '')
+    : (localPropFilter && properties.some(p => p.id === localPropFilter)) ? localPropFilter : ''
 
   const filtered = txns.filter(t =>
+    (scope.isAll || t.properties.some(p => scope.idSet.has(p.id))) &&
     (!typeFilter || t.type === typeFilter) &&
     (!yearFilter || yearOf(t.closeDate) === yearFilter) &&
     (!propFilter || t.properties.some(p => p.id === propFilter)) &&
@@ -64,7 +76,8 @@ export function TransactionsPage() {
   // All ACTIVE (not superseded) closing documents for the selected property —
   // the input to the on-demand narrative-abstract pack. Requires a single
   // property so the AI run stays scoped.
-  const selectedPropName = properties.find(p => p.id === propFilter)?.name ?? ''
+  const selectedPropName = properties.find(p => p.id === propFilter)?.name
+    ?? (scope.properties ?? []).find(p => p.id === propFilter)?.name ?? ''
   const abstractDocs = useMemo<AbstractDocRef[]>(() => {
     if (!propFilter) return []
     const seen = new Set<string>()
@@ -142,10 +155,12 @@ export function TransactionsPage() {
               <option value="">All types</option>
               {(Object.keys(TXN_TYPE_LABEL) as TxnType[]).map(k => <option key={k} value={k}>{TXN_TYPE_LABEL[k]}</option>)}
             </select>
-            <select value={propFilter} onChange={e => setPropFilter(e.target.value)} style={selectStyle}>
-              <option value="">All properties</option>
-              {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            {!scope.isSingle && (
+              <select value={propFilter} onChange={e => setLocalPropFilter(e.target.value)} style={selectStyle}>
+                <option value="">{scope.isAll ? 'All properties' : `All in view (${properties.length})`}</option>
+                {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
             <select value={yearFilter} onChange={e => setYearFilter(e.target.value)} style={selectStyle}>
               <option value="">All years</option>
               {years.map(y => <option key={y} value={y}>{y}</option>)}

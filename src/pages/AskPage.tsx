@@ -1,7 +1,8 @@
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { viewHref, openSourceAt } from '../lib/viewer'
 import { useProperties } from '../hooks/useProperties'
+import { useHeaderScope } from '../hooks/useHeaderProperty'
 import { loadCache, saveCache } from '../lib/uiCache'
 
 const FN_BASE = import.meta.env.VITE_SUPABASE_URL + '/functions/v1'
@@ -55,6 +56,14 @@ export function AskPage() {
   // Restore the last question + answer so leaving to another page and coming back keeps it.
   const [q, setQ] = useState(() => loadCache<AskCache>(CACHE_KEY)?.q ?? '')
   const [propertyId, setPropertyId] = useState<string>(() => loadCache<AskCache>(CACHE_KEY)?.propertyId ?? '')
+  // Follow the header "View:" filter when it names one property (the search
+  // scope select stays available — "All properties" = whole corpus is a real
+  // choice here, so the control never disappears).
+  const scope = useHeaderScope()
+  const headerSingleId = scope.isSingle ? (scope.ids[0] ?? '') : ''
+  useEffect(() => {
+    if (headerSingleId) setPropertyId(headerSingleId)
+  }, [headerSingleId])
   const [loading, setLoading] = useState(false)
   const [resp, setResp] = useState<AskResponse | null>(() => loadCache<AskCache>(CACHE_KEY)?.resp ?? null)
   const [asked, setAsked] = useState<string | null>(() => loadCache<AskCache>(CACHE_KEY)?.asked ?? null)

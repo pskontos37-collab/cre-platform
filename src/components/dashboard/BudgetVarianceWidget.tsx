@@ -79,7 +79,7 @@ export function BudgetVarianceWidget({ propertyIds, propertyNames = {} }: {
 function BvaDetail({ data }: { data: Pick<PropertyBva, 'revenue' | 'opex' | 'expense'> }) {
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 84px 84px 70px', gap: 4, marginTop: 12, marginBottom: 4 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 84px 84px 70px', gap: 4, marginTop: 12, marginBottom: 4 }}>
         <span />
         <ColHead>Actual</ColHead>
         <ColHead>Budget</ColHead>
@@ -203,8 +203,8 @@ function SummaryRow({ label, line, isExpense }: { label: string; line: BvaLine; 
   const { delta, favorable, pct } = variance(line, isExpense)
   const color = favorable ? 'var(--green)' : 'var(--red)'
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 84px 84px 70px', gap: 4, alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--border)' }}>
-      <span style={{ fontSize: 12, fontWeight: 650, color: 'var(--text)' }}>{label}</span>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 84px 84px 70px', gap: 4, alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--border)' }}>
+      <span style={{ fontSize: 12, fontWeight: 650, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={label}>{label}</span>
       <Num>{fmt(line.actual)}</Num>
       <Num muted>{fmt(line.budget)}</Num>
       <span style={{ fontSize: 11, fontWeight: 650, color, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
@@ -218,8 +218,8 @@ function DetailRow({ line, isExpense }: { line: BvaLine; isExpense: boolean }) {
   const { delta, favorable, pct } = variance(line, isExpense)
   const color = favorable ? 'var(--green)' : 'var(--red)'
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 84px 84px 70px', gap: 4, alignItems: 'center', padding: '2px 0' }}>
-      <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{line.label}</span>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 84px 84px 70px', gap: 4, alignItems: 'center', padding: '2px 0' }}>
+      <span style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={line.label}>{line.label}</span>
       <Num small>{fmt(line.actual)}</Num>
       <Num small muted>{fmt(line.budget)}</Num>
       <span style={{ fontSize: 10.5, fontWeight: 600, color, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>

@@ -777,7 +777,7 @@ function GlDrilldown({ propertyId, accounts, loading, error }: {
           General Ledger — Account Drill-Down
         </span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', minHeight: 420 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 320px) minmax(0, 1fr)', minHeight: 420 }}>
         {/* Account list */}
         <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: 10, borderBottom: '1px solid var(--border)' }}>

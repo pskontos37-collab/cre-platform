@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useQuery } from '../hooks/useQuery'
+import { useHeaderScope } from '../hooks/useHeaderProperty'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
 import { EmptyState } from '../components/ui/EmptyState'
 import { CLAUSES } from './AbstractsPage'
@@ -142,20 +143,31 @@ export function ClausesPage() {
   }, [])
 
   const def = CLAUSES.find(c => c.key === clause)!
-  const props = useMemo(() => [...new Set((rows.data ?? []).map(r => r.property_name))].sort(), [rows.data])
 
-  const rendered = useMemo(() => (rows.data ?? [])
+  // The header "View:" filter scopes the matrix (it works in property NAMES —
+  // abstracts join to properties(name)); the page dropdown narrows within it.
+  const scope = useHeaderScope()
+  const scopeNames = useMemo(() => {
+    if (scope.isAll) return null
+    return new Set((scope.properties ?? []).filter(p => scope.idSet.has(p.id)).map(p => p.name))
+  }, [scope.isAll, scope.idSet, scope.properties])
+  const inScope = (rowsIn: Row[]) => scopeNames ? rowsIn.filter(r => scopeNames.has(r.property_name)) : rowsIn
+
+  const props = useMemo(() => [...new Set(inScope(rows.data ?? []).map(r => r.property_name))].sort(),
+    [rows.data, scopeNames])
+
+  const rendered = useMemo(() => inScope(rows.data ?? [])
     .map(r => ({ ...r, value: def.render(r.abstract) || '—' }))
     .filter(r => !propFilter || r.property_name === propFilter)
     .filter(r => !text || r.value.toLowerCase().includes(text.toLowerCase()) || r.tenant_name.toLowerCase().includes(text.toLowerCase()))
     .sort((a, b) => a.property_name.localeCompare(b.property_name) || a.tenant_name.localeCompare(b.tenant_name)),
-  [rows.data, def, propFilter, text])
+  [rows.data, def, propFilter, text, scopeNames])
 
   const prevalence = useMemo(() => {
-    const all = (rows.data ?? []).map(r => def.render(r.abstract) || '—')
+    const all = inScope(rows.data ?? []).map(r => def.render(r.abstract) || '—')
     const has = all.filter(v => v !== '—' && !/^(none|does not report)$/i.test(v.trim())).length
     return { has, total: all.length }
-  }, [rows.data, def])
+  }, [rows.data, def, scopeNames])
 
   if (appUser?.role !== 'admin' && appUser?.role !== 'asset_manager') {
     return <div style={{ padding: '40px 32px', color: 'var(--text-muted)', fontSize: 14 }}>You need admin or asset manager access to view clause intelligence.</div>
@@ -201,11 +213,13 @@ export function ClausesPage() {
           style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '7px 10px' }}>
           {CLAUSES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
         </select>
-        <select value={propFilter} onChange={e => setPropFilter(e.target.value)}
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '7px 9px' }}>
-          <option value="">All properties</option>
-          {props.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
+        {!scope.isSingle && (
+          <select value={propFilter} onChange={e => setPropFilter(e.target.value)}
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '7px 9px' }}>
+            <option value="">{scope.isAll ? 'All properties' : `All in view (${props.length})`}</option>
+            {props.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
         <input value={text} onChange={e => setText(e.target.value)} placeholder="Filter language or tenant…"
           style={{ flex: 1, minWidth: 180, maxWidth: 340, fontSize: 12, padding: '7px 10px', borderRadius: 6, background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' }} />
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>

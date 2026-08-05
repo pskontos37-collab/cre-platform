@@ -190,7 +190,7 @@ export function CAMReconWidget({ propertyIds, propertyNames, previewCount }: CAM
                   key={row.id}
                   style={{
                     display:   'grid',
-                    gridTemplateColumns: '1fr 80px 80px 80px 108px',
+                    gridTemplateColumns: 'minmax(0, 1fr) 80px 80px 80px 108px',
                     gap:       8,
                     alignItems:'center',
                     padding:   '7px 10px',
@@ -199,11 +199,11 @@ export function CAMReconWidget({ propertyIds, propertyNames, previewCount }: CAM
                     border:    `1px solid ${row.status === 'overdue' ? 'var(--red-border)' : 'var(--border-2)'}`,
                   }}
                 >
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.tenantName ?? undefined}>
                       {row.tenantName ?? 'Unknown'}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {row.propertyName} · {row.periodYear} · {TYPE_LABEL[row.recType] ?? row.recType}
                     </div>
                   </div>

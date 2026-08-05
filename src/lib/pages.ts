@@ -18,6 +18,7 @@ export interface PageDef {
   restricted?: boolean
   adminOnly?: boolean
   group?: string          // sidebar accordion group (see NAV_GROUPS); admin is pinned separately
+  hidden?: boolean        // reachable by route/deep link but not listed in the sidebar
 }
 
 export const PAGES: PageDef[] = [
@@ -41,7 +42,10 @@ export const PAGES: PageDef[] = [
   { key: 'rea',         path: '/rea',         label: 'REAs',        icon: '📜', group: 'portfolio' },
   { key: 'abstracts',   path: '/abstracts',   label: 'Abstracts',   icon: '🗂', restricted: true, group: 'leasing' },
   { key: 'review',      path: '/review',      label: 'Review Center', icon: '🗹', restricted: true, group: 'leasing' },
-  { key: 'imports',     path: '/imports',     label: 'MRI Imports',   icon: '⇪', restricted: true, group: 'portfolio' },
+  // Hidden from the sidebar: staged imports arrive at most monthly, so the page
+  // is reached from the Review Center's pending-imports banner (and the
+  // onboarding wizard) instead of holding a permanent nav slot.
+  { key: 'imports',     path: '/imports',     label: 'MRI Imports',   icon: '⇪', restricted: true, group: 'portfolio', hidden: true },
   { key: 'clauses',     path: '/clauses',     label: 'Clauses',     icon: '§',  restricted: true, group: 'leasing' },
   { key: 'brokerage',   path: '/brokerage',   label: 'Brokerage',   icon: '🤝', group: 'leasing' },
   { key: 'documents',   path: '/documents',   label: 'Documents',   icon: '📁', group: 'leasing' },
@@ -106,7 +110,7 @@ export function visiblePages(user: PageViewer | null | undefined): PageDef[] {
 export function visiblePagesByGroup(
   user: PageViewer | null | undefined,
 ): { group: NavGroupDef; pages: PageDef[] }[] {
-  const vis = visiblePages(user).filter(p => !p.adminOnly)
+  const vis = visiblePages(user).filter(p => !p.adminOnly && !p.hidden)
   return NAV_GROUPS
     .map(group => ({ group, pages: vis.filter(p => p.group === group.key) }))
     .filter(x => x.pages.length > 0)

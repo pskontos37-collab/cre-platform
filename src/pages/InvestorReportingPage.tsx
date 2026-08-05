@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useDeals, type DealRow } from '../hooks/useDeals'
 import { useProperties } from '../hooks/useProperties'
+import { useHeaderProperty } from '../hooks/useHeaderProperty'
 import { useGlPnl } from '../hooks/useGlPnl'
 import { useRentRoll } from '../hooks/useRentRoll'
 import { Widget } from '../components/ui/Widget'
@@ -32,8 +33,10 @@ export function InvestorReportingPage() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [deals, properties])
 
-  const [propId, setPropId] = useState<string | null>(null)
-  const property = dealProps.find(p => p.id === propId) ?? dealProps[0] ?? null
+  // The header "View:" filter governs the property; the tab row below only
+  // renders when the header is on a multi-property scope.
+  const headerProp = useHeaderProperty(dealProps)
+  const property = dealProps.find(p => p.id === headerProp.activeId) ?? null
 
   const propertyIds = useMemo(() => (property ? [property.id] : []), [property?.id])
   const { data: pnl } = useGlPnl(propertyIds)
@@ -72,26 +75,33 @@ export function InvestorReportingPage() {
         Actual contributions and distributions per capital partner — the same dated flows that drive the waterfall — with realized returns and the quarterly report package.
       </div>
 
-      {/* Property tabs */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-        {dealProps.map(p => {
-          const active = p.id === property?.id
-          return (
-            <button
-              key={p.id}
-              onClick={() => setPropId(p.id)}
-              style={{
-                fontSize: 12, fontWeight: active ? 650 : 400, padding: '5px 12px', borderRadius: 999,
-                border: active ? '1px solid var(--accent)' : '1px solid var(--border-2)',
-                background: active ? 'var(--accent-dim)' : 'var(--surface-2)',
-                color: active ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer',
-              }}
-            >
-              {p.name}
-            </button>
-          )
-        })}
-      </div>
+      {/* Property tabs — only when the header view spans several properties */}
+      {headerProp.showPicker && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
+          {headerProp.options.map(p => {
+            const active = p.id === property?.id
+            return (
+              <button
+                key={p.id}
+                onClick={() => headerProp.pick(p.id)}
+                style={{
+                  fontSize: 12, fontWeight: active ? 650 : 400, padding: '5px 12px', borderRadius: 999,
+                  border: active ? '1px solid var(--accent)' : '1px solid var(--border-2)',
+                  background: active ? 'var(--accent-dim)' : 'var(--surface-2)',
+                  color: active ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer',
+                }}
+              >
+                {p.name}
+              </button>
+            )
+          })}
+          {headerProp.headerMismatchName && (
+            <span style={{ fontSize: 11, color: 'var(--amber, #d97706)' }}>
+              {headerProp.headerMismatchName} has no modeled capital partnerships — showing the properties that do.
+            </span>
+          )}
+        </div>
+      )}
 
       {propDeals.length === 0 && (
         <div style={{ color: 'var(--text-faint)', fontSize: 13 }}>No modeled capital partnerships yet.</div>

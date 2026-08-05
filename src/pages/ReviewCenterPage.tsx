@@ -109,6 +109,37 @@ function rankDocs(docs: DocLite[], citation: string | null): DocLite[] {
   return [...docs].sort((a, b) => score(b) - score(a))
 }
 
+// Staged MRI import batches are a fifth kind of thing awaiting a human decision;
+// they live on /imports (hidden from the sidebar), so surface them here — the
+// one place people check for pending review work.
+function PendingImportsBanner() {
+  const [count, setCount] = useState<number | null>(null)
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      const { count: n, error } = await supabase
+        .from('mri_import_batches')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['staged', 'approved'])
+      if (live && !error) setCount(n ?? 0)
+    })()
+    return () => { live = false }
+  }, [])
+  if (!count) return null
+  return (
+    <a href="/imports" style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 7,
+      background: 'var(--accent-dim)', border: '1px solid var(--accent)', textDecoration: 'none',
+    }}>
+      <span style={{ fontSize: 12 }}>⇪</span>
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--accent)' }}>
+        {count} MRI import batch{count === 1 ? '' : 'es'} awaiting approval
+      </span>
+      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--accent)' }}>Review →</span>
+    </a>
+  )
+}
+
 export function ReviewCenterPage() {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -459,6 +490,7 @@ export function ReviewCenterPage() {
       {/* ── left: queue ── */}
       <div style={{ width: 340, minWidth: 290, borderRight: '1px solid var(--border-2)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <PendingImportsBanner />
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontSize: 14, fontWeight: 700 }}>Review queue</span>
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{visible.length} open</span>

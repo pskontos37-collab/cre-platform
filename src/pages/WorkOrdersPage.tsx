@@ -2,6 +2,7 @@ import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } fro
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
+import { useHeaderScope } from '../hooks/useHeaderProperty'
 import { useLeaseRm, rmRowForCategory } from '../hooks/useLeaseRm'
 import {
   WorkOrder, WoComment, WoPhoto, PortalUserRow, VendorBookRow,
@@ -48,10 +49,15 @@ export function WorkOrdersPage() {
   const propertyNames = useMemo(
     () => Object.fromEntries((properties ?? []).map(p => [p.id, p.name])), [properties])
 
+  // The header "View:" filter scopes the queue (Portal-access admin stays
+  // portfolio-wide — it's configuration, not a data view).
+  const scope = useHeaderScope()
+  const queueIds = scope.isAll ? propertyIds : scope.ids
+
   const [refreshKey, setRefreshKey] = useState(0)
   const refresh = () => setRefreshKey(k => k + 1)
-  const { data: orders, loading, error } = useWorkOrders(propertyIds, propertyNames, refreshKey)
-  const { data: vendorBook } = useVendorBook(propertyIds)
+  const { data: orders, loading, error } = useWorkOrders(queueIds, propertyNames, refreshKey)
+  const { data: vendorBook } = useVendorBook(queueIds)
 
   const [tab, setTab] = useState<'queue' | 'portal'>('queue')
   const [statusFilter, setStatusFilter] = useState<'open' | 'all' | string>('open')
@@ -117,10 +123,13 @@ export function WorkOrdersPage() {
                 onClick={() => setStatusFilter(s.value)}>{s.label}</button>
             ))}
             <button style={statusFilter === 'all' ? primaryBtn : btn} onClick={() => setStatusFilter('all')}>All</button>
-            <select style={{ ...inputStyle, minWidth: 160 }} value={propertyFilter} onChange={e => setPropertyFilter(e.target.value)}>
-              <option value="">All properties</option>
-              {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            {!scope.isSingle && (
+              <select style={{ ...inputStyle, minWidth: 160 }} value={propertyFilter} onChange={e => setPropertyFilter(e.target.value)}>
+                <option value="">{scope.isAll ? 'All properties' : `All in view (${queueIds.length})`}</option>
+                {(properties ?? []).filter(p => scope.isAll || scope.idSet.has(p.id))
+                  .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
             <input style={{ ...inputStyle, flex: 1, minWidth: 180 }} placeholder="Search tenant, title, WO number…"
               value={search} onChange={e => setSearch(e.target.value)} />
             <button style={btn} onClick={() => setShowNewOrder(true)}>+ Log order</button>

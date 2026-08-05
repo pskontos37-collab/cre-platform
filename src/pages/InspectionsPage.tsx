@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
+import { useHeaderProperty } from '../hooks/useHeaderProperty'
 import { useAuth } from '../contexts/AuthContext'
 import { useIsPhone } from '../hooks/useMediaQuery'
 import { Widget, WidgetSkeleton } from '../components/ui/Widget'
@@ -27,11 +28,15 @@ export function InspectionsPage() {
   const { appUser } = useAuth()
   const { data: properties } = useProperties()
   const isPhone = useIsPhone()
-  const [propertyId, setPropertyId] = useState<string | null>(null)
-  useEffect(() => { if (!propertyId && properties?.length) setPropertyId(properties[0].id) }, [properties, propertyId])
+  // The header "View:" filter governs the property; the page picker only
+  // appears when the header is on a multi-property scope.
+  const headerProp = useHeaderProperty(properties ?? [])
+  const propertyId = headerProp.activeId
 
   const property = useMemo(() => properties?.find(p => p.id === propertyId) ?? null, [properties, propertyId])
   const [mode, setMode] = useState<Mode>('history')
+  // Property changed (picker or header) — return to the history tab.
+  useEffect(() => { setMode('history') }, [propertyId])
   const [bump, setBump] = useState(0)
   const [editInitial, setEditInitial] = useState<EditableInspection | null>(null)
   const [loadingEdit, setLoadingEdit] = useState<string | null>(null)
@@ -76,10 +81,15 @@ export function InspectionsPage() {
       </div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', margin: '14px 0 18px', flexWrap: 'wrap' }}>
-        <select value={propertyId ?? ''} onChange={e => { setPropertyId(e.target.value); setMode('history') }}
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '9px 10px', flex: isPhone ? 1 : undefined, minWidth: 220 }}>
-          {(properties ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        {headerProp.showPicker ? (
+          <select value={propertyId ?? ''} onChange={e => headerProp.pick(e.target.value)}
+            title="The header view covers multiple properties — pick one for its inspections"
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '9px 10px', flex: isPhone ? 1 : undefined, minWidth: 220 }}>
+            {headerProp.options.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        ) : (
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{headerProp.activeName}</span>
+        )}
       </div>
 
       {mode !== 'edit' && (

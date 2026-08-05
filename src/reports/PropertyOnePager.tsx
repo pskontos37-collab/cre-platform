@@ -138,7 +138,7 @@ export function PropertyOnePager({ property, kpis, noiTrend, topTenants, loans, 
             {loans.length === 0 ? <Muted>No debt on this property.</Muted> : loans.map((l, i) => (
               <View key={i} style={{ marginBottom: i === loans.length - 1 ? 0 : 7 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: TEXT }}>{l.lender}</Text>
+                  <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: TEXT, flexShrink: 1, paddingRight: 6 }}>{pdfSafe(l.lender)}</Text>
                   <Text style={{ fontSize: 6, fontFamily: 'Helvetica-Bold', color: l.status === 'breach' ? '#c25b52' : l.status === 'near' ? '#b8860b' : l.status === 'ok' ? GREEN : TEXT_FAINT }}>
                     {l.status === 'breach' ? 'BREACH' : l.status === 'near' ? 'NEAR COVENANT' : l.status === 'ok' ? 'IN COMPLIANCE' : 'NO COVENANT'}
                   </Text>
@@ -216,7 +216,10 @@ function FactRow({ k, v }: { k: string; v: string }) {
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 1.5 }}>
       <Text style={{ fontSize: 7, color: TEXT_FAINT }}>{k}</Text>
-      <Text style={{ fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: TEXT, textAlign: 'right', maxWidth: '65%' }}>{v}</Text>
+      {/* pdfSafe: values are DB-sourced (covenants carry ≥, notes carry arrows)
+          and Helvetica is WinAnsi-only — unmapped glyphs mis-measure and smear
+          into the neighboring column. */}
+      <Text style={{ fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: TEXT, textAlign: 'right', maxWidth: '65%' }}>{pdfSafe(v)}</Text>
     </View>
   )
 }

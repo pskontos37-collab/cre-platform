@@ -45,6 +45,7 @@ export function ImportsPage() {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [actErr, setActErr] = useState<string | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
   const canApprove = useCan('imports.approve')   // action gate (Phase 3b); server enforces regardless
 
   const load = useCallback(async () => {
@@ -69,6 +70,12 @@ export function ImportsPage() {
 
   const sel = useMemo(() => batches.find(b => b.id === selId) ?? null, [batches, selId])
   const diff = sel?.diff ?? null
+
+  // Decided batches (applied / rejected) are history — they leave the default
+  // view instead of accumulating. Rejecting a staged batch is how you dismiss it.
+  const pending = useMemo(() => batches.filter(b => b.status === 'staged' || b.status === 'approved'), [batches])
+  const decided = useMemo(() => batches.filter(b => b.status !== 'staged' && b.status !== 'approved'), [batches])
+  const shown = showHistory ? batches : pending
 
   async function approve() {
     if (!sel) return
@@ -107,7 +114,7 @@ export function ImportsPage() {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       {/* batches list */}
       <div style={{ width: 350, minWidth: 300 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
@@ -116,14 +123,14 @@ export function ImportsPage() {
         </div>
         {loading && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>}
         {error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{error}</div>}
-        {!loading && !batches.length && (
+        {!loading && !pending.length && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            No staged imports. Run the rent-roll loader with <code>RR_STAGE=1</code> or the GL
+            Nothing awaiting review. Run the rent-roll loader with <code>RR_STAGE=1</code> or the GL
             loader with <code>GL_STAGE=1</code> to stage a monthly MRI drop for review here
             (instead of writing it straight to the database).
           </div>
         )}
-        {batches.map(b => (
+        {shown.map(b => (
           <div key={b.id} onClick={() => { setSelId(b.id); setActErr(null) }}
             style={{ padding: '10px 12px', borderRadius: 8, border: `1px solid ${selId === b.id ? 'var(--accent)' : 'var(--border-2)'}`, marginBottom: 8, cursor: 'pointer', background: 'var(--surface-1, transparent)' }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
@@ -136,6 +143,14 @@ export function ImportsPage() {
             </div>
           </div>
         ))}
+        {!loading && decided.length > 0 && (
+          <button
+            onClick={() => setShowHistory(s => !s)}
+            style={{ fontSize: 11, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0' }}
+          >
+            {showHistory ? '▾ Hide' : '▸ Show'} history — {decided.length} decided batch{decided.length === 1 ? '' : 'es'}
+          </button>
+        )}
       </div>
 
       {/* batch detail + diff */}
