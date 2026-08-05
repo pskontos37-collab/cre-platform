@@ -4,6 +4,25 @@ Newest entries at the top. Times local (America/Chicago).
 
 ---
 
+## 2026-08-05 (merge session) — Reconvergence with master, merge + push authorized by owner
+
+Master had moved 3 commits while the branch waited (`bc31b65` independently cleared the SAME
+17-error tsc backlog and flipped CI typecheck to blocking; `9189517`/`aaf26f3` closed the last
+PCF bridge defects + picker default). Rather than fight 10 overlap conflicts, the branch was
+REBUILT from origin/master (`release-hardening-v2`): master's deployed versions win every
+overlap file; cherry-picked the five commits that are purely additive (lockfile+ledgers,
+tracking files, 31 money tests, security review + 14 recovered migrations, docs); re-applied
+the two still-missing pieces on top — ci.yml `npm ci`+cache+critical-prod-audit gate, and the
+site-plan caption wiring in PipelinePage (`title?: string` to match master's deck type).
+
+**Correction to the 8/04 entry**: the sibling session verified empirically that pptxgenjs 3.12
+drops the compression option whenever `outputType` is explicit (byte-identical packages), so
+my `write({compression:true})` relocation was a no-op — master's resolution (remove + document)
+is the accepted one. Decks export uncompressed, as they always have.
+
+Verification on the rebuilt branch before push: `tsc -b --force` (first run read), vitest,
+`vite build` — results recorded below in this entry's evidence table by the merge commit.
+
 ## 2026-08-04 23:40 – 2026-08-05 02:20 — Typecheck burn-down, CI hardening, money-engine tests, security/DB review, docs
 
 **Work performed + results (exact commands in RELEASE_CHECKLIST evidence column)**

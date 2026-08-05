@@ -52,7 +52,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
+          cache: npm
+      # npm ci: reproducible install from the committed lockfile (added 2026-08-05);
+      # bare `npm install` could silently float dependency versions between runs.
+      - run: npm ci
       # BLOCKING as of 2026-08-04: the pre-existing backlog (17 errors) is burned down to
       # zero, so this now holds the line. Neither Vercel nor `vite build` typechecks, so
       # before today a type error shipped to production silently — this is the only gate.
@@ -65,6 +68,15 @@ jobs:
         run: npm run test:run
       - name: Build (vite, mirrors Vercel)
         run: npm run build:ci
+      # Dependency audit: BLOCKS only on a critical advisory in PRODUCTION deps
+      # (what actually ships in the bundle). Dev-tooling advisories (vite/vitest
+      # dev servers) and lower severities print for visibility without stranding
+      # deploys behind upstream fixes we can't control. Known accepted risks as
+      # of 2026-08-04 are documented in docs/SECURITY.md.
+      - name: Dependency audit (blocking at critical, prod deps only)
+        run: |
+          npm audit --omit=dev || true
+          npm audit --omit=dev --audit-level=critical
 
   preview:
     needs: [check, secrets]

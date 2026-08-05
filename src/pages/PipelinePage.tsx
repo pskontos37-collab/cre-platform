@@ -1431,7 +1431,7 @@ function MeetingDeckButton({ deals, buyBoxes, partners, preparedBy }: { deals: D
         // Site plans are PRE-RENDERED to stored JPEGs (scripts/render_site_plans.ps1),
         // so we just fetch each image — fast and reliable, no client-side pdf.js.
         const extrasData = await fetchDeckExtras(deals.map(d => d.id))
-        const sitePlanImgs: Record<string, { data: string; w: number; h: number }> = {}
+        const sitePlanImgs: Record<string, { data: string; w: number; h: number; title?: string }> = {}
         const toDataUrl = (b: Blob) => new Promise<string>((res, rej) => {
           const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.onerror = () => rej(fr.error); fr.readAsDataURL(b)
         })
@@ -1442,7 +1442,9 @@ function MeetingDeckButton({ deals, buyBoxes, partners, preparedBy }: { deals: D
           try {
             const blob = await (await fetch(sp.url)).blob()
             const data = await toDataUrl(blob)
-            sitePlanImgs[sp.dealId] = { data, ...(await dims(data)) }
+            // Pass the plan's title through — the deck captions the image with it
+            // (declared on the extras type but never set here, so captions never rendered).
+            sitePlanImgs[sp.dealId] = { data, title: sp.title ?? undefined, ...(await dims(data)) }
           } catch (e) { console.warn('[meeting-deck] site-plan image failed:', sp.title ?? sp.dealId, e) }
         }))
         console.log(`[meeting-deck] site plans embedded ${Object.keys(sitePlanImgs).length}/${extrasData.sitePlans.length}`)

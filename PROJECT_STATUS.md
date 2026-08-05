@@ -84,14 +84,15 @@ See `KNOWN_ISSUES.md` for the full ledger. Headlines:
 7. Credential rotation pending (sb_secret, jwt_secret) — owner action.
 8. 3 abstract locks (Best Buy, Starbucks, Yard House), KM expirations source-of-truth, `7031-00` mapping — owner calls.
 
-## Most recent verified state (2026-08-05 02:20)
+## Most recent verified state (2026-08-05, merge session)
 
-- `tsc -b --force`: **0 errors** (was 17 — burned down on this branch, commit `0f55821`)
-- `vitest run`: **200/200 pass** (16 files; +31 hand-verified money-engine tests, `29318e8`)
-- `vite build`: exit 0; `vite preview` serves HTTP 200
-- `npm ci`: exit 0 from committed lockfile (fresh worktree)
-- Edge functions: 37/37 esbuild-parse clean
+- Branch REBUILT on origin/master (post `bc31b65`/`9189517`/`aaf26f3` — a sibling session
+  independently cleared the same tsc backlog and flipped CI blocking): master's deployed
+  versions kept for every overlap file; only additive work re-applied
+  (tests, docs, tracking, recovered migrations, lockfile, npm ci + audit gate, caption wiring).
+- `tsc -b --force`: **0 errors** (baseline is now 0 — CI blocks on it)
+- `vitest run`: **200/200 pass** (169 pre-existing + 31 new money-engine tests)
 - Security: **no Critical/High** (advisors + read-only SQL verification, docs/SECURITY.md)
 - Ledger: reconciled; 14 prod-only migration bodies recovered into `supabase/migrations/recovered_from_prod/`
-- Branch `release-hardening`: 6 commits ahead of master @ `6c26d4b`, **not pushed** (push = prod deploy = owner's call)
-- Production: `https://cre-platform-mjw2.vercel.app` — live; last deploy = CI from `6c26d4b` push (sibling session, ~23:20 8/04)
+- Merged to master + pushed with the owner's explicit authorization (this turn); deploy via CI.
+- Production: `https://cre-platform-mjw2.vercel.app`
