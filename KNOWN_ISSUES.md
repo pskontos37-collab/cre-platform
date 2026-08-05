@@ -66,6 +66,25 @@ Severity scale: Critical / High / Medium / Low. Updated 2026-08-04.
 - **Description**: 169 unit tests take ~20 s, almost all jsdom environment setup (106 s cumulative env time). Pure-node lib tests pay the jsdom tax needlessly.
 - **Status**: Optimization opportunity only (per-file `// @vitest-environment node`), not a release blocker.
 
+## KI-12 · Medium · Migrations ledger is not complete apply history (RESOLVED where possible, 8/05)
+
+- **Description**: Reconciling all 206 on-disk files against all 195 `schema_migrations` rows found two gaps:
+  (a) **14 applied migrations had no source file in the repo** — applied via MCP but never committed
+  (including `pnl_views_scope_by_entitlement`, the migration that guards the GL P&L views).
+  (b) **25 foundation files (20240001–23, 20240031, 20240045) have no ledger rows** — dashboard-era applies.
+- **Resolution**: (a) FIXED — all 14 bodies recovered verbatim from `schema_migrations.statements`
+  into `supabase/migrations/recovered_from_prod/` (see its README; never re-apply).
+  (b) Documented: a from-zero rebuild must run the 25 foundation files first, then the ledger.
+- **Residual risk**: none for prod; replay-based disaster recovery remains unrehearsed (KI-6).
+
+## KI-13 · Low · Advisor backlog (search_path, RLS initplan, policy sprawl, FK indexes)
+
+- **Description**: Supabase advisors list 5 mutable-search_path functions, 18 RLS policies re-evaluating
+  `auth.uid()` per row, 275 multiple-permissive-policy combos, 141 unindexed FKs (mostly `comps.*`),
+  42 unused indexes, and `purge_policy` without a PK. Zero High/Critical security findings.
+- **Impact**: performance headroom + hardening hygiene, not correctness. Detail + exact fixes in docs/SECURITY.md.
+- **Status**: Backlog; each fix is a migration (owner-gated).
+
 ## KI-11 · Low · `sample-data/` and `run-remaining-migrations.sql` in repo root
 
 - **Description**: `run-remaining-migrations.sql` (24 KB, June-era) predates the per-file migration ledger and could tempt a bulk re-run; sample-data is gitignored but present on disk.
