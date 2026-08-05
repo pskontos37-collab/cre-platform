@@ -25,6 +25,18 @@
 // resumable across the edge runtime's 150s wall. When all segments are done a
 // final merge call combines them into one brief.
 //
+// OVERFLOW HANDLING (v12-13): each model call is bounded IN-function at
+// SEGMENT_CALL_TIMEOUT_MS so a slow generation aborts catchably instead of the
+// 150s wall killing the whole invocation with nothing recorded. Overflow
+// strikes — the in-function timeout OR max_tokens truncation, same pathology —
+// are counted per segment in doc_briefs.seg_state; a struck segment runs
+// DEGRADED on the next resume (strike 1: DENSE_MAX_TOKENS + structural-summary
+// addendum; strike 2+: MINIMAL_MAX_TOKENS key-facts-only brief that cannot
+// overflow). The usual cause is non-lease tabular matter bound into the PDF,
+// e.g. MRI lease-profile printouts, whose rows the model enumerates until the
+// clock runs out. After MAX_SEG_ATTEMPTS the segment is reported as a
+// permanent error so callers stop resuming.
+//
 // Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY.
 // Usage: POST JSON { document_id: uuid, force?: boolean }
 //   → { success, done, segments_done, segments_total, brief? }
@@ -59,22 +71,53 @@ const SEGMENT_OVERLAP = 2_000     // look-back chars so a boundary-spanning clau
 // SEGMENT_CONCURRENCY segments (the common giant doc = 3-4 segments = one wave =
 // one invocation). Bigger docs persist the wave and resume for the next.
 const SOFT_DEADLINE_MS = 30_000
+// In-function bound per model call, UNDER the 150s wall. Before this, a segment
+// whose generation outran the wall killed the whole invocation mid-call — the
+// catch never ran, nothing was recorded, and every resume repeated identically
+// (observed: a lease bundle whose tail is appended MRI printout pages; the
+// dense tables made the model emit ~8K tokens slower than the wall allows, six
+// invocations in a row). Normal segments run ~100-120s and are unaffected; a
+// call that hits this bound is aborted IN-function so the timeout is recorded
+// in doc_briefs.seg_state and the next resume runs the segment DEGRADED.
+const SEGMENT_CALL_TIMEOUT_MS = 135_000
+// Degrade ladder for a segment that keeps overflowing its budget — BOTH walls
+// count as the same pathology (the segment's content demands more output than
+// time allows): my in-function timeout AND max_tokens truncation. Strike 1 →
+// 3K tokens + structural-summary addendum (~45-60s); strike 2+ → a minimal
+// brief (1.2K tokens, key_facts only, ~20-25s) that cannot overflow. After
+// MAX_SEG_ATTEMPTS the segment is reported as a PERMANENT error (error
+// non-null => callers stop resuming) instead of looping forever.
+const DENSE_MAX_TOKENS = 3_000
+const MINIMAL_MAX_TOKENS = 1_200
+const MAX_SEG_ATTEMPTS = 4
 
-async function anthropicJson(key: string, model: string, content: any[], maxTokens: number): Promise<any> {
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model, max_tokens: maxTokens,
-      tools: [{
-        name: 'submit_brief',
-        description: 'Submit the structured document brief.',
-        input_schema: { type: 'object', additionalProperties: true },
-      }],
-      tool_choice: { type: 'tool', name: 'submit_brief' },
-      messages: [{ role: 'user', content }],
-    }),
-  })
+async function anthropicJson(key: string, model: string, content: any[], maxTokens: number, timeoutMs = SEGMENT_CALL_TIMEOUT_MS): Promise<any> {
+  let r: Response
+  try {
+    r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model, max_tokens: maxTokens,
+        tools: [{
+          name: 'submit_brief',
+          description: 'Submit the structured document brief.',
+          input_schema: { type: 'object', additionalProperties: true },
+        }],
+        tool_choice: { type: 'tool', name: 'submit_brief' },
+        messages: [{ role: 'user', content }],
+      }),
+      // Abort in-function BEFORE the 150s request wall kills the invocation —
+      // an aborted call is catchable and its timeout gets recorded; a wall-kill
+      // records nothing and the resume repeats it identically.
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+  } catch (e) {
+    if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+      throw new Error(`segment call timed out after ${Math.round(timeoutMs / 1000)}s`)
+    }
+    throw e
+  }
   const d = await r.json()
   // Carry the HTTP STATUS in the message. The caller classifies transient (retry on a
   // later resume) vs permanent (surface now) off this number, and without it every
@@ -260,7 +303,7 @@ serve(async (req) => {
 
     // ── 3. Existing brief? (idempotent unless text changed or force) ──
     const { data: existing } = await sb.from('doc_briefs')
-      .select('id, brief, segments, segments_done, segments_total, text_chars, status')
+      .select('id, brief, segments, segments_done, segments_total, text_chars, status, seg_state')
       .eq('document_id', documentId).maybeSingle()
     if (existing?.status === 'complete' && existing.brief &&
         existing.text_chars === fullText.length && !body.force) {
@@ -282,6 +325,12 @@ serve(async (req) => {
     if (resume && Array.isArray(existing!.segments)) {
       for (let i = 0; i < segTotal; i++) if (existing!.segments[i]) segs[i] = existing!.segments[i]
     }
+    // Timeout strikes per segment index ({"6": 1} = segment 7 timed out once).
+    // Carried only across RESUMES of the same text/boundaries — a fresh start
+    // or force clears it with everything else.
+    const segState: Record<string, number> =
+      resume && (existing as any)?.seg_state && typeof (existing as any).seg_state === 'object'
+        ? { ...((existing as any).seg_state as Record<string, number>) } : {}
 
     const docMeta = `title: ${doc.title ?? doc.file_name}\nfile: ${doc.file_path ?? ''}\ncorpus doc_type tag: ${doc.doc_type ?? '?'}\ntotal text: ${fullText.length.toLocaleString()} chars in ${segTotal} segment(s)`
 
@@ -293,13 +342,26 @@ serve(async (req) => {
     // money error rather than a verbosity saving — Target's $2,842,335 SS6.3
     // allowance went missing from a 71:1-compressed brief exactly this way.
     const TERSE_ADDENDUM = `\n\nTERSE MODE (your previous attempt exceeded the output limit): keep every quote to ONE operative sentence (max ~300 chars), cap clauses[] at the 20 most material entries, cap key_facts at 8, and omit rent_effects rows beyond the controlling schedule. NEVER drop an allowance_effects entry — trim its quote instead; a missing allowance misstates the deal economics and is not verbosity. Completeness of FIELDS still matters; verbosity does not.`
+    // A segment that already overflowed gets this instead of a plain retry: the
+    // usual cause is NON-LEASE tabular matter bound into the PDF (MRI lease-
+    // profile printouts, rent registers, schedules) whose rows the model was
+    // dutifully enumerating until the clock ran out. Structural summaries keep
+    // whatever signal the tables carry without the row-by-row output.
+    const DENSE_ADDENDUM = `\n\nDENSE/TABULAR SEGMENT (a previous attempt ran out of time or output budget): this text is likely a system printout, rent register, schedule, or other tabular data rather than lease prose. Do NOT enumerate table rows into rent_effects/critical_dates/clauses — summarize each table STRUCTURALLY in key_facts instead (what the table is, its date, whose record it appears to be, its scope, min/max ranges). Extract only singular operative facts. HARD CAPS: clauses <= 8 entries, rent_effects <= 4, critical_dates <= 6, key_facts <= 8, every quote <= 200 chars. NEVER drop an allowance_effects entry — trim its quote instead.`
+    // Last rung: a brief that CANNOT overflow. Fields only, no quotes, tiny caps.
+    const MINIMAL_ADDENDUM = `\n\nMINIMAL BRIEF (previous attempts overflowed even the reduced budget): return ONLY doc_class, chain_role, instrument_name, instrument_date, effective_date, executed, parties, premises, quality, and key_facts (max 8 entries, each <= 120 chars, structural summaries only — e.g. "MRI lease-profile printout for suite 027, options table to 2058"). EVERY other array (term_effects, rent_effects, allowance_effects, option_effects, guaranty_effects, assignment_effects, clauses, critical_dates, references_other_instruments) MUST be the empty array []. All keys still present. NO quotes anywhere.`
     const isTruncated = (e: unknown) => /truncated at max_tokens/i.test(e instanceof Error ? e.message : String(e))
+    // Invocation-level time budget: never start (or terse-retry) a call the 150s
+    // wall would kill anyway — leave the segment for the caller's resume instead.
+    const INVOCATION_BUDGET_MS = 140_000
+    const budgetLeft = () => INVOCATION_BUDGET_MS - (Date.now() - t0)
     const callWithTerseRetry = async (text: string, maxTokens: number) => {
+      const bound = () => Math.min(SEGMENT_CALL_TIMEOUT_MS, Math.max(15_000, budgetLeft()))
       try {
-        return await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text }], maxTokens)
+        return await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text }], maxTokens, bound())
       } catch (e) {
-        if (!isTruncated(e)) throw e
-        return await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: text + TERSE_ADDENDUM }], maxTokens)
+        if (!isTruncated(e) || budgetLeft() < 30_000) throw e
+        return await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: text + TERSE_ADDENDUM }], maxTokens, bound())
       }
     }
 
@@ -313,6 +375,7 @@ serve(async (req) => {
       persistChain = persistChain.then(() => sb.from('doc_briefs').upsert({
         document_id: documentId, property_id: doc.property_id,
         segments: segs, segments_done: segs.filter(Boolean).length, segments_total: segTotal,
+        seg_state: Object.keys(segState).length ? segState : null,
         text_chars: fullText.length, status: 'in_progress', model: MODEL, error: null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'document_id' }))
@@ -328,8 +391,25 @@ serve(async (req) => {
         // run concurrently and extraction is verbatim-only.
         const start = Math.max(0, i * SEGMENT_CHARS - (i > 0 ? SEGMENT_OVERLAP : 0))
         const segText = fullText.slice(start, (i + 1) * SEGMENT_CHARS)
+        // A segment with recorded overflow strikes runs DEGRADED: smaller output
+        // budget + summary instructions, so it finishes inside one bounded call.
+        // Rung 2 (minimal) ALSO truncates the INPUT — instructions alone proved
+        // insufficient (the model kept enumerating printout rows through a 3K
+        // and even a 1.2K cap), and for tabular printout matter a stub brief of
+        // the visible head is the desired outcome anyway.
+        // Rungs 1-2 skip the terse-retry path — same cap, wasted spend.
+        const strikes = Number(segState[String(i)] ?? 0)
+        const effText = strikes >= 2
+          ? segText.slice(0, 8_000) + '\n\n[REMAINDER OF SEGMENT OMITTED FOR BRIEFING: this segment repeatedly overflowed the output budget and appears to be dense tabular/printout matter. Summarize what is visible above and record the omission in quality.notes.]'
+          : segText
+        const prompt = SEGMENT_PROMPT(docMeta, i, segTotal, '', effText)
+          + (strikes >= 2 ? MINIMAL_ADDENDUM : strikes >= 1 ? DENSE_ADDENDUM : '')
         try {
-          segs[i] = await callWithTerseRetry(SEGMENT_PROMPT(docMeta, i, segTotal, '', segText), SEGMENT_MAX_TOKENS)
+          segs[i] = strikes >= 1
+            ? await anthropicJson(anthropicKey, MODEL, [{ type: 'text', text: prompt }],
+                strikes >= 2 ? MINIMAL_MAX_TOKENS : DENSE_MAX_TOKENS,
+                Math.min(SEGMENT_CALL_TIMEOUT_MS, Math.max(15_000, budgetLeft())))
+            : await callWithTerseRetry(prompt, SEGMENT_MAX_TOKENS)
           await persistProgress()
         } catch (e) {
           // Leave this index for a resume retry, but RECORD anything that will fail
@@ -347,7 +427,21 @@ serve(async (req) => {
           // Keep the rule: retry anything a re-roll can fix; surface anything it cannot
           // (4xx auth/billing/bad-request), which is what the credit outage needed.
           const m = e instanceof Error ? e.message : String(e)
-          const transient = /truncated at max_tokens|overloaded|rate_limit|Anthropic API error (?:429|5\d\d)|malformed brief envelope|no tool_use block/i.test(m)
+          // BOTH overflow walls take a strike: the in-function timeout AND
+          // max_tokens truncation (which lands here only after the terse retry
+          // also failed, or on the degraded rungs). Same pathology — the
+          // segment demands more output than one call allows — same ladder:
+          // strike 1 → DENSE (3K), strike 2 → MINIMAL (1.2K, cannot overflow),
+          // MAX_SEG_ATTEMPTS → permanent error so callers stop resuming.
+          if (/segment call timed out|truncated at max_tokens/i.test(m)) {
+            segState[String(i)] = strikes + 1
+            await persistProgress()
+            if (strikes + 1 >= MAX_SEG_ATTEMPTS) {
+              segErr = `segment ${i + 1}/${segTotal} overflowed the time/output budget ${strikes + 1}x (even minimal) — its text is likely non-lease tabular matter; needs manual review`
+            }
+            continue
+          }
+          const transient = /overloaded|rate_limit|Anthropic API error (?:429|5\d\d)|malformed brief envelope|no tool_use block/i.test(m)
           if (!transient) segErr = m
         }
       }
@@ -378,6 +472,7 @@ serve(async (req) => {
       chain_role: typeof brief?.chain_role === 'string' ? brief.chain_role : null,
       brief,
       segments: null,          // partials no longer needed once merged
+      seg_state: null,         // timeout strikes are moot once complete
       segments_done: doneCount,
       segments_total: segTotal,
       text_chars: fullText.length,

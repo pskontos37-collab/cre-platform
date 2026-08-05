@@ -1,0 +1,11 @@
+-- 20240198_doc_briefs_seg_state
+-- Per-segment attempt state for doc-brief's time-wall handling. A segment whose
+-- model call outruns the edge runtime's 150s request wall used to kill the whole
+-- invocation with nothing recorded — the resume then repeated identically forever
+-- (Club Pilates doc 50cbf325 sat at 6/7 through 6+ attempts because the bundle
+-- carries appended MRI printout pages that generate enormous output). doc-brief
+-- v12-14 bounds each call in-function, records overflow strikes here
+-- ({"<segIdx>": attempts}), and degrades the segment on later resumes (3K tokens
+-- + tabular-summary addendum, then a 1.2K-token minimal brief over truncated
+-- input); MAX_SEG_ATTEMPTS records a permanent error so runners stop looping.
+alter table doc_briefs add column if not exists seg_state jsonb;
