@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 // A deploy replaces the hashed chunk files, so a tab opened before the deploy
 // fails its next dynamic import (every PDF/Excel export button dynamic-imports
@@ -18,8 +19,13 @@ window.addEventListener('vite:preloadError', event => {
   window.location.reload()
 })
 
+// The inner boundary in AppLayout keeps the shell alive for a page-level throw.
+// This outer one is the last resort: if the layout, router or a provider throws,
+// there is no shell left to preserve, and without it the user gets a white page.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary label="root">
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )
