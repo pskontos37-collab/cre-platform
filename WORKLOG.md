@@ -4,6 +4,36 @@ Newest entries at the top. Times local (America/Chicago).
 
 ---
 
+## 2026-08-07 — Staging environment + DR rehearsal + Playwright smoke in CI
+
+Owner approved the $10/mo staging project; everything else ran hands-off.
+
+- **Created `cre-platform-staging`** (ref `neftwjesayzsfggluuts`, us-west-1) via the
+  Management API with cost confirmation.
+- **DR rehearsal (KI-6 closed)**: replayed all 224 migration bodies in prod-ledger
+  order onto the empty project. 217 applied clean, 7 data-only migrations correctly
+  guard-refused, 8 drift patches required and documented (`docs/DR_REHEARSAL.md`).
+  Headline finds: `log_mutation()` in `20240010` is BROKEN on a fresh DB (prod runs
+  an untracked hotfix); `useProperties()` filters on an untracked column
+  (`properties.ownership_type`); `mixed_use` enum value, 2 storage buckets, 1
+  function, and 7 more columns exist only outside the repo.
+- **End-state fidelity verified**: tables 120=120, views 33=33 (31 invoker), matviews
+  2=2, RLS 120=120, policies 249=249, functions 370=370, enum diff empty, column
+  diff empty both directions.
+- **PR previews re-pointed at staging**: `VITE_SUPABASE_*` preview-scoped on Vercel
+  (production records untouched, verified by listing). Previews can no longer touch
+  the prod database.
+- **Smoke user** `smoke@staging.local` (admin/global) created; GoTrue verified with
+  positive + negative login (200/400). Gotcha recorded: manual `auth.users` inserts
+  need `''` not NULL in token fields or the token endpoint 500s.
+- **Playwright suite** (`e2e/smoke.spec.ts`, 4 tests) + `playwright.config.ts` +
+  `e2e-smoke` CI job building against staging; `deploy` now needs it. Local run:
+  **4/4 in 9s**. `STAGING_SMOKE_PASSWORD` set as a GitHub Actions secret. vitest
+  excludes `e2e/**` (its default include would have collected the spec).
+- Commands: `node replay.mjs` (scratchpad driver, resume-safe), `npx vite build
+  --mode e2e`, `npm run test:e2e`, `gh secret set STAGING_SMOKE_PASSWORD`.
+- Next action: land this branch on master (CI must go green incl. the new job).
+
 ## 2026-08-05 (merge session) — Reconvergence with master, merge + push authorized by owner
 
 Master had moved 3 commits while the branch waited (`bc31b65` independently cleared the SAME

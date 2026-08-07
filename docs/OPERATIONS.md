@@ -64,14 +64,28 @@ the v6 tree + v8 file contents. Details in project memory
   the deliberate exception (definer + inline guard; see docs/SECURITY.md).
 - Postgres regex: `\b` is BACKSPACE; use `\y`.
 
-### From-zero rebuild (disaster recovery by replay) — UNREHEARSED
+### From-zero rebuild (disaster recovery by replay) — REHEARSED 2026-08-07
 
 Order: (1) the 25 foundation files `20240001–23, 20240031, 20240045` in numeric
-order — they have no ledger rows; (2) the remaining numbered files in order;
-(3) the ledger-only migrations now preserved in
-`supabase/migrations/recovered_from_prod/` at their timestamped positions.
-This has NEVER been rehearsed against a scratch project (KNOWN_ISSUES KI-6);
-treat restore-from-backup as the primary DR path.
+order — they have no ledger rows; (2) the ledger rows in `version` order (bodies
+in `supabase/migrations/` + `recovered_from_prod/` at their timestamped
+positions).
+
+**Rehearsed against a fresh project (`cre-platform-staging`) on 2026-08-07: it
+works, with eight documented patches** — see `docs/DR_REHEARSAL.md` for the full
+drift ledger (untracked columns, one enum value, one hotfixed trigger function,
+two dashboard-created storage buckets, one untracked function, and 7 data-only
+migrations whose guards correctly refuse an empty database). Restore-from-backup
+remains the PRIMARY DR path; replay is now a proven secondary.
+
+### Staging environment
+
+`cre-platform-staging` (ref `neftwjesayzsfggluuts`, us-west-1, $10/mo) carries
+prod's full schema and the 26 property reference rows, no other data. Vercel
+PR previews build against it (preview-scoped env vars), so previews can no
+longer touch the production database. CI's `e2e-smoke` job runs the Playwright
+suite (`e2e/`) against a staging build on every push/PR and BLOCKS production
+deploys. Details + smoke-credential rotation: `docs/DR_REHEARSAL.md`.
 
 ## Backup / restore
 

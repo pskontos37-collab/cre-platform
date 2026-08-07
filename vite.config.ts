@@ -12,5 +12,8 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // e2e/ is Playwright's, not vitest's — its specs import '@playwright/test'
+    // and need a served build, so vitest must never collect them.
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
   },
 })

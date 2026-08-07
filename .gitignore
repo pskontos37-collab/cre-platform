@@ -9,6 +9,10 @@ dist
 sample-data/
 scripts/logs/
 
+# Playwright output
+test-results/
+playwright-report/
+
 scripts/*.log
 scripts/_*
 scripts/.monthly_reports_out/

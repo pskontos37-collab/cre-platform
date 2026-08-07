@@ -35,7 +35,7 @@ Updated: 2026-08-05 02:15 (release-hardening branch, worktree `cre-platform-rh`)
 | No skipped/focused tests | Passed | grep `.skip(/.only(/.todo(` → 0 matches |
 | Financial calcs independently verified | Passed | 31 new tests with hand-derived expectations (closed-form annuities, par-bond IRRs, hand-solved quadratic); existing waterfall suite uses golden JV fixtures |
 | Integration tests (DB reads/writes) | Blocked | No test DB — single prod environment (docs/OPERATIONS.md). Compensating: read-only RLS/authz verification vs prod (7/30 full sweep + this pass) |
-| E2E critical workflows | Partially passed | Login/startup/missing-env live-verified this pass; broader UI verified signed-in 8/01–8/03; no automated E2E (needs staging first — FEATURE_INVENTORY gap #1) |
+| E2E critical workflows | Passed (smoke) | Playwright suite in CI vs STAGING (auth wall, login, live /properties via RLS, /financials shell) — 4/4 local 8/07; blocks deploys. Deeper flows (imports, reports) remain manual |
 | Negative tests (authz, invalid input) | Passed (lib layer) | access.test + leaseMath fail-closed tests + verifyStatus; server-side gates verified by SQL inspection |
 | Cross-organization isolation | Not applicable | Single-firm tool. In-scope analogues verified: PM property-scoping (RLS + view guards), tenant-portal gateway |
 | Role/permission tests pass | Passed | access.test green; destructive RPC gates (`_purge_guard`, `can_do_action`) verified against live function sources |
@@ -58,7 +58,7 @@ Updated: 2026-08-05 02:15 (release-hardening branch, worktree `cre-platform-rh`)
 
 | Item | Status | Evidence / notes |
 |---|---|---|
-| Migrations clean-apply on empty DB | Blocked | Unrehearsed (KI-6); replay ORDER now documented incl. foundation files + recovered set |
+| Migrations clean-apply on empty DB | Passed (rehearsed) | Full replay onto cre-platform-staging 8/07: 217/224 clean + 7 correct guard-refusals; 8 drift patches in docs/DR_REHEARSAL.md; end-state fidelity verified vs prod |
 | Ledger reconciled (disk vs `schema_migrations`) | Passed | Full 206-vs-195 name recon 8/05; 14 prod-only bodies RECOVERED into repo (`recovered_from_prod/`); 25 pre-ledger foundation files documented (KI-12) |
 | FKs/constraints/indexes reviewed | Passed w/ backlog | Advisors: 141 unindexed FKs, 42 unused indexes, 1 missing PK — enumerated in docs/SECURITY.md backlog (KI-13) |
 | Multi-step ops roll back cleanly | Passed (by design) | Multi-step writers are single plpgsql RPCs (`apply_mri_import`, `complete_property_onboarding`, purge suite) — one statement = one transaction; raises abort atomically |

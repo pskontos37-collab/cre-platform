@@ -36,11 +36,16 @@ Severity scale: Critical / High / Medium / Low. Updated 2026-08-04.
 - **Description**: no Sentry or equivalent; prod errors surface only if a user reports them. Edge fns have Supabase logs (`get_logs`) — adequate server-side.
 - **Status**: Missing (do not invent). Owner decision post-release.
 
-## KI-6 · Medium · Migrations never rehearsed against a clean database
+## KI-6 · ~~Medium~~ RESOLVED 2026-08-07 · Migrations never rehearsed against a clean database
 
-- **Description**: 206 migrations applied incrementally to the live project over months; known duplicate numbers (20240053/55/72/86/96 — harmless, Supabase keys by full name). A from-zero replay has never been run, so disaster-recovery-by-replay is unproven.
-- **Impact**: restore procedure depends on Supabase backups, not migration replay.
-- **Status**: Documented in docs/OPERATIONS.md; rehearsal needs a scratch Supabase project (cost → owner call).
+- **Resolution**: full from-zero replay executed onto the new `cre-platform-staging`
+  project (owner approved $10/mo). 217/224 applied clean; 7 data-only migrations
+  correctly guard-refused an empty DB; 8 drift patches documented in
+  `docs/DR_REHEARSAL.md`. End-state fidelity verified: tables/views/policies/
+  functions/enums all match prod exactly.
+- **Follow-up (open, owner-gated)**: formalize the drift (5 untracked columns, 1 enum
+  value, 2 functions, 2 storage buckets) as one no-op-on-prod migration so the repo
+  alone can rebuild prod — needs a number claimed at apply time + owner's go.
 
 ## KI-7 · Medium · Owner-blocked feature inputs (since 7/04)
 
@@ -75,7 +80,7 @@ Severity scale: Critical / High / Medium / Low. Updated 2026-08-04.
 - **Resolution**: (a) FIXED — all 14 bodies recovered verbatim from `schema_migrations.statements`
   into `supabase/migrations/recovered_from_prod/` (see its README; never re-apply).
   (b) Documented: a from-zero rebuild must run the 25 foundation files first, then the ledger.
-- **Residual risk**: none for prod; replay-based disaster recovery remains unrehearsed (KI-6).
+- **Residual risk**: none for prod; replay-based DR was rehearsed 2026-08-07 (KI-6 resolved, see docs/DR_REHEARSAL.md).
 
 ## KI-13 · Low · Advisor backlog (search_path, RLS initplan, policy sprawl, FK indexes)
 

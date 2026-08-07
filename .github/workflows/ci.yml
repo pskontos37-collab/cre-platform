@@ -78,6 +78,34 @@ jobs:
           npm audit --omit=dev || true
           npm audit --omit=dev --audit-level=critical
 
+  # Staging smoke (Playwright): builds the app against the STAGING Supabase
+  # project (neftwjesayzsfggluuts — never production) and drives a real browser
+  # through login, the auth wall, and the core pages. The staging URL and anon
+  # key are publishable by design (they ship in any staging bundle); only the
+  # smoke user's password is a secret. BLOCKS deploys via the deploy job's needs.
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: https://neftwjesayzsfggluuts.supabase.co
+      # gitleaks:allow — STAGING anon key: publishable by design (ships in any staging
+      # bundle); the staging project holds no production data. NOT the prod key.
+      VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5lZnR3amVzYXl6c2ZnZ2x1dXRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5NDUzMDYsImV4cCI6MjEwMTUyMTMwNn0.eihExGpRhCBpQXWylwnOdtByKWS7HzAbsr35C9Ywie4 # gitleaks:allow
+      STAGING_SMOKE_EMAIL: smoke@staging.local
+      STAGING_SMOKE_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright chromium
+        run: npx playwright install chromium --with-deps
+      - name: Build against staging
+        run: npm run build:ci
+      - name: Staging smoke tests
+        run: npm run test:e2e
+
   preview:
     needs: [check, secrets]
     # Same-repository pull requests receive an isolated Vercel preview URL.
@@ -104,7 +132,7 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
   deploy:
-    needs: [check, secrets]
+    needs: [check, secrets, e2e-smoke]
     # Deploy the COMMITTED master ref on every green push to master (and on manual
     # dispatch). This makes committed master HEAD the single source of truth for
     # production and retires the working-tree upload (scripts/deploy_vercel.ps1),
