@@ -34,6 +34,7 @@ import { computePromote, DEFAULT_PROMOTE } from '../lib/acqPromote'
 import { computeAcqAlerts, type AlertItem } from '../lib/acqAlerts'
 import { bestFit, fitCategory, FIT_LABEL, type BuyBox, type FitDeal, type FitCategory } from '../lib/buyBox'
 import { rankPartners, type MatchPartner, type MatchDeal } from '../lib/partnerMatch'
+import { PriorLooksPanel } from '../components/pipeline/PriorLooksPanel'
 import type { UwLeaseLine, UwRollover, UwOpex, UwRefi, UwPromote, UwPromoteTier, UwScenario } from '../hooks/usePipeline'
 
 // /pipeline — acquisition deal pipeline (v2). Four views: Pipeline (board/table),
@@ -1668,6 +1669,7 @@ function UnderwritingTab({ deal, busy, onSaveModel, docs, refetchDocs, onChanged
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <UwSourcesPanel deal={deal} docs={docs} refetchDocs={refetchDocs} onChanged={onChanged} createdBy={createdBy} />
       <CompsLookupPanel deal={deal} />
+      <PriorLooksPanel dealName={deal.name} city={deal.city} />
       <div style={{ display: 'flex', border: '1px solid var(--border-2)', borderRadius: 6, overflow: 'hidden', alignSelf: 'flex-start' }}>
         {(['simple', 'tenant'] as const).map(md => (
           <button key={md} onClick={() => setMode(md)} style={{ ...segBtn, background: mode === md ? 'var(--accent, #466371)' : 'var(--surface)', color: mode === md ? '#fff' : 'var(--text-muted)' }}>
