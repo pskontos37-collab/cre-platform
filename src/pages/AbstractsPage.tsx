@@ -87,7 +87,6 @@ function useResolutions(abstractIds: string[], bump: number) {
       .in('abstract_id', abstractIds).eq('archived', false)
     if (error) throw new Error(error.message)
     return (data ?? []) as Resolution[]
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, bump])
 }
 
@@ -1971,7 +1970,6 @@ function SourceDocsPanel({ docIds, tenant, propertyId }: { docIds: string[]; ten
     return ((data ?? []) as DocMeta[])
       .map(d => ({ ...d, brief_status: briefBy.get(d.id) }))
       .sort(byDocDateDesc)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAll, canBrowse, tenant, propertyId])
   if (!docIds.length) return null
   const srcSet = new Set(docIds)

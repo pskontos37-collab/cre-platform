@@ -1664,6 +1664,7 @@ function UnderwritingTab({ deal, busy, onSaveModel, docs, refetchDocs, onChanged
   // keyed on the source stamps so a plain Save never resets in-progress state.
   const src = deal.underwritingModel?.sources
   const uwKey = [src?.metrics?.extractedAt, src?.rentRoll?.extractedAt, src?.opex?.extractedAt].map(x => x ?? '').join('|')
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- uwKey (the source stamps) is the intended trigger; adding deal.underwritingModel?.mode would re-seed on every plain Save and throw away the user's in-progress mode toggle
   useEffect(() => { setMode(deal.underwritingModel?.mode === 'tenant' ? 'tenant' : 'simple') }, [uwKey])
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -2389,10 +2390,15 @@ function TenantUwEditor({ deal, busy, onSaveModel }: { deal: Deal; busy: boolean
     periodicity: m.periodicity ?? 'annual',
     leases: leases as any, rollover: roll as any, opex: opex as any,
   }
+  // `model` is an object literal rebuilt on every render, so listing it would make
+  // these memos recompute every time - i.e. no memoisation at all, on the most
+  // expensive calculation on the page. `m` and `today` are its real inputs.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- model is derived from m/today; depending on it would defeat the memo
   const r = useMemo(() => underwriteTenant(model), [m, today])
   const exitCaps = useMemo(() => [-0.005, -0.0025, 0, 0.0025, 0.005].map(d => +(m.exitCapPct + d).toFixed(4)).filter(x => x > 0), [m.exitCapPct])
   const growths = useMemo(() => [-0.01, 0, 0.01, 0.02].map(d => +(roll.marketRentGrowthPct + d).toFixed(4)).filter(x => x >= 0), [roll.marketRentGrowthPct])
   const irrGrid = useMemo(() => growths.map(g => exitCaps.map(ec =>
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- same as above: model and roll are rebuilt each render and derived from m/today, which ARE listed
     underwriteTenant({ ...model, exitCapPct: ec, rollover: { ...roll, marketRentGrowthPct: g } as any }).leveredIrr)), [m, today, exitCaps, growths])
 
   const totalSf = leases.reduce((s, l) => s + (l.sf || 0), 0)

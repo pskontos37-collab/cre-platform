@@ -6,6 +6,12 @@ export function useFilteredPropertyIds(properties: PropertyWithPortfolio[] | nul
   const { filter } = useFilter()
   const { data: portfolios } = usePortfolios()
 
+  // Keyed on the ids joined into a string, not on `filter.ids` itself: the filter
+  // context hands back a fresh array on every update, so depending on the array
+  // would recompute this list - and re-fire every query downstream of it - on
+  // renders where the selection did not actually change.
+  const idsKey = (filter.ids ?? []).join(',')
+
   return useMemo(() => {
     if (!properties?.length) return []
 
@@ -28,7 +34,8 @@ export function useFilteredPropertyIds(properties: PropertyWithPortfolio[] | nul
       default:
         return properties.map(p => p.id)
     }
-  }, [properties, filter.scope, filter.id, (filter.ids ?? []).join(','), portfolios])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- idsKey covers filter.ids by VALUE (see above); listing the array itself would defeat the point
+  }, [properties, filter.scope, filter.id, idsKey, portfolios])
 }
 
 export function usePropertyNameMap(properties: PropertyWithPortfolio[] | null): Record<string, string> {

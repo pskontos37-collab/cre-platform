@@ -149,8 +149,13 @@ export function WidgetSkeleton({ rows = 4 }: { rows?: number }) {
 export function usePropertyChip(scopeIds: string[]) {
   const [sel, setSel] = useState('all')
   const key = scopeIds.join(',')
+  // Keyed on `key` (the ids by value) rather than the scopeIds array: the array
+  // identity changes on every header-filter update, and re-running this on an
+  // unchanged selection is pointless work. When the CONTENTS change, key changes
+  // and the reset still fires - which is the only case that matters here.
   useEffect(() => {
     if (sel !== 'all' && !scopeIds.includes(sel)) setSel('all')
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- key covers scopeIds by VALUE; see above
   }, [key, sel])
   const effectiveIds = sel !== 'all' && scopeIds.includes(sel) ? [sel] : scopeIds
   return { sel, setSel, effectiveIds }

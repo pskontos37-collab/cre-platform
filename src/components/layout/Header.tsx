@@ -282,11 +282,16 @@ function PropertyPicker({ properties }: { properties: Array<{ id: string; name: 
   const boxRef = useRef<HTMLDivElement>(null)
 
   // Seed the checkboxes from the active filter whenever the panel opens.
+  // Depends on `open` ALONE on purpose: while the panel is open the user is
+  // editing these checkboxes, and the filter updates as they apply changes. Adding
+  // filter.scope/id/ids here would re-seed mid-edit and wipe their in-progress
+  // selection. "On open" is the intended trigger, not "whenever the filter moves".
   useEffect(() => {
     if (!open) return
     if (filter.scope === 'property' && filter.id) setChecked(new Set([filter.id]))
     else if (filter.scope === 'custom') setChecked(new Set(filter.ids ?? []))
     else setChecked(new Set())
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above: re-seeding on filter change is the bug, not the fix
   }, [open])
 
   // Close when clicking anywhere outside the panel.

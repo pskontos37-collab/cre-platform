@@ -83,6 +83,5 @@ export function useGlNcaMap(propertyIds: string[]) {
     const map: Record<string, number> = {}
     for (const [pid, nca] of entries) if (nca != null) map[pid] = nca
     return map
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 }

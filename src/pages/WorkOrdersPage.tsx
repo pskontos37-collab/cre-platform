@@ -1,4 +1,4 @@
-import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
+import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useProperties } from '../hooks/useProperties'
@@ -239,7 +239,11 @@ function DetailPanel({ order, allOrders, vendorBook, me, onClose, onChanged }: {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  async function loadThread() {
+  // useCallback so the effect can depend on it directly. It closes over nothing
+  // but order.id (the setters are stable), so the identity changes exactly when
+  // the effect should re-run - which is what the [order.id] array was expressing
+  // by hand.
+  const loadThread = useCallback(async () => {
     try {
       const t = await fetchOrderThread(order.id)
       setComments(t.comments)
@@ -247,8 +251,8 @@ function DetailPanel({ order, allOrders, vendorBook, me, onClose, onChanged }: {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     }
-  }
-  useEffect(() => { loadThread() }, [order.id])
+  }, [order.id])
+  useEffect(() => { loadThread() }, [loadThread])
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setErr(null)

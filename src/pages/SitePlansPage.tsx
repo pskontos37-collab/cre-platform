@@ -100,6 +100,12 @@ export function SitePlansPage() {
     let best = 1; let bestN = 0
     for (const [pg, n] of byPage) if (n > bestN) { bestN = n; best = pg }
     setPage(best)
+    // Deliberately keyed on planId + the page/match counts rather than
+    // mapData.regions: this picks the DEFAULT page, and regions is a fresh array
+    // on every render of the parent. Depending on it would re-run this on
+    // essentially every render and yank the user back to the default page every
+    // time they navigated to another one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above: re-firing on regions identity would fight manual page selection
   }, [planId, mapData?.pages.length, mapData?.matched])
 
   // Open the selected plan PDF.

@@ -38,7 +38,11 @@ export function InvestorReportingPage() {
   const headerProp = useHeaderProperty(dealProps)
   const property = dealProps.find(p => p.id === headerProp.activeId) ?? null
 
-  const propertyIds = useMemo(() => (property ? [property.id] : []), [property?.id])
+  // Keyed on the id rather than the object: `property` is re-found by identity on
+  // every render, so depending on it would rebuild this array each time and
+  // re-fire the two queries below. Hoisting the id makes that statically checkable.
+  const propertyId = property?.id ?? null
+  const propertyIds = useMemo(() => (propertyId ? [propertyId] : []), [propertyId])
   const { data: pnl } = useGlPnl(propertyIds)
   const { data: rentRoll } = useRentRoll(propertyIds)
 

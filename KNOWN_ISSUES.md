@@ -60,12 +60,16 @@ evidence that settled them.
   non-permitted render called one fewer hook than a permitted one. Had `appUser` resolved
   asynchronously (undefined → admin), React would have thrown "Rendered more hooks than during
   the previous render" and taken the page out. Fixed by hoisting it above the guard.
-- **Baseline**: **0 errors, 585 warnings** — 505 `no-explicit-any` (deliberate, at the untyped
-  Supabase jsonb edges), 39 `react-refresh/only-export-components`, 38
-  `react-hooks/exhaustive-deps`, 3 stale `eslint-disable` directives that no longer suppress
-  anything. The warnings are a real backlog, not noise to ignore; `exhaustive-deps` in
-  particular is worth working down, since a missing dependency is how a panel keeps showing the
-  previous property's numbers.
+- **Baseline**: **0 errors, 544 warnings** — 505 `no-explicit-any` (deliberate, at the untyped
+  Supabase jsonb edges) and 39 `react-refresh/only-export-components`.
+- **`react-hooks/exhaustive-deps` worked down 38 → 0 on 2026-08-07.** 22 were one idiom
+  (`const rows = data ?? []` handing a fresh array to a `useMemo`, so the memo never memoised —
+  a performance defect, fixed by memoising the fallback). 6 were fixed properly with
+  `useCallback` / by hoisting an id. **The remaining 10 were deliberate and are now documented
+  in place** with a targeted disable and a reason — they key on a joined string so a new array
+  *identity* with identical contents does not retrigger. Adding the "missing" dep to those would
+  have introduced real bugs: re-seeding the property picker mid-edit, resetting the underwriting
+  mode toggle on every Save, and yanking the site-plan viewer back to the default page.
 - **No Prettier, deliberately.** Reformatting 228 files / ~58k lines produces an unreviewable
   diff, carries no correctness benefit, and this checkout is worked by several sessions at once
   — a repo-wide reformat would collide with everything in flight.

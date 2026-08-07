@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from'react'
 import { Link } from 'react-router-dom'
 import { useProperties } from '../hooks/useProperties'
 import { useFilteredPropertyIds, usePropertyNameMap } from '../hooks/useFilteredPropertyIds'
@@ -56,17 +56,21 @@ export function ReceivablesPage() {
 
   // Same dual-key resolution the drill uses: MRI lease id first, then the
   // punctuation-tolerant tenant-name match.
-  const followUpsFor = (r: ArAgingRow): ArFollowUp[] =>
+  // Both wrapped in useCallback so the filter memo below can depend on
+  // `needsFollowUp` directly. Between them they close over nothing but
+  // `followUps`, so this is behaviourally identical to listing `followUps` -
+  // it just lets the linter verify that rather than taking it on trust.
+  const followUpsFor = useCallback((r: ArAgingRow): ArFollowUp[] =>
     (r.mriLeaseId ? (followUps ?? {})[`${r.propertyId}|mri:${r.mriLeaseId}`] : undefined)
     ?? (followUps ?? {})[`${r.propertyId}|nm:${normalizeTenantName(r.tenantName)}`]
-    ?? []
+    ?? [], [followUps])
 
-  const needsFollowUp = (r: ArAgingRow): boolean => {
+  const needsFollowUp = useCallback((r: ArAgingRow): boolean => {
     if (r.pastDue <= 0.005) return false
     const latest = followUpsFor(r)[0]
     if (!latest) return true
     return Date.now() - new Date(latest.createdAt).getTime() > FOLLOWUP_STALE_DAYS * 86400e3
-  }
+  }, [followUpsFor])
   const { data: reas } = useReaAgreements(propertyIds, propertyNames)
   // MRI lease ids that belong to REA parties (chip + cross-link to /rea)
   const reaMris = useMemo(() => {
@@ -128,7 +132,7 @@ export function ReceivablesPage() {
       return sortDesc ? -c : c
     })
     return v
-  }, [rows, quick, search, sortKey, sortDesc, followUps])
+  }, [rows, quick, search, sortKey, sortDesc, needsFollowUp])
 
   function clickSort(k: SortKey) {
     if (sortKey === k) setSortDesc(d => !d)

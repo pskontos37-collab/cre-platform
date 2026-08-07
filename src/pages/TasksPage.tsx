@@ -76,7 +76,12 @@ export function TasksPage() {
   const [busy, setBusy]       = useState<string | null>(null)
 
   const today = todayIso()
-  const scope = useMemo(() => new Set(scopeIds), [scopeIds.join(',')])
+  // Keyed by value, not by array identity: scopeIds is rebuilt by the header
+  // filter on every update, so depending on it would rebuild this Set (and
+  // re-filter every task) on renders where the scope did not change.
+  const scopeKey = scopeIds.join(',')
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- scopeKey covers scopeIds by VALUE; see above
+  const scope = useMemo(() => new Set(scopeIds), [scopeKey])
 
   const tasks = useMemo(() => {
     const q = search.trim().toLowerCase()

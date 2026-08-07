@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useQuery } from '../hooks/useQuery'
@@ -151,23 +151,29 @@ export function ClausesPage() {
     if (scope.isAll) return null
     return new Set((scope.properties ?? []).filter(p => scope.idSet.has(p.id)).map(p => p.name))
   }, [scope.isAll, scope.idSet, scope.properties])
-  const inScope = (rowsIn: Row[]) => scopeNames ? rowsIn.filter(r => scopeNames.has(r.property_name)) : rowsIn
+  // useCallback so the three memos below can depend on `inScope` directly. It
+  // closes over nothing but `scopeNames`, so this is identical in behaviour to
+  // listing `scopeNames` in each dependency array - just statically checkable.
+  const inScope = useCallback(
+    (rowsIn: Row[]) => scopeNames ? rowsIn.filter(r => scopeNames.has(r.property_name)) : rowsIn,
+    [scopeNames],
+  )
 
   const props = useMemo(() => [...new Set(inScope(rows.data ?? []).map(r => r.property_name))].sort(),
-    [rows.data, scopeNames])
+    [rows.data, inScope])
 
   const rendered = useMemo(() => inScope(rows.data ?? [])
     .map(r => ({ ...r, value: def.render(r.abstract) || '—' }))
     .filter(r => !propFilter || r.property_name === propFilter)
     .filter(r => !text || r.value.toLowerCase().includes(text.toLowerCase()) || r.tenant_name.toLowerCase().includes(text.toLowerCase()))
     .sort((a, b) => a.property_name.localeCompare(b.property_name) || a.tenant_name.localeCompare(b.tenant_name)),
-  [rows.data, def, propFilter, text, scopeNames])
+  [rows.data, def, propFilter, text, inScope])
 
   const prevalence = useMemo(() => {
     const all = inScope(rows.data ?? []).map(r => def.render(r.abstract) || '—')
     const has = all.filter(v => v !== '—' && !/^(none|does not report)$/i.test(v.trim())).length
     return { has, total: all.length }
-  }, [rows.data, def, scopeNames])
+  }, [rows.data, def, inScope])
 
   if (appUser?.role !== 'admin' && appUser?.role !== 'asset_manager') {
     return <div style={{ padding: '40px 32px', color: 'var(--text-muted)', fontSize: 14 }}>You need admin or asset manager access to view clause intelligence.</div>
