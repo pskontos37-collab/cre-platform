@@ -34,10 +34,10 @@ begin
    where n.nspname = 'public' and p.proname = 'enforce_abstract_lock_action';
 
   if v_anon_can is null then
-    raise exception '20240201: enforce_abstract_lock_action() not found - did it get renamed?';
+    raise exception '20240202: enforce_abstract_lock_action() not found - did it get renamed?';
   end if;
   if v_anon_can then
-    raise exception '20240201: anon STILL holds EXECUTE after the revoke';
+    raise exception '20240202: anon STILL holds EXECUTE after the revoke';
   end if;
 
   -- 2. Predicted end state: ZERO public SECURITY DEFINER functions executable by
@@ -48,7 +48,7 @@ begin
      and has_function_privilege('anon', p.oid, 'EXECUTE');
 
   if v_secdef_open <> 0 then
-    raise exception '20240201: % public SECURITY DEFINER fns are still anon-executable, expected 0',
+    raise exception '20240202: % public SECURITY DEFINER fns are still anon-executable, expected 0',
                     v_secdef_open;
   end if;
 
@@ -63,9 +63,9 @@ begin
      and not t.tgisinternal;
 
   if v_triggers = 0 then
-    raise exception '20240201: no trigger uses enforce_abstract_lock_action() - lock enforcement lost';
+    raise exception '20240202: no trigger uses enforce_abstract_lock_action() - lock enforcement lost';
   end if;
 
-  raise notice '20240201 OK: anon EXECUTE revoked; 0 anon-executable SECURITY DEFINER fns; % trigger(s) intact',
+  raise notice '20240202 OK: anon EXECUTE revoked; 0 anon-executable SECURITY DEFINER fns; % trigger(s) intact',
                v_triggers;
 end $$;
