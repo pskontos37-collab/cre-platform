@@ -77,9 +77,13 @@ evidence that settled them.
   correctly guard-refused an empty DB; 8 drift patches documented in
   `docs/DR_REHEARSAL.md`. End-state fidelity verified: tables/views/policies/
   functions/enums all match prod exactly.
-- **Follow-up (open, owner-gated)**: formalize the drift (5 untracked columns, 1 enum
-  value, 2 functions, 2 storage buckets) as one no-op-on-prod migration so the repo
-  alone can rebuild prod — needs a number claimed at apply time + owner's go.
+- **Follow-up CLOSED 2026-08-07**: the drift (7 untracked columns, 1 enum value, 2
+  functions, 2 storage buckets) is formalized as migration
+  `20240202_formalize_untracked_schema_drift` — applied to staging (dress rehearsal,
+  full no-op) then prod with the owner's go; existence guard passed on both. The repo
+  alone can now rebuild the schema. ⚠️ 20240202 is a NUMBER DUP with the sibling
+  `20240202_revoke_anon_execute_abstract_lock_trigger` (31-second claim race) —
+  harmless, Supabase keys by full name; never renumber either.
 
 ## KI-7 · Medium · Owner-blocked feature inputs (since 7/04)
 
