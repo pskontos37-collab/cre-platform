@@ -84,7 +84,8 @@ function TenantContactsTab() {
   const propertyNames = usePropertyNameMap(properties ?? null)
   const { data, loading, error, refetch } = useTenantContacts(propertyIds)
   const { data: tenantOptions } = useTenantOptions(propertyIds)
-  const contacts = data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const contacts = useMemo(() => data ?? [], [data])
 
   const [typeFilter, setTypeFilter] = useState<ContactType | null>(null)
   const [search, setSearch] = useState('')

@@ -27,7 +27,9 @@ export function ServiceAgreementsWidget({ propertyIds, propertyNames }: Props) {
   const [days, setDays] = useState(120)
   const { sel, setSel, effectiveIds } = usePropertyChip(propertyIds)
   const { data, loading, error } = useServiceAgreements(effectiveIds, propertyNames)
-  const agreements = data ?? []
+  // Memoised so the `?? []` fallback does not hand a fresh array to the useMemos
+  // below on every render, which defeats their memoisation entirely.
+  const agreements = useMemo(() => data ?? [], [data])
 
   const todayMs = Date.parse(new Date().toISOString().slice(0, 10))
 

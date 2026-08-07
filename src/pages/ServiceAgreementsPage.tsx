@@ -118,7 +118,8 @@ export function ServiceAgreementsPage() {
   const propertyIds = useFilteredPropertyIds(properties ?? null)
   const propertyNames = usePropertyNameMap(properties ?? null)
   const { data, loading, error, refetch } = useServiceAgreements(propertyIds, propertyNames)
-  const agreements = data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const agreements = useMemo(() => data ?? [], [data])
 
   const [searchParams] = useSearchParams()
   const [lifecycleFilter, setLifecycleFilter] = useState<Lifecycle | null>(() => {

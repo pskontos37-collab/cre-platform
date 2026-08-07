@@ -66,7 +66,8 @@ export function WorkOrdersPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showNewOrder, setShowNewOrder] = useState(false)
 
-  const all = orders ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const all = useMemo(() => orders ?? [], [orders])
   const filtered = useMemo(() => all.filter(o => {
     if (statusFilter === 'open' && !OPEN_STATUSES.includes(o.status)) return false
     if (statusFilter !== 'open' && statusFilter !== 'all' && o.status !== statusFilter) return false

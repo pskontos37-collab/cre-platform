@@ -274,7 +274,8 @@ export function MonthlyReportsPage() {
   const reports = useMonthlyReports()
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const rows = reports.data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const rows = useMemo(() => reports.data ?? [], [reports.data])
 
   // The header "View:" filter seeds the property selection (empty = all).
   // The page dropdown still narrows further without touching the header.

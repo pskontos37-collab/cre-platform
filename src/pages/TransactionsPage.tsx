@@ -38,7 +38,8 @@ const yearOf = (iso: string) => iso.slice(0, 4)
 
 export function TransactionsPage() {
   const { data, loading, error } = useTransactions()
-  const txns = data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const txns = useMemo(() => data ?? [], [data])
 
   const [typeFilter, setTypeFilter] = useState<TxnType | ''>('')
   const [yearFilter, setYearFilter] = useState('')

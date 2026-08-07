@@ -52,7 +52,9 @@ export function AnnouncementsPage() {
   }, [propertyId, propertyIds, visibleProps])
 
   const { data: pool, loading: poolLoading } = useAnnouncementRecipients(propertyId || null)
-  const recipients = pool?.recipients ?? []
+  // Memoised: the `?? []` fallback would otherwise be a new array each render and
+  // defeat the memoisation of everything downstream of it.
+  const recipients = useMemo(() => pool?.recipients ?? [], [pool])
   const gap = pool?.tenantsWithoutEmail ?? []
 
   const [mode, setMode] = useState<'all' | 'selected'>('all')

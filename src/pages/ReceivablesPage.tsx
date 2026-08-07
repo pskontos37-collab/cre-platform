@@ -48,7 +48,8 @@ export function ReceivablesPage() {
   const propertyIds = useFilteredPropertyIds(properties ?? null)
   const propertyNames = usePropertyNameMap(properties ?? null)
   const { data, loading, error } = useArAging(propertyIds, propertyNames)
-  const rows = data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const rows = useMemo(() => data ?? [], [data])
   const { data: notes } = useArNotes(propertyIds)
   const { data: arContacts } = useArContacts(propertyIds)
   const { data: followUps, refetch: refetchFollowUps } = useArFollowUps(propertyIds)

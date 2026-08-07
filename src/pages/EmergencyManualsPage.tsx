@@ -179,7 +179,8 @@ function PropertyCard({ property, rows }: { property: string; rows: ManualRow[] 
 export function EmergencyManualsPage() {
   const manuals = useEmergencyManuals()
   const [q, setQ] = useState('')
-  const rows = manuals.data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const rows = useMemo(() => manuals.data ?? [], [manuals.data])
 
   const groups = useMemo(() => {
     const byProp = new Map<string, ManualRow[]>()

@@ -26,7 +26,8 @@ export function RelationshipsTab() {
   const propertyNames = usePropertyNameMap(properties ?? null)
   const { data, loading, error, refetch } = useAmContacts(true)
   const { data: deals } = useDealOptions(true)
-  const contacts = data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const contacts = useMemo(() => data ?? [], [data])
 
   const [catFilter, setCatFilter] = useState<AmCategory | null>(null)
   const [search, setSearch] = useState('')

@@ -51,7 +51,8 @@ export function BrokeragePage() {
   const propertyIds = useFilteredPropertyIds(properties ?? null)
   const propertyNames = usePropertyNameMap(properties ?? null)
   const { data, loading, error } = useBrokerage(propertyIds, propertyNames)
-  const docs = data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const docs = useMemo(() => data ?? [], [data])
 
   const [lifecycleFilter, setLifecycleFilter] = useState<BrokerageLifecycle | null>(null)
   const [search, setSearch] = useState('')

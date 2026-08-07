@@ -24,7 +24,8 @@ export function InsurancePage() {
   const propertyIds = useFilteredPropertyIds(properties ?? null)
   const propertyNames = usePropertyNameMap(properties ?? null)
   const { data, loading, error, refetch } = useCoiCertificates(propertyIds)
-  const certs = data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const certs = useMemo(() => data ?? [], [data])
   const { data: reviewItems, refetch: refetchReview } = useCoiReviewQueue()
 
   const [partyFilter, setPartyFilter] = useState<PartyFilter>('all')

@@ -25,7 +25,8 @@ export function ReaPage() {
   const propertyIds = useFilteredPropertyIds(properties ?? null)
   const propertyNames = usePropertyNameMap(properties ?? null)
   const { data, loading, error } = useReaAgreements(propertyIds, propertyNames)
-  const agreements = data ?? []
+  // Memoised so the `?? []` fallback is not a fresh array every render.
+  const agreements = useMemo(() => data ?? [], [data])
 
   const byProperty = useMemo(() => {
     const m = new Map<string, ReaAgreement[]>()
