@@ -137,7 +137,7 @@ export async function fetchDraftDocs(docIds: string[]): Promise<OnboardingDocRow
 export async function uploadOnboardingDoc(
   draftId: string, file: File, docType: string, subtype: string,
 ): Promise<string> {
-  const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80)
+  const safe = file.name.replace(/[^\w.-]+/g, '_').slice(-80)
   const uid = globalThis.crypto?.randomUUID?.() ?? String(Date.now())
   const path = `onboarding/${draftId}/${uid}-${safe}`
   const { error: upErr } = await supabase.storage.from('documents')

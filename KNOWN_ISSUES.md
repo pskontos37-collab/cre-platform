@@ -45,14 +45,30 @@ evidence that settled them.
   esbuild parse).
 - **Status**: Resolved.
 
-## KI-4 · Medium · No linter/formatter configured
+## KI-4 · ~~Medium~~ RESOLVED 2026-08-07 · No linter configured
 
-- **Description**: no ESLint/Prettier config anywhere in the repo; `eslint-disable` comments
-  exist for editors that inject their own.
-- **Impact**: style drift; some bug classes (exhaustive-deps) unchecked.
-- **Status**: Open and now actionable — it was deferred as "post-release" during hardening, and
-  that release has shipped. Expect a large first-run diff; land the config and the mechanical
-  fixes as separate commits so review stays readable.
+- **What shipped**: ESLint 9 flat config (`eslint.config.js`) over `src/**`, with
+  `typescript-eslint`, `react-hooks` and `react-refresh`. `npm run lint`. **CI blocks on lint
+  errors** — `eslint .` exits 1 on errors and 0 on warnings, so the error baseline is held at
+  zero without stranding deploys behind pre-existing warnings.
+- **Scoped to what tsc cannot see.** `tsc -b` already runs strict + `noUnusedLocals` +
+  `noUnusedParameters` + `noFallthroughCasesInSwitch` and blocks CI at zero, so
+  `@typescript-eslint/no-unused-vars` is switched **off** rather than double-reported. The value
+  added is the hook rules and Fast Refresh correctness.
+- **It paid for itself immediately**: `react-hooks/rules-of-hooks` caught a **conditionally
+  called `useMemo`** on `/mri-recon` — declared *after* the access-control early return, so a
+  non-permitted render called one fewer hook than a permitted one. Had `appUser` resolved
+  asynchronously (undefined → admin), React would have thrown "Rendered more hooks than during
+  the previous render" and taken the page out. Fixed by hoisting it above the guard.
+- **Baseline**: **0 errors, 585 warnings** — 505 `no-explicit-any` (deliberate, at the untyped
+  Supabase jsonb edges), 39 `react-refresh/only-export-components`, 38
+  `react-hooks/exhaustive-deps`, 3 stale `eslint-disable` directives that no longer suppress
+  anything. The warnings are a real backlog, not noise to ignore; `exhaustive-deps` in
+  particular is worth working down, since a missing dependency is how a panel keeps showing the
+  previous property's numbers.
+- **No Prettier, deliberately.** Reformatting 228 files / ~58k lines produces an unreviewable
+  diff, carries no correctness benefit, and this checkout is worked by several sessions at once
+  — a repo-wide reformat would collide with everything in flight.
 
 ## KI-5 · Medium · No error monitoring / observability on the frontend
 

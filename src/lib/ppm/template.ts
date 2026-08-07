@@ -541,7 +541,7 @@ export function verifyNumbers(text: string, ds: PpmDataSheet): NumberCheck[] {
   for (const m of tokens) {
     const raw = m[0]
     if (seen.has(raw)) continue
-    let numPart = raw.replace(/[$%x\s]/gi, '').replace(/million|billion|M$|B$/i, '')
+    const numPart = raw.replace(/[$%x\s]/gi, '').replace(/million|billion|M$|B$/i, '')
     let val = Number(numPart.replace(/,/g, ''))
     if (/million|M$/i.test(raw)) val *= 1_000_000
     if (/billion|B$/i.test(raw)) val *= 1_000_000_000

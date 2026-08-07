@@ -95,6 +95,18 @@ export function MriReconPage() {
       || a.tenant_name.localeCompare(b.tenant_name)),
   [recon.data, governs, propFilter, tenantFilter, statusFilter, stMap])
 
+  // Must stay ABOVE the access-control early return: this was declared after it,
+  // so a non-permitted render called one fewer hook than a permitted one. When
+  // appUser resolves asynchronously (undefined on the first render, then admin),
+  // the hook count grows between renders and React throws "Rendered more hooks
+  // than during the previous render", taking the page out. Caught by
+  // react-hooks/rules-of-hooks when the linter was added (KI-4).
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { abstract: 0, mri: 0, unclear: 0 }
+    for (const r of recon.data ?? []) c[r.governs] = (c[r.governs] ?? 0) + 1
+    return c
+  }, [recon.data])
+
   if (appUser?.role !== 'admin' && appUser?.role !== 'asset_manager') {
     return <div style={{ padding: '40px 32px', color: 'var(--text-muted)', fontSize: 14 }}>You need admin or asset manager access to view MRI reconciliation.</div>
   }
@@ -125,12 +137,6 @@ export function MriReconPage() {
     a.download = 'mri_reconciliation.csv'
     a.click()
   }
-
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { abstract: 0, mri: 0, unclear: 0 }
-    for (const r of recon.data ?? []) c[r.governs] = (c[r.governs] ?? 0) + 1
-    return c
-  }, [recon.data])
 
   return (
     <div style={{ padding: '24px 32px' }}>

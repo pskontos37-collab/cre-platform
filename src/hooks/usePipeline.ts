@@ -717,7 +717,7 @@ export async function reextractUw(dealId: string, kind: 'metrics' | 'rentroll' |
 /** Upload a document to a deal: stores under pipeline/<dealId>/<role>/, files a
  *  documents row, and links it to the deal. Returns the new document id. */
 export async function uploadDealDocument(dealId: string, file: File, role: string, createdBy: string | null): Promise<string> {
-  const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80)
+  const safe = file.name.replace(/[^\w.-]+/g, '_').slice(-80)
   const uid = (globalThis.crypto?.randomUUID?.() ?? String(Date.now()))
   const path = `pipeline/${dealId}/${role}/${uid}-${safe}`
   const { error: upErr } = await supabase.storage.from('documents')
@@ -868,7 +868,7 @@ export interface UploadedOm { storagePath: string; documentId: string | null; ti
 // createdBy is accepted for call-site symmetry with the other pipeline helpers
 // but not recorded here — the documents insert below carries no uploader column.
 export async function uploadOmPdf(file: File, _createdBy: string | null): Promise<UploadedOm> {
-  const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80)
+  const safe = file.name.replace(/[^\w.-]+/g, '_').slice(-80)
   const uid = (globalThis.crypto?.randomUUID?.() ?? String(Date.now()))
   const path = `pipeline/om/${uid}-${safe}`
   const { error: upErr } = await supabase.storage.from('documents')
