@@ -61,6 +61,14 @@ jobs:
       # before today a type error shipped to production silently — this is the only gate.
       - name: Type-check (blocking)
         run: npm run typecheck
+      # Lint BLOCKS on ERRORS only (added 2026-08-07, KI-4). `eslint .` exits 1 for
+      # errors and 0 for warnings, so this holds the error baseline at zero without
+      # stranding deploys behind the 585 pre-existing warnings (mostly no-explicit-any
+      # on untyped Supabase jsonb). The rules that matter here are the ones tsc cannot
+      # see: react-hooks/rules-of-hooks caught a conditionally-called useMemo on
+      # /mri-recon the day it was added.
+      - name: Lint (blocking on errors)
+        run: npm run lint
       # Unit tests BLOCK the deploy. The suite was reconciled to the current
       # engines on 2026-07-16 (waterfall/irrWaterfall/acqPromote) and all 82
       # pass; a red suite should now fail the build rather than ship.
