@@ -61,9 +61,14 @@ evidence that settled them.
   error rendered nothing below the toolbar because every render branch was false.
 - **Mitigations already in place**: `vite:preloadError` self-heals the stale-chunk case after a
   deploy; edge functions have Supabase logs (`get_logs`), which is adequate server-side.
-- **Status**: In progress — a React error boundary is being added so a thrown error shows a
-  recovery UI instead of a blank region. Durable capture (persisting errors for later reading)
-  remains a separate decision, since it needs a table and a write path.
+- **Partly addressed 2026-08-07**: a React `ErrorBoundary` now wraps page content *inside*
+  `AppLayout`, so a thrown page leaves the sidebar and header usable and shows the error text
+  with a retry, instead of a blank region; it is keyed on the pathname so navigating away
+  recovers. A second boundary at the root covers a throw in the layout, router or a provider.
+  The failure is also parked on `window.__creLastError` for read-back without a screenshot.
+- **Status**: Open (reduced). Durable capture — persisting errors so they can be reviewed after
+  the fact rather than only when a user is looking — still does not exist and remains an owner
+  decision, since it needs a table, a write path, and a retention answer.
 
 ## KI-6 · ~~Medium~~ RESOLVED 2026-08-07 · Migrations never rehearsed against a clean database
 
@@ -110,7 +115,7 @@ evidence that settled them.
 
 ## KI-10 · Low · Vitest environment slow-start
 
-- **Description**: the suite is **217 tests across 17 files**; most of the wall-clock is jsdom
+- **Description**: the suite is **225 tests across 19 files**; most of the wall-clock is jsdom
   environment setup. Pure-node lib tests pay the jsdom tax needlessly.
 - **Status**: Optimization only (per-file `// @vitest-environment node`), not a blocker.
 
